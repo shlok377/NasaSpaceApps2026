@@ -26,7 +26,8 @@
 **Hey Claude!** Welcome to the project.
 - **Current status**: We have Vite + Phaser 3 + TypeScript running with Vitest unit tests (`npm test`).
 - **What I've built so far**: In `src/core/RocketTree.ts`, we have an anchored root Cockpit with 4-directional socket attachment rules for Fuel Tanks, Engines, Nose Cones, and Fins.
-- **My next task**: Finishing the Builder interactive controls (drag/drop, center of mass calculation, and staging order).
+- **Visual Overhaul**: Complete retro aesthetic implementation based on *Major Moo's Moonbound Milky Way Mission*! We now have procedural vector/pixel textures for all rocket parts (Cockpit with cute astronaut inside, illuminated Fuel Tank gauges, ribbed Engine nozzle, berry Nose Cone, aerodynamic Fins, and Hull), parallax mountain scenery with snow caps, authentic PCB bottom parts console tray with arched bays, and live telemetry terminal HUD.
+- **Git Repo State**: Pristine single `main` branch tracking `origin/main`.
 - **Your turn**: Check out the Task Board below. When you're ready, you can start scaffolding the `FlightScene` in `src/scenes/FlightScene.ts` and the flight physics simulation that will consume the rocket vehicle data!
 
 ---
@@ -38,6 +39,7 @@ Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLA
 ### 🛠️ Rocket Builder & Staging (Gemini)
 - [x] Anchored root Cockpit on 15x15 grid with port orientation validation.
 - [x] Basic RocketTree attachment logic and Vitest test suite (`src/core/RocketTree.test.ts`).
+- [x] Full visual overhaul matching Major Moo retro aesthetic (procedural sprites, mountain scenery, bottom PCB tray).
 - [ ] Center of Mass (CoM) and Center of Thrust (CoT) calculations.
 - [ ] Staging sequencer (Stage 1, Stage 2, Decouplers).
 - [ ] Export `FlightVehicle` data contract for the flight simulator scene.
