@@ -1,0 +1,43 @@
+export type PortDirection = 'NORTH' | 'SOUTH' | 'EAST' | 'WEST';
+
+export type PartType =
+  | 'COCKPIT'
+  | 'FUEL_TANK'
+  | 'ENGINE'
+  | 'NOSE_CONE'
+  | 'FIN'
+  | 'STRUCTURAL';
+
+export interface PartDefinition {
+  type: PartType;
+  label: string;
+  defaultPorts: PortDirection[];
+  mass: number;
+  fuel: number;
+  thrust: number;
+  color: number;
+}
+
+export interface RocketNode {
+  id: string;
+  type: PartType;
+  gridX: number;
+  gridY: number;
+  parentId: string | null;
+  parentPort: PortDirection | null; // Port on parent that this node is attached to
+  childrenIds: string[];
+  finOrientation?: 'LEFT' | 'RIGHT';
+  mass: number;
+  fuel: number;
+  thrust: number;
+}
+
+export interface RocketTelemetry {
+  valid: boolean;
+  partCount: number;
+  totalMass: number;
+  totalThrust: number;
+  totalFuel: number;
+  twr: number;
+  tree: RocketNode;
+}
