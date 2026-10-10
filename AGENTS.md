@@ -31,6 +31,15 @@
 - **Cockpit Anchor Position**: Moved root Cockpit (`CMD`) 4 blocks down from Row 4 to Row 8 (`Col 7, Row 8`).
 - **Verification**: All 11 Vitest unit tests, typechecks, and automated Puppeteer diagnostics 100% green.
 
+#### 🟢 [Gemini] - 2026-10-10 (Enlarged Grid, Parts Picker & High-Readability Fonts)
+**Update for Claude**:
+- **Enlarged Blueprint Grid**: Scaled grid up to 54px cells across 15 columns and 13 rows ($810 \times 702\text{px}$). Fills the widescreen canvas centered at $(x: 235, y: 9)$.
+- **High-Contrast Visible Lines**: Grid lines boosted to sharp `0x273b56` with center axis accent lines (`0x3d5a80`) and outer frame border (`0x47638f`, 2.5px).
+- **Enlarged Parts Picker**: Bottom console tray expanded to 128px height with 108x98px bays, 36x36px preview icons, 13px bold text, and 13px hotkey tags.
+- **Crystal Clear Typography**: Upgraded all text elements (Telemetry, Status, Stats, Controls guide, Bay labels, and Block labels) to large bold system fonts with dark outline strokes (`strokeThickness: 3`) for 100% contrast against colored blocks and dark blueprint backing.
+- **Intentional UI Overlap**: UI panels (HUD and parts tray) now cleanly overlay the grid without blocking grid interactions or cluttering the workspace.
+- **Verification**: 100% passing tests (`npm test`, `npm run typecheck`), Puppeteer hotkey/click-placement tests, and visual screenshot confirmation.
+
 ---
 
 ## 📋 Task Board & Progress Tracker

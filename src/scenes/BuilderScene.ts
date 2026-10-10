@@ -13,13 +13,13 @@ interface PaletteBay {
 
 export class BuilderScene extends Phaser.Scene {
   public static readonly GRID_COLS = 15;
-  public static readonly GRID_ROWS = 12;
-  public static readonly CELL_SIZE = 40;
+  public static readonly GRID_ROWS = 13;
+  public static readonly CELL_SIZE = 54;
 
-  public readonly hudHeight = 72;
+  public readonly hudHeight = 96;
   public readonly hudY = 14;
-  public readonly trayHeight = 105;
-  public readonly trayY = 615;
+  public readonly trayHeight = 128;
+  public readonly trayY = 592;
 
   private rocketTree!: RocketTree;
   private sceneryGraphics!: Phaser.GameObjects.Graphics;
@@ -50,11 +50,12 @@ export class BuilderScene extends Phaser.Scene {
   create(): void {
     // 1. Layout coordinates (1280 x 720 widescreen)
     const totalGridWidth = BuilderScene.GRID_COLS * BuilderScene.CELL_SIZE;
+    const totalGridHeight = BuilderScene.GRID_ROWS * BuilderScene.CELL_SIZE;
 
-    // Centered horizontally: (1280 - 600) / 2 = 340
+    // Centered horizontally: (1280 - 810) / 2 = 235
     this.gridOriginX = Math.round((this.scale.width - totalGridWidth) / 2);
-    // Positioned below HUD with zero overlap: Y = 120, ending at 600
-    this.gridOriginY = 120;
+    // Centered vertically: (720 - 702) / 2 = 9 (fills screen with UI floating on top)
+    this.gridOriginY = Math.round((this.scale.height - totalGridHeight) / 2);
 
     // 2. Initialize core RocketTree model (immovable Cockpit at center column 7, row 8)
     this.rocketTree = new RocketTree(7, 8);
@@ -108,21 +109,31 @@ export class BuilderScene extends Phaser.Scene {
     const height = BuilderScene.GRID_ROWS * BuilderScene.CELL_SIZE;
 
     // Grid workspace backing
-    this.gridGraphics.fillStyle(0x131d31, 1);
+    this.gridGraphics.fillStyle(0x111c30, 1);
     this.gridGraphics.fillRect(this.gridOriginX, this.gridOriginY, width, height);
 
-    // Grid outer border
-    this.gridGraphics.lineStyle(2, 0x334155, 1);
+    // Grid outer border - crisp high-contrast border
+    this.gridGraphics.lineStyle(2.5, 0x47638f, 1);
     this.gridGraphics.strokeRect(this.gridOriginX, this.gridOriginY, width, height);
 
-    // Grid lines
-    this.gridGraphics.lineStyle(1, 0x1e293b, 0.85);
+    // Grid lines - high-contrast visible lines
     for (let c = 1; c < BuilderScene.GRID_COLS; c++) {
       const x = this.gridOriginX + c * BuilderScene.CELL_SIZE;
+      // Center column line highlight (Col 7 / 8 boundary is the rocket centerline)
+      if (c === 7 || c === 8) {
+        this.gridGraphics.lineStyle(1.5, 0x3d5a80, 1);
+      } else {
+        this.gridGraphics.lineStyle(1, 0x273b56, 0.95);
+      }
       this.gridGraphics.lineBetween(x, this.gridOriginY, x, this.gridOriginY + height);
     }
     for (let r = 1; r < BuilderScene.GRID_ROWS; r++) {
       const y = this.gridOriginY + r * BuilderScene.CELL_SIZE;
+      if (r === 8) {
+        this.gridGraphics.lineStyle(1.5, 0x3d5a80, 1);
+      } else {
+        this.gridGraphics.lineStyle(1, 0x273b56, 0.95);
+      }
       this.gridGraphics.lineBetween(this.gridOriginX, y, this.gridOriginX + width, y);
     }
   }
@@ -132,21 +143,22 @@ export class BuilderScene extends Phaser.Scene {
     const h = this.trayHeight;
     const trayY = this.trayY;
 
-    // 1. Plain dark tray backing
+    // 1. Plain dark tray backing (semi-opaque so UI clearly sits on top of overlapping grid)
     const trayBg = this.add.graphics();
-    trayBg.fillStyle(0x090d16, 0.98);
+    trayBg.fillStyle(0x0a101d, 0.96);
     trayBg.fillRect(0, trayY, w, h);
-    trayBg.lineStyle(2, 0x334155, 1);
+    trayBg.lineStyle(2, 0x334d6e, 1);
     trayBg.lineBetween(0, trayY, w, trayY);
 
     // 2. Vertical "PARTS" label on the left
     const partsLabelContainer = this.add.container(48, trayY + h / 2);
     const chars = ['P', 'A', 'R', 'T', 'S'];
     chars.forEach((char, idx) => {
-      const t = this.add.text(0, (idx - 2) * 18, char, {
+      const t = this.add.text(0, (idx - 2) * 20, char, {
         fontSize: '15px',
         color: '#94a3b8',
-        fontStyle: 'bold'
+        fontStyle: 'bold',
+        fontFamily: 'system-ui, sans-serif'
       }).setOrigin(0.5);
       partsLabelContainer.add(t);
     });
@@ -160,9 +172,9 @@ export class BuilderScene extends Phaser.Scene {
       { type: 'FIN', label: 'FINS', hotkey: '5' }
     ];
 
-    const bayWidth = 88;
-    const bayHeight = 84;
-    const baySpacing = 14;
+    const bayWidth = 108;
+    const bayHeight = 98;
+    const baySpacing = 16;
     const totalBaysWidth = bayConfigs.length * bayWidth + (bayConfigs.length - 1) * baySpacing;
     const startX = Math.round((w - totalBaysWidth) / 2) + Math.round(bayWidth / 2);
     const bayY = trayY + Math.round(h / 2);
@@ -178,25 +190,27 @@ export class BuilderScene extends Phaser.Scene {
       const bgGfx = this.add.graphics();
       this.drawBayBg(bgGfx, false, bayWidth, bayHeight);
 
-      // Blank square icon preview
+      // Blank square icon preview (enlarged to 36x36)
       const iconGfx = this.add.graphics();
       iconGfx.fillStyle(def.color, 1);
-      iconGfx.fillRect(-13, -22, 26, 26);
-      iconGfx.lineStyle(1.5, 0xffffff, 0.7);
-      iconGfx.strokeRect(-13, -22, 26, 26);
+      iconGfx.fillRect(-18, -26, 36, 36);
+      iconGfx.lineStyle(2, 0xffffff, 0.8);
+      iconGfx.strokeRect(-18, -26, 36, 36);
 
-      // Label below
-      const labelText = this.add.text(0, 18, cfg.label, {
-        fontSize: '11px',
-        color: '#f8fafc',
-        fontStyle: 'bold'
+      // Label below (clearly readable 13px bold)
+      const labelText = this.add.text(0, 22, cfg.label, {
+        fontSize: '13px',
+        color: '#ffffff',
+        fontStyle: 'bold',
+        fontFamily: 'system-ui, sans-serif'
       }).setOrigin(0.5);
 
       // Hotkey badge in corner
-      const hotkeyText = this.add.text(-32, -29, cfg.hotkey, {
-        fontSize: '11px',
+      const hotkeyText = this.add.text(-40, -36, cfg.hotkey, {
+        fontSize: '13px',
         color: '#94a3b8',
-        fontStyle: 'bold'
+        fontStyle: 'bold',
+        fontFamily: 'system-ui, sans-serif'
       }).setOrigin(0.5);
 
       bayContainer.add([bgGfx, iconGfx, labelText, hotkeyText]);
@@ -252,12 +266,12 @@ export class BuilderScene extends Phaser.Scene {
     if (isSelected) {
       gfx.fillStyle(0x1e293b, 1);
       gfx.fillRoundedRect(-w / 2, -h / 2, w, h, 8);
-      gfx.lineStyle(2, 0x38bdf8, 1); // Glowing cyan border
+      gfx.lineStyle(2.5, 0x38bdf8, 1); // Glowing cyan border
       gfx.strokeRoundedRect(-w / 2, -h / 2, w, h, 8);
     } else {
-      gfx.fillStyle(0x1e293b, 0.6);
+      gfx.fillStyle(0x141f33, 0.9);
       gfx.fillRoundedRect(-w / 2, -h / 2, w, h, 8);
-      gfx.lineStyle(1.5, 0x334155, 1);
+      gfx.lineStyle(2, 0x334d6e, 1);
       gfx.strokeRoundedRect(-w / 2, -h / 2, w, h, 8);
     }
   }
@@ -266,46 +280,52 @@ export class BuilderScene extends Phaser.Scene {
     const padX = 24;
     const padY = this.hudY;
 
-    // Terminal Panel in Top Left
+    // Terminal Panel in Top Left (enlarged with crystal clear typography)
     const panelBg = this.add.graphics();
-    panelBg.fillStyle(0x131d31, 0.95);
-    panelBg.fillRoundedRect(padX, padY, 300, this.hudHeight, 8);
-    panelBg.lineStyle(2, 0x334155, 1);
-    panelBg.strokeRoundedRect(padX, padY, 300, this.hudHeight, 8);
+    panelBg.fillStyle(0x111c30, 0.95);
+    panelBg.fillRoundedRect(padX, padY, 360, this.hudHeight, 8);
+    panelBg.lineStyle(2, 0x334d6e, 1);
+    panelBg.strokeRoundedRect(padX, padY, 360, this.hudHeight, 8);
 
-    const titleText = this.add.text(padX + 14, padY + 8, 'MISSION TELEMETRY', {
-      fontSize: '11px',
+    const titleText = this.add.text(padX + 16, padY + 10, 'MISSION TELEMETRY', {
+      fontSize: '13px',
       color: '#38bdf8',
-      fontStyle: 'bold'
+      fontStyle: 'bold',
+      fontFamily: 'system-ui, sans-serif'
     });
 
-    this.hudStatusText = this.add.text(padX + 14, padY + 25, 'STATUS: [ INCOMPLETE ]', {
-      fontSize: '12px',
+    this.hudStatusText = this.add.text(padX + 16, padY + 31, 'STATUS: [ INCOMPLETE ]', {
+      fontSize: '15px',
       color: '#f59e0b',
-      fontStyle: 'bold'
+      fontStyle: 'bold',
+      fontFamily: 'system-ui, sans-serif'
     });
 
-    this.hudStatsText = this.add.text(padX + 14, padY + 44, 'MASS: 100 kg   THRUST: 0 kN\nFUEL: 0 L     TWR: 0.00', {
-      fontSize: '11px',
-      color: '#e2e8f0',
-      lineSpacing: 3
+    this.hudStatsText = this.add.text(padX + 16, padY + 54, 'MASS: 100 kg    THRUST: 0 kN\nFUEL: 0 L      TWR: 0.00', {
+      fontSize: '13px',
+      color: '#ffffff',
+      fontStyle: 'bold',
+      fontFamily: 'system-ui, sans-serif',
+      lineSpacing: 4
     });
 
     this.hudContainer.add([panelBg, titleText, this.hudStatusText, this.hudStatsText]);
 
     // Top Right Controls Helper Badge
     const helperBg = this.add.graphics();
-    const helperW = 440;
+    const helperW = 540;
+    const helperH = 42;
     const helperX = this.scale.width - helperW - 24;
-    helperBg.fillStyle(0x131d31, 0.95);
-    helperBg.fillRoundedRect(helperX, padY, helperW, 36, 6);
-    helperBg.lineStyle(1.5, 0x334155, 1);
-    helperBg.strokeRoundedRect(helperX, padY, helperW, 36, 6);
+    helperBg.fillStyle(0x111c30, 0.95);
+    helperBg.fillRoundedRect(helperX, padY, helperW, helperH, 8);
+    helperBg.lineStyle(2, 0x334d6e, 1);
+    helperBg.strokeRoundedRect(helperX, padY, helperW, helperH, 8);
 
-    const helperText = this.add.text(helperX + 14, padY + 11, '1-5: Select  •  L-Click: Place  •  R-Click: Remove  •  Esc: Cancel', {
-      fontSize: '11px',
-      color: '#94a3b8',
-      fontStyle: 'bold'
+    const helperText = this.add.text(helperX + 16, padY + 12, '1-5: Select  •  L-Click: Place  •  R-Click: Remove  •  Esc: Cancel', {
+      fontSize: '13px',
+      color: '#ffffff',
+      fontStyle: 'bold',
+      fontFamily: 'system-ui, sans-serif'
     });
     this.hudContainer.add([helperBg, helperText]);
   }
@@ -320,7 +340,7 @@ export class BuilderScene extends Phaser.Scene {
     }
 
     this.hudStatsText.setText(
-      `MASS: ${telemetry.totalMass} kg   THRUST: ${telemetry.totalThrust} kN\nFUEL: ${telemetry.totalFuel} L    TWR: ${telemetry.twr.toFixed(2)}`
+      `MASS: ${telemetry.totalMass} kg    THRUST: ${telemetry.totalThrust} kN\nFUEL: ${telemetry.totalFuel} L      TWR: ${telemetry.twr.toFixed(2)}`
     );
   }
 
@@ -328,9 +348,12 @@ export class BuilderScene extends Phaser.Scene {
     this.ghostContainer.setVisible(false);
     this.ghostGfx = this.add.graphics();
     this.ghostText = this.add.text(0, 0, '', {
-      fontSize: '11px',
+      fontSize: '14px',
       color: '#ffffff',
-      fontStyle: 'bold'
+      fontStyle: 'bold',
+      fontFamily: 'system-ui, sans-serif',
+      stroke: '#000000',
+      strokeThickness: 3
     }).setOrigin(0.5);
 
     this.ghostContainer.add([this.ghostGfx, this.ghostText]);
@@ -362,7 +385,7 @@ export class BuilderScene extends Phaser.Scene {
 
     for (const bay of this.paletteBays) {
       const isSelected = bay.type === this.selectedPartType;
-      this.drawBayBg(bay.bgGfx, isSelected, 88, 84);
+      this.drawBayBg(bay.bgGfx, isSelected, 108, 98);
 
       this.tweens.add({
         targets: bay.container,
@@ -419,8 +442,8 @@ export class BuilderScene extends Phaser.Scene {
       const bx = bay.container.x;
       const by = bay.container.y;
       return (
-        Math.abs(pointer.worldX - bx) <= 44 &&
-        Math.abs(pointer.worldY - by) <= 42
+        Math.abs(pointer.worldX - bx) <= 54 &&
+        Math.abs(pointer.worldY - by) <= 49
       );
     });
 
@@ -472,6 +495,12 @@ export class BuilderScene extends Phaser.Scene {
       return;
     }
 
+    // Hide ghost when cursor is over the bottom parts picker tray
+    if (pointer.worldY >= this.trayY) {
+      this.ghostContainer.setVisible(false);
+      return;
+    }
+
     this.ghostContainer.setVisible(true);
     const size = BuilderScene.CELL_SIZE;
     const def = PART_DEFINITIONS[this.selectedPartType];
@@ -494,7 +523,7 @@ export class BuilderScene extends Phaser.Scene {
         this.ghostGfx.clear();
         this.ghostGfx.fillStyle(def.color, 0.55);
         this.ghostGfx.fillRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
-        this.ghostGfx.lineStyle(2, 0x22c55e, 1);
+        this.ghostGfx.lineStyle(2.5, 0x22c55e, 1);
         this.ghostGfx.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
 
         this.ghostText.setText(displayLabel);
@@ -512,7 +541,7 @@ export class BuilderScene extends Phaser.Scene {
       if (isOccupied || hasAdjacentSocket) {
         this.ghostGfx.fillStyle(0xef4444, 0.3);
         this.ghostGfx.fillRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
-        this.ghostGfx.lineStyle(2, 0xef4444, 0.9);
+        this.ghostGfx.lineStyle(2.5, 0xef4444, 0.9);
         this.ghostGfx.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
 
         this.ghostText.setText(isOccupied ? '' : 'INVALID');
@@ -535,7 +564,7 @@ export class BuilderScene extends Phaser.Scene {
     this.ghostGfx.clear();
     this.ghostGfx.fillStyle(def.color, 0.6);
     this.ghostGfx.fillRect(-size / 2, -size / 2, size, size);
-    this.ghostGfx.lineStyle(1.5, 0x94a3b8, 0.85);
+    this.ghostGfx.lineStyle(2, 0x94a3b8, 0.85);
     this.ghostGfx.strokeRect(-size / 2, -size / 2, size, size);
 
     this.ghostText.setText(def.label);
@@ -543,13 +572,16 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   private handleLeftClick(pointer: Phaser.Input.Pointer): void {
+    if (pointer.worldY >= this.trayY) {
+      // Handled by bayContainer pointerdown
+      return;
+    }
+
     if (!this.selectedPartType) return;
 
     const { col, row, inside } = this.getGridCellAtPointer(pointer);
     if (!inside) {
-      if (pointer.worldY < this.trayY) {
-        this.deselectPart();
-      }
+      this.deselectPart();
       return;
     }
 
@@ -575,6 +607,8 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   private handleRightClick(pointer: Phaser.Input.Pointer): void {
+    if (pointer.worldY >= this.trayY) return;
+
     if (this.selectedPartType) {
       this.deselectPart();
       return;
@@ -657,7 +691,7 @@ export class BuilderScene extends Phaser.Scene {
     const blockGfx = this.add.graphics();
     blockGfx.fillStyle(def.color, 1);
     blockGfx.fillRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
-    blockGfx.lineStyle(2, 0xffffff, 0.6);
+    blockGfx.lineStyle(2, 0xffffff, 0.7);
     blockGfx.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
 
     let displayLabel = def.label;
@@ -665,9 +699,12 @@ export class BuilderScene extends Phaser.Scene {
     else if (node.type === 'FIN') displayLabel = node.finOrientation === 'LEFT' ? 'L-FIN' : 'R-FIN';
 
     const label = this.add.text(0, 0, displayLabel, {
-      fontSize: node.type === 'FIN' ? '10px' : '11px',
+      fontSize: node.type === 'FIN' ? '12px' : '14px',
       color: '#ffffff',
-      fontStyle: 'bold'
+      fontStyle: 'bold',
+      fontFamily: 'system-ui, sans-serif',
+      stroke: '#000000',
+      strokeThickness: 3
     }).setOrigin(0.5);
 
     blockContainer.add([blockGfx, label]);
@@ -677,13 +714,13 @@ export class BuilderScene extends Phaser.Scene {
 
   private renderAvailableSockets(): void {
     const ports = this.rocketTree.getAvailablePorts();
-    const radius = 6;
+    const radius = 7;
 
     for (const port of ports) {
       const pos = this.getPortPixelPosition(port.gridX, port.gridY, port.direction);
 
       const socketGfx = this.add.graphics();
-      socketGfx.fillStyle(0x0284c7, 0.9);
+      socketGfx.fillStyle(0x0284c7, 0.95);
       socketGfx.fillCircle(pos.x, pos.y, radius);
       socketGfx.lineStyle(2, 0x38bdf8, 1);
       socketGfx.strokeCircle(pos.x, pos.y, radius);
