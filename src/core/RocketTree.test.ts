@@ -45,3 +45,121 @@ describe('RocketTree', () => {
     expect(tree.getRootNode()).toBeDefined();
   });
 });
+
+describe('RocketTree Attachment Validation', () => {
+  it('validates Fuel Tank attachment on all 4 adjacent sides of Cockpit', () => {
+    const tree = new RocketTree(7, 5);
+
+    expect(tree.validateAttachment(7, 4, 'FUEL_TANK').valid).toBe(true); // NORTH
+    expect(tree.validateAttachment(7, 6, 'FUEL_TANK').valid).toBe(true); // SOUTH
+    expect(tree.validateAttachment(8, 5, 'FUEL_TANK').valid).toBe(true); // EAST
+    expect(tree.validateAttachment(6, 5, 'FUEL_TANK').valid).toBe(true); // WEST
+  });
+
+  it('restricts Engine to only attach below an open South port', () => {
+    const tree = new RocketTree(7, 5);
+
+    expect(tree.validateAttachment(7, 6, 'ENGINE').valid).toBe(true); // Below Cockpit
+    expect(tree.validateAttachment(7, 4, 'ENGINE').valid).toBe(false); // Above Cockpit (Invalid)
+    expect(tree.validateAttachment(6, 5, 'ENGINE').valid).toBe(false); // Side of Cockpit (Invalid)
+  });
+
+  it('restricts Nose Cone to only attach above an open North port', () => {
+    const tree = new RocketTree(7, 5);
+
+    expect(tree.validateAttachment(7, 4, 'NOSE_CONE').valid).toBe(true); // Above Cockpit
+    expect(tree.validateAttachment(7, 6, 'NOSE_CONE').valid).toBe(false); // Below Cockpit (Invalid)
+    expect(tree.validateAttachment(8, 5, 'NOSE_CONE').valid).toBe(false); // Side of Cockpit (Invalid)
+  });
+
+  it('auto-orients Fin to LEFT or RIGHT flanks and rejects North/South attachments', () => {
+    const tree = new RocketTree(7, 5);
+
+    const leftAttach = tree.validateAttachment(6, 5, 'FIN');
+    expect(leftAttach.valid).toBe(true);
+    expect(leftAttach.finOrientation).toBe('LEFT');
+
+    const rightAttach = tree.validateAttachment(8, 5, 'FIN');
+    expect(rightAttach.valid).toBe(true);
+    expect(rightAttach.finOrientation).toBe('RIGHT');
+
+    expect(tree.validateAttachment(7, 4, 'FIN').valid).toBe(false); // Top (Invalid)
+    expect(tree.validateAttachment(7, 6, 'FIN').valid).toBe(false); // Bottom (Invalid)
+  });
+
+  it('rejects attachment to an already occupied cell or floating isolated cell', () => {
+    const tree = new RocketTree(7, 5);
+
+    // Occupied cell
+    expect(tree.validateAttachment(7, 5, 'FUEL_TANK').valid).toBe(false);
+    // Floating cell (not adjacent to any rocket part)
+    expect(tree.validateAttachment(1, 1, 'FUEL_TANK').valid).toBe(false);
+  });
+});
+
+describe('RocketTree Full Lifecycle & Telemetry', () => {
+  it('correctly builds a multi-part rocket and fuses ports', () => {
+    const tree = new RocketTree(7, 5);
+
+    // Attach Fuel Tank below Cockpit
+    const tankRes = tree.attachPart(7, 6, 'FUEL_TANK');
+    expect(tankRes.success).toBe(true);
+    expect(tankRes.node?.id).toBeDefined();
+
+    // Attach Engine below Fuel Tank
+    const engineRes = tree.attachPart(7, 7, 'ENGINE');
+    expect(engineRes.success).toBe(true);
+
+    // Attach Nose Cone above Cockpit
+    const noseRes = tree.attachPart(7, 4, 'NOSE_CONE');
+    expect(noseRes.success).toBe(true);
+
+    // Attach Fins on sides of Fuel Tank
+    const leftFinRes = tree.attachPart(6, 6, 'FIN');
+    expect(leftFinRes.success).toBe(true);
+    expect(leftFinRes.node?.finOrientation).toBe('LEFT');
+
+    const rightFinRes = tree.attachPart(8, 6, 'FIN');
+    expect(rightFinRes.success).toBe(true);
+    expect(rightFinRes.node?.finOrientation).toBe('RIGHT');
+
+    // Telemetry: 1 Cockpit + 1 Tank + 1 Engine + 1 Cone + 2 Fins = 6 parts
+    const telemetry = tree.getTelemetry();
+    expect(telemetry.partCount).toBe(6);
+    expect(telemetry.totalFuel).toBe(200);
+    expect(telemetry.totalThrust).toBe(500);
+    expect(telemetry.totalMass).toBe(100 + 50 + 80 + 30 + 20 + 20); // 300
+    expect(telemetry.twr).toBe(1.67);
+    expect(telemetry.valid).toBe(true);
+  });
+
+  it('enforces deletion protection on parent nodes until leaf nodes are deleted', () => {
+    const tree = new RocketTree(7, 5);
+
+    // Build: Cockpit -> Fuel Tank -> Engine
+    const tankRes = tree.attachPart(7, 6, 'FUEL_TANK');
+    const engineRes = tree.attachPart(7, 7, 'ENGINE');
+
+    const tankId = tankRes.node!.id;
+    const engineId = engineRes.node!.id;
+
+    // Attempting to remove parent Fuel Tank fails
+    const failRemoveTank = tree.removeNode(tankId);
+    expect(failRemoveTank.success).toBe(false);
+    expect(failRemoveTank.reason).toBe('Cannot remove block: Remove attached child parts first!');
+
+    // Removing leaf Engine succeeds
+    const removeEngine = tree.removeNode(engineId);
+    expect(removeEngine.success).toBe(true);
+
+    // Now removing Fuel Tank succeeds
+    const removeTank = tree.removeNode(tankId);
+    expect(removeTank.success).toBe(true);
+
+    // Cockpit's south port is now available again
+    const availablePorts = tree.getAvailablePorts();
+    const southPort = availablePorts.find(p => p.direction === 'SOUTH' && p.nodeId === 'node_cockpit');
+    expect(southPort).toBeDefined();
+    expect(southPort?.targetGridY).toBe(6);
+  });
+});

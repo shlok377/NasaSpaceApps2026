@@ -11,6 +11,15 @@ export interface AvailablePort {
   targetGridY: number;
 }
 
+export interface AttachmentValidation {
+  valid: boolean;
+  reason?: string;
+  parentNode?: RocketNode;
+  parentPort?: PortDirection;
+  childPort?: PortDirection;
+  finOrientation?: 'LEFT' | 'RIGHT';
+}
+
 export class RocketTree {
   private rootId = 'node_cockpit';
   private nodes: Map<string, RocketNode> = new Map();
@@ -110,6 +119,113 @@ export class RocketTree {
     }
 
     return available;
+  }
+
+  public validateAttachment(gridX: number, gridY: number, childType: PartType): AttachmentValidation {
+    // 1. Check if cell is already occupied
+    if (this.gridOccupancy.has(`${gridX},${gridY}`)) {
+      return { valid: false, reason: 'Cell is already occupied' };
+    }
+
+    // 2. Find available ports pointing to this cell
+    const ports = this.getAvailablePorts().filter(
+      p => p.targetGridX === gridX && p.targetGridY === gridY
+    );
+
+    if (ports.length === 0) {
+      return { valid: false, reason: 'No adjacent open connection socket' };
+    }
+
+    // Check each port candidate for directional compatibility
+    for (const port of ports) {
+      const parent = this.nodes.get(port.nodeId);
+      if (!parent) continue;
+
+      const neededChildPort = this.getOppositeDirection(port.direction);
+
+      // Verify child directional rules
+      if (childType === 'ENGINE') {
+        // Engine must connect via its top (NORTH) port, so parent port must be SOUTH
+        if (port.direction === 'SOUTH') {
+          return {
+            valid: true,
+            parentNode: parent,
+            parentPort: port.direction,
+            childPort: neededChildPort
+          };
+        }
+      } else if (childType === 'NOSE_CONE') {
+        // Nose Cone must connect via its bottom (SOUTH) port, so parent port must be NORTH
+        if (port.direction === 'NORTH') {
+          return {
+            valid: true,
+            parentNode: parent,
+            parentPort: port.direction,
+            childPort: neededChildPort
+          };
+        }
+      } else if (childType === 'FIN') {
+        // Fin connects either on West (Left Fin) or East (Right Fin)
+        if (port.direction === 'WEST') {
+          return {
+            valid: true,
+            parentNode: parent,
+            parentPort: port.direction,
+            childPort: neededChildPort,
+            finOrientation: 'LEFT'
+          };
+        } else if (port.direction === 'EAST') {
+          return {
+            valid: true,
+            parentNode: parent,
+            parentPort: port.direction,
+            childPort: neededChildPort,
+            finOrientation: 'RIGHT'
+          };
+        }
+      } else {
+        // Fuel Tank & Structural blocks can connect to any open socket
+        return {
+          valid: true,
+          parentNode: parent,
+          parentPort: port.direction,
+          childPort: neededChildPort
+        };
+      }
+    }
+
+    return { valid: false, reason: 'Part orientation incompatible with socket' };
+  }
+
+  public attachPart(gridX: number, gridY: number, childType: PartType): { success: boolean; node?: RocketNode; reason?: string } {
+    const validation = this.validateAttachment(gridX, gridY, childType);
+    if (!validation.valid || !validation.parentNode || !validation.parentPort) {
+      return { success: false, reason: validation.reason || 'Invalid attachment' };
+    }
+
+    const def = PART_DEFINITIONS[childType];
+    const newId = `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    const newNode: RocketNode = {
+      id: newId,
+      type: childType,
+      gridX,
+      gridY,
+      parentId: validation.parentNode.id,
+      parentPort: validation.parentPort,
+      childrenIds: [],
+      finOrientation: validation.finOrientation,
+      mass: def.mass,
+      fuel: def.fuel,
+      thrust: def.thrust
+    };
+
+    // Register node
+    this.nodes.set(newId, newNode);
+    this.gridOccupancy.set(`${gridX},${gridY}`, newId);
+    validation.parentNode.childrenIds.push(newId);
+
+    return { success: true, node: newNode };
   }
 
   public removeNode(id: string): { success: boolean; reason?: string } {
