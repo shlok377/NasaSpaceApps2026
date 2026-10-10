@@ -28,6 +28,7 @@
 - **Fixed Interactive HitArea Offset**: Resolved a 44px horizontal offset on palette bay containers caused by passing centered coordinates `[-w/2, -h/2]` into `Container.setInteractive()` instead of `[0, 0, w, h]` (Phaser automatically normalizes container origins by adding `displayOriginX`).
 - **Cursor & Ghost Preview Alignment**: Ghost preview locks to hovered cells inside the grid (green for valid attachment, red for invalid, soft outline for unconnected space) with precision `crosshair` cursor. Fixed deletion shake animation bug.
 - **Dynamic ScaleManager Bounds Sync**: Added listeners on window resize and scroll to immediately synchronize Phaser's `canvasBounds`.
+- **Cockpit Anchor Position**: Moved root Cockpit (`CMD`) 4 blocks down from Row 4 to Row 8 (`Col 7, Row 8`).
 - **Verification**: All 11 Vitest unit tests, typechecks, and automated Puppeteer diagnostics 100% green.
 
 ---
