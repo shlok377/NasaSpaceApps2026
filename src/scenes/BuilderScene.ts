@@ -79,6 +79,16 @@ export class BuilderScene extends Phaser.Scene {
     this.syncExportableState('[RocketBuilder] Initialized rocket:');
     (window as unknown as { __ROCKET_TREE__: RocketTree }).__ROCKET_TREE__ = this.rocketTree;
     (window as unknown as { __BUILDER_SCENE__: BuilderScene }).__BUILDER_SCENE__ = this;
+
+    // 5. Keep input bounds strictly synchronized with window layout/scroll
+    this.scale.updateBounds();
+    window.addEventListener('resize', () => {
+      this.scale.refresh();
+      this.scale.updateBounds();
+    });
+    window.addEventListener('scroll', () => {
+      this.scale.updateBounds();
+    });
   }
 
   private drawScenery(): void {
@@ -192,7 +202,7 @@ export class BuilderScene extends Phaser.Scene {
       bayContainer.add([bgGfx, iconGfx, labelText, hotkeyText]);
       bayContainer.setSize(bayWidth, bayHeight);
       bayContainer.setInteractive(
-        new Phaser.Geom.Rectangle(-bayWidth / 2, -bayHeight / 2, bayWidth, bayHeight),
+        new Phaser.Geom.Rectangle(0, 0, bayWidth, bayHeight),
         Phaser.Geom.Rectangle.Contains
       );
 
@@ -404,8 +414,18 @@ export class BuilderScene extends Phaser.Scene {
       return;
     }
 
-    if (pointer.worldY >= this.trayY) {
-      this.game.canvas.style.cursor = 'default';
+    // Check if pointer is hovering over any bay in the console tray
+    const isOverBay = this.paletteBays.some(bay => {
+      const bx = bay.container.x;
+      const by = bay.container.y;
+      return (
+        Math.abs(pointer.worldX - bx) <= 44 &&
+        Math.abs(pointer.worldY - by) <= 42
+      );
+    });
+
+    if (isOverBay) {
+      this.game.canvas.style.cursor = 'pointer';
       return;
     }
 
