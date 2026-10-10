@@ -56,8 +56,8 @@ export class BuilderScene extends Phaser.Scene {
     // Positioned below HUD with zero overlap: Y = 120, ending at 600
     this.gridOriginY = 120;
 
-    // 2. Initialize core RocketTree model (immovable Cockpit at center column 7, row 4)
-    this.rocketTree = new RocketTree(7, 4);
+    // 2. Initialize core RocketTree model (immovable Cockpit at center column 7, row 8)
+    this.rocketTree = new RocketTree(7, 8);
 
     // 3. Rendering layers in order
     this.sceneryGraphics = this.add.graphics();
