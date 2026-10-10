@@ -3,10 +3,10 @@ import { BuilderScene } from './scenes/BuilderScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: 1080,
-  height: 1020,
+  width: 1280,
+  height: 720,
   parent: 'game-container',
-  backgroundColor: '#11141a',
+  backgroundColor: '#0f172a',
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH

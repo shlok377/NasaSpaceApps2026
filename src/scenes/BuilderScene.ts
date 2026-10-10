@@ -13,8 +13,13 @@ interface PaletteBay {
 
 export class BuilderScene extends Phaser.Scene {
   public static readonly GRID_COLS = 15;
-  public static readonly GRID_ROWS = 15;
-  public static readonly CELL_SIZE = 56;
+  public static readonly GRID_ROWS = 12;
+  public static readonly CELL_SIZE = 40;
+
+  public readonly hudHeight = 72;
+  public readonly hudY = 14;
+  public readonly trayHeight = 105;
+  public readonly trayY = 615;
 
   private rocketTree!: RocketTree;
   private sceneryGraphics!: Phaser.GameObjects.Graphics;
@@ -28,11 +33,11 @@ export class BuilderScene extends Phaser.Scene {
 
   private blockDisplayMap: Map<string, Phaser.GameObjects.Container> = new Map();
 
-  private gridOriginX = 0;
-  private gridOriginY = 0;
+  public gridOriginX = 0;
+  public gridOriginY = 0;
 
   private selectedPartType: PartType | null = null;
-  private paletteBays: PaletteBay[] = [];
+  public paletteBays: PaletteBay[] = [];
 
   // HUD text objects
   private hudStatusText!: Phaser.GameObjects.Text;
@@ -43,14 +48,15 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   create(): void {
-    // 1. Layout coordinates (Leave 130px at bottom for parts console)
+    // 1. Layout coordinates (1280 x 720 widescreen)
     const totalGridWidth = BuilderScene.GRID_COLS * BuilderScene.CELL_SIZE;
-    const totalGridHeight = BuilderScene.GRID_ROWS * BuilderScene.CELL_SIZE;
 
-    this.gridOriginX = Math.floor((this.scale.width - totalGridWidth) / 2);
-    this.gridOriginY = Math.floor((this.scale.height - totalGridHeight - 130) / 2 + 10);
+    // Centered horizontally: (1280 - 600) / 2 = 340
+    this.gridOriginX = Math.round((this.scale.width - totalGridWidth) / 2);
+    // Positioned below HUD with zero overlap: Y = 120, ending at 600
+    this.gridOriginY = 120;
 
-    // 2. Initialize core RocketTree model
+    // 2. Initialize core RocketTree model (immovable Cockpit at center column 7, row 4)
     this.rocketTree = new RocketTree(7, 4);
 
     // 3. Rendering layers in order
@@ -81,7 +87,7 @@ export class BuilderScene extends Phaser.Scene {
     const h = this.scale.height;
 
     // Plain solid dark background
-    this.sceneryGraphics.fillStyle(0x11141a, 1);
+    this.sceneryGraphics.fillStyle(0x0f172a, 1);
     this.sceneryGraphics.fillRect(0, 0, w, h);
   }
 
@@ -92,7 +98,7 @@ export class BuilderScene extends Phaser.Scene {
     const height = BuilderScene.GRID_ROWS * BuilderScene.CELL_SIZE;
 
     // Grid workspace backing
-    this.gridGraphics.fillStyle(0x161a23, 1);
+    this.gridGraphics.fillStyle(0x131d31, 1);
     this.gridGraphics.fillRect(this.gridOriginX, this.gridOriginY, width, height);
 
     // Grid outer border
@@ -100,7 +106,7 @@ export class BuilderScene extends Phaser.Scene {
     this.gridGraphics.strokeRect(this.gridOriginX, this.gridOriginY, width, height);
 
     // Grid lines
-    this.gridGraphics.lineStyle(1, 0x1f2937, 0.85);
+    this.gridGraphics.lineStyle(1, 0x1e293b, 0.85);
     for (let c = 1; c < BuilderScene.GRID_COLS; c++) {
       const x = this.gridOriginX + c * BuilderScene.CELL_SIZE;
       this.gridGraphics.lineBetween(x, this.gridOriginY, x, this.gridOriginY + height);
@@ -113,12 +119,12 @@ export class BuilderScene extends Phaser.Scene {
 
   private createBottomPartsTray(): void {
     const w = this.scale.width;
-    const h = 126;
-    const trayY = this.scale.height - h;
+    const h = this.trayHeight;
+    const trayY = this.trayY;
 
     // 1. Plain dark tray backing
     const trayBg = this.add.graphics();
-    trayBg.fillStyle(0x0f172a, 0.98);
+    trayBg.fillStyle(0x090d16, 0.98);
     trayBg.fillRect(0, trayY, w, h);
     trayBg.lineStyle(2, 0x334155, 1);
     trayBg.lineBetween(0, trayY, w, trayY);
@@ -127,8 +133,8 @@ export class BuilderScene extends Phaser.Scene {
     const partsLabelContainer = this.add.container(48, trayY + h / 2);
     const chars = ['P', 'A', 'R', 'T', 'S'];
     chars.forEach((char, idx) => {
-      const t = this.add.text(0, (idx - 2) * 20, char, {
-        fontSize: '16px',
+      const t = this.add.text(0, (idx - 2) * 18, char, {
+        fontSize: '15px',
         color: '#94a3b8',
         fontStyle: 'bold'
       }).setOrigin(0.5);
@@ -144,12 +150,12 @@ export class BuilderScene extends Phaser.Scene {
       { type: 'FIN', label: 'FINS', hotkey: '5' }
     ];
 
-    const bayWidth = 96;
-    const bayHeight = 98;
-    const baySpacing = 16;
+    const bayWidth = 88;
+    const bayHeight = 84;
+    const baySpacing = 14;
     const totalBaysWidth = bayConfigs.length * bayWidth + (bayConfigs.length - 1) * baySpacing;
-    const startX = (w - totalBaysWidth) / 2 + bayWidth / 2 + 25;
-    const bayY = trayY + h / 2;
+    const startX = Math.round((w - totalBaysWidth) / 2) + Math.round(bayWidth / 2);
+    const bayY = trayY + Math.round(h / 2);
 
     this.paletteBays = [];
 
@@ -165,19 +171,19 @@ export class BuilderScene extends Phaser.Scene {
       // Blank square icon preview
       const iconGfx = this.add.graphics();
       iconGfx.fillStyle(def.color, 1);
-      iconGfx.fillRect(-16, -26, 32, 32);
+      iconGfx.fillRect(-13, -22, 26, 26);
       iconGfx.lineStyle(1.5, 0xffffff, 0.7);
-      iconGfx.strokeRect(-16, -26, 32, 32);
+      iconGfx.strokeRect(-13, -22, 26, 26);
 
       // Label below
-      const labelText = this.add.text(0, 24, cfg.label, {
-        fontSize: '12px',
+      const labelText = this.add.text(0, 18, cfg.label, {
+        fontSize: '11px',
         color: '#f8fafc',
         fontStyle: 'bold'
       }).setOrigin(0.5);
 
       // Hotkey badge in corner
-      const hotkeyText = this.add.text(-36, -34, cfg.hotkey, {
+      const hotkeyText = this.add.text(-32, -29, cfg.hotkey, {
         fontSize: '11px',
         color: '#94a3b8',
         fontStyle: 'bold'
@@ -192,6 +198,7 @@ export class BuilderScene extends Phaser.Scene {
 
       // Hover and click animations
       bayContainer.on('pointerover', () => {
+        if (this.game.canvas) this.game.canvas.style.cursor = 'pointer';
         if (this.selectedPartType !== cfg.type) {
           this.tweens.add({
             targets: bayContainer,
@@ -202,7 +209,8 @@ export class BuilderScene extends Phaser.Scene {
         }
       });
 
-      bayContainer.on('pointerout', () => {
+      bayContainer.on('pointerout', (pointer: Phaser.Input.Pointer) => {
+        this.updateCursorStyle(pointer);
         if (this.selectedPartType !== cfg.type) {
           this.tweens.add({
             targets: bayContainer,
@@ -246,45 +254,45 @@ export class BuilderScene extends Phaser.Scene {
 
   private createHud(): void {
     const padX = 24;
-    const padY = 20;
+    const padY = this.hudY;
 
     // Terminal Panel in Top Left
     const panelBg = this.add.graphics();
-    panelBg.fillStyle(0x161a23, 0.9);
-    panelBg.fillRoundedRect(padX, padY, 280, 96, 8);
+    panelBg.fillStyle(0x131d31, 0.95);
+    panelBg.fillRoundedRect(padX, padY, 300, this.hudHeight, 8);
     panelBg.lineStyle(2, 0x334155, 1);
-    panelBg.strokeRoundedRect(padX, padY, 280, 96, 8);
+    panelBg.strokeRoundedRect(padX, padY, 300, this.hudHeight, 8);
 
-    const titleText = this.add.text(padX + 14, padY + 10, 'MISSION TELEMETRY', {
+    const titleText = this.add.text(padX + 14, padY + 8, 'MISSION TELEMETRY', {
       fontSize: '11px',
       color: '#38bdf8',
       fontStyle: 'bold'
     });
 
-    this.hudStatusText = this.add.text(padX + 14, padY + 28, 'STATUS: [ INCOMPLETE ]', {
+    this.hudStatusText = this.add.text(padX + 14, padY + 25, 'STATUS: [ INCOMPLETE ]', {
       fontSize: '12px',
       color: '#f59e0b',
       fontStyle: 'bold'
     });
 
-    this.hudStatsText = this.add.text(padX + 14, padY + 50, 'MASS: 100 kg   THRUST: 0 kN\nFUEL: 0 L     TWR: 0.00', {
+    this.hudStatsText = this.add.text(padX + 14, padY + 44, 'MASS: 100 kg   THRUST: 0 kN\nFUEL: 0 L     TWR: 0.00', {
       fontSize: '11px',
       color: '#e2e8f0',
-      lineSpacing: 4
+      lineSpacing: 3
     });
 
     this.hudContainer.add([panelBg, titleText, this.hudStatusText, this.hudStatsText]);
 
     // Top Right Controls Helper Badge
     const helperBg = this.add.graphics();
-    const helperW = 340;
+    const helperW = 440;
     const helperX = this.scale.width - helperW - 24;
-    helperBg.fillStyle(0x161a23, 0.9);
+    helperBg.fillStyle(0x131d31, 0.95);
     helperBg.fillRoundedRect(helperX, padY, helperW, 36, 6);
     helperBg.lineStyle(1.5, 0x334155, 1);
     helperBg.strokeRoundedRect(helperX, padY, helperW, 36, 6);
 
-    const helperText = this.add.text(helperX + 14, padY + 11, '1-5: Select  •  L-Click: Place  •  R-Click: Remove', {
+    const helperText = this.add.text(helperX + 14, padY + 11, '1-5: Select  •  L-Click: Place  •  R-Click: Remove  •  Esc: Cancel', {
       fontSize: '11px',
       color: '#94a3b8',
       fontStyle: 'bold'
@@ -326,23 +334,25 @@ export class BuilderScene extends Phaser.Scene {
 
     this.selectedPartType = type;
     this.ghostContainer.setVisible(true);
+    if (this.game.canvas) this.game.canvas.style.cursor = 'crosshair';
     this.updatePaletteSelectionUI();
   }
 
   public deselectPart(): void {
     this.selectedPartType = null;
     this.ghostContainer.setVisible(false);
+    if (this.game.canvas) this.game.canvas.style.cursor = 'default';
     this.updatePaletteSelectionUI();
   }
 
   private updatePaletteSelectionUI(): void {
-    const h = 126;
-    const trayY = this.scale.height - h;
-    const bayY = trayY + h / 2;
+    const h = this.trayHeight;
+    const trayY = this.trayY;
+    const bayY = trayY + Math.round(h / 2);
 
     for (const bay of this.paletteBays) {
       const isSelected = bay.type === this.selectedPartType;
-      this.drawBayBg(bay.bgGfx, isSelected, 96, 98);
+      this.drawBayBg(bay.bgGfx, isSelected, 88, 84);
 
       this.tweens.add({
         targets: bay.container,
@@ -380,17 +390,43 @@ export class BuilderScene extends Phaser.Scene {
     });
   }
 
+  private updateCursorStyle(pointer: Phaser.Input.Pointer): void {
+    if (!this.game.canvas) return;
+
+    if (this.selectedPartType) {
+      this.game.canvas.style.cursor = 'crosshair';
+      return;
+    }
+
+    const { col, row, inside } = this.getGridCellAtPointer(pointer);
+    if (inside && this.rocketTree.getNodeAt(col, row)) {
+      this.game.canvas.style.cursor = 'pointer';
+      return;
+    }
+
+    if (pointer.worldY >= this.trayY) {
+      this.game.canvas.style.cursor = 'default';
+      return;
+    }
+
+    this.game.canvas.style.cursor = 'default';
+  }
+
   private getGridCellAtPointer(pointer: Phaser.Input.Pointer): { col: number; row: number; inside: boolean } {
-    const col = Math.floor((pointer.x - this.gridOriginX) / BuilderScene.CELL_SIZE);
-    const row = Math.floor((pointer.y - this.gridOriginY) / BuilderScene.CELL_SIZE);
+    const totalWidth = BuilderScene.GRID_COLS * BuilderScene.CELL_SIZE;
+    const totalHeight = BuilderScene.GRID_ROWS * BuilderScene.CELL_SIZE;
+
+    const col = Math.floor((pointer.worldX - this.gridOriginX) / BuilderScene.CELL_SIZE);
+    const row = Math.floor((pointer.worldY - this.gridOriginY) / BuilderScene.CELL_SIZE);
     const inside =
       col >= 0 &&
       col < BuilderScene.GRID_COLS &&
       row >= 0 &&
       row < BuilderScene.GRID_ROWS &&
-      pointer.x >= this.gridOriginX &&
-      pointer.y >= this.gridOriginY &&
-      pointer.y < this.scale.height - 130; // Exclude bottom console tray
+      pointer.worldX >= this.gridOriginX &&
+      pointer.worldX < this.gridOriginX + totalWidth &&
+      pointer.worldY >= this.gridOriginY &&
+      pointer.worldY < this.gridOriginY + totalHeight;
 
     return { col, row, inside };
   }
@@ -409,6 +445,8 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   private updateGhostPreview(pointer: Phaser.Input.Pointer): void {
+    this.updateCursorStyle(pointer);
+
     if (!this.selectedPartType) {
       this.ghostContainer.setVisible(false);
       return;
@@ -421,60 +459,67 @@ export class BuilderScene extends Phaser.Scene {
     const { col, row, inside } = this.getGridCellAtPointer(pointer);
 
     if (inside) {
+      const snapX = this.gridOriginX + col * size + size / 2;
+      const snapY = this.gridOriginY + row * size + size / 2;
+      this.ghostContainer.setPosition(snapX, snapY);
+
       const validation = this.rocketTree.validateAttachment(col, row, this.selectedPartType);
 
       if (validation.valid) {
-        // Snapped blank square with green highlight
-        const snapX = this.gridOriginX + col * size + size / 2;
-        const snapY = this.gridOriginY + row * size + size / 2;
-
         let displayLabel = def.label;
         if (this.selectedPartType === 'FIN') {
           displayLabel = validation.finOrientation === 'LEFT' ? 'L-FIN' : 'R-FIN';
         }
 
-        this.ghostContainer.setPosition(snapX, snapY);
         this.ghostGfx.clear();
-        this.ghostGfx.fillStyle(def.color, 0.45);
+        this.ghostGfx.fillStyle(def.color, 0.55);
         this.ghostGfx.fillRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
         this.ghostGfx.lineStyle(2, 0x22c55e, 1);
         this.ghostGfx.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
 
         this.ghostText.setText(displayLabel);
+        this.ghostText.setColor('#ffffff');
         return;
       }
 
-      // Check if near socket or occupied for red indicator
+      // Check if occupied or adjacent to socket for invalid indicator
+      const isOccupied = this.rocketTree.getNodeAt(col, row) !== undefined;
       const hasAdjacentSocket = this.rocketTree.getAvailablePorts().some(
         p => p.targetGridX === col && p.targetGridY === row
       );
-      const isOccupied = this.rocketTree.getNodeAt(col, row) !== undefined;
 
-      if (hasAdjacentSocket || isOccupied) {
-        const snapX = this.gridOriginX + col * size + size / 2;
-        const snapY = this.gridOriginY + row * size + size / 2;
-
-        this.ghostContainer.setPosition(snapX, snapY);
-        this.ghostGfx.clear();
-        this.ghostGfx.fillStyle(0xef4444, 0.25);
+      this.ghostGfx.clear();
+      if (isOccupied || hasAdjacentSocket) {
+        this.ghostGfx.fillStyle(0xef4444, 0.3);
         this.ghostGfx.fillRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
         this.ghostGfx.lineStyle(2, 0xef4444, 0.9);
         this.ghostGfx.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
 
+        this.ghostText.setText(isOccupied ? '' : 'INVALID');
+        this.ghostText.setColor('#fca5a5');
+      } else {
+        // Empty cell not adjacent to any open socket - soft translucent guide
+        this.ghostGfx.fillStyle(0x334155, 0.2);
+        this.ghostGfx.fillRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
+        this.ghostGfx.lineStyle(1.5, 0x64748b, 0.6);
+        this.ghostGfx.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
+
         this.ghostText.setText(def.label);
-        return;
+        this.ghostText.setColor('#94a3b8');
       }
+      return;
     }
 
-    // Floating smoothly under cursor
-    this.ghostContainer.setPosition(pointer.x, pointer.y);
+    // Floating smoothly under cursor when outside grid
+    this.ghostContainer.setPosition(pointer.worldX, pointer.worldY);
     this.ghostGfx.clear();
-    this.ghostGfx.fillStyle(def.color, 0.5);
+    this.ghostGfx.fillStyle(def.color, 0.6);
     this.ghostGfx.fillRect(-size / 2, -size / 2, size, size);
-    this.ghostGfx.lineStyle(1, 0x94a3b8, 0.8);
+    this.ghostGfx.lineStyle(1.5, 0x94a3b8, 0.85);
     this.ghostGfx.strokeRect(-size / 2, -size / 2, size, size);
 
     this.ghostText.setText(def.label);
+    this.ghostText.setColor('#ffffff');
   }
 
   private handleLeftClick(pointer: Phaser.Input.Pointer): void {
@@ -482,7 +527,7 @@ export class BuilderScene extends Phaser.Scene {
 
     const { col, row, inside } = this.getGridCellAtPointer(pointer);
     if (!inside) {
-      if (pointer.y < this.scale.height - 130) {
+      if (pointer.worldY < this.trayY) {
         this.deselectPart();
       }
       return;
@@ -533,30 +578,33 @@ export class BuilderScene extends Phaser.Scene {
 
   private flashAndShakeBlock(node: RocketNode): void {
     const size = BuilderScene.CELL_SIZE;
-    const px = this.gridOriginX + node.gridX * size;
-    const py = this.gridOriginY + node.gridY * size;
+    const cx = this.gridOriginX + node.gridX * size + size / 2;
+    const cy = this.gridOriginY + node.gridY * size + size / 2;
 
     const flash = this.add.graphics();
+    flash.setPosition(cx, cy);
     flash.fillStyle(0xef4444, 0.65);
-    flash.fillRect(px + 2, py + 2, size - 4, size - 4);
+    flash.fillRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
     flash.lineStyle(3, 0xff0000, 1);
-    flash.strokeRect(px + 2, py + 2, size - 4, size - 4);
+    flash.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
 
     const blockDisplay = this.blockDisplayMap.get(node.id);
-    const targetsToShake: object[] = [flash];
+    const origX = cx;
+
+    const targetsToShake: Array<Phaser.GameObjects.GameObject | { x: number }> = [flash];
     if (blockDisplay) {
       targetsToShake.push(blockDisplay);
     }
 
     this.tweens.add({
       targets: targetsToShake,
-      x: { from: -5, to: 5 },
-      duration: 35,
+      x: { from: origX - 4, to: origX + 4 },
+      duration: 40,
       yoyo: true,
       repeat: 3,
       onComplete: () => {
         if (blockDisplay) {
-          blockDisplay.x = px + size / 2;
+          blockDisplay.x = origX;
         }
         flash.destroy();
       }
@@ -564,6 +612,7 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   public renderRocket(): void {
+    this.tweens.killTweensOf(this.socketsContainer.list);
     this.blocksContainer.removeAll(true);
     this.blockDisplayMap.clear();
     this.socketsContainer.removeAll(true);
