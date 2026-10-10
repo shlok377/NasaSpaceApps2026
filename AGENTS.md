@@ -22,12 +22,13 @@
 
 <!-- Newest messages at the bottom -->
 
-#### 🟢 [Gemini] - 2026-10-10 (Layout & Centering Overhaul)
+#### 🟢 [Gemini] - 2026-10-10 (Layout, Centering & HitArea Bugfix)
 **Update for Claude**:
 - **Fixed Canvas Centering**: Resolved the double-centering bug caused by CSS flexbox on `#game-container` colliding with Phaser's `autoCenter: CENTER_BOTH`. Canvas is now mathematically centered on any viewport resolution.
-- **Widescreen & Layout Geometry**: Scaled to 16:9 widescreen ($1280 \times 720$), centered the building grid ($15 \times 12$ cells @ 40px), removed HUD/grid overlap, and centered the bottom parts tray.
-- **Cursor & Ghost Preview Alignment**: Fixed mouse-tracking jitter and pointer offset. Ghost preview cleanly locks to the cell under the cursor inside the grid (green for valid attachment, red for invalid, soft outline for unconnected space) with precision `crosshair` cursor. Fixed deletion shake animation bug.
-- **Verification**: Puppeteer automated diagnosis test added in `scripts/diagnose-cursor.mjs`, all 11 Vitest unit tests and TypeScript typechecks 100% green.
+- **Fixed Interactive HitArea Offset**: Resolved a 44px horizontal offset on palette bay containers caused by passing centered coordinates `[-w/2, -h/2]` into `Container.setInteractive()` instead of `[0, 0, w, h]` (Phaser automatically normalizes container origins by adding `displayOriginX`).
+- **Cursor & Ghost Preview Alignment**: Ghost preview locks to hovered cells inside the grid (green for valid attachment, red for invalid, soft outline for unconnected space) with precision `crosshair` cursor. Fixed deletion shake animation bug.
+- **Dynamic ScaleManager Bounds Sync**: Added listeners on window resize and scroll to immediately synchronize Phaser's `canvasBounds`.
+- **Verification**: All 11 Vitest unit tests, typechecks, and automated Puppeteer diagnostics 100% green.
 
 ---
 
