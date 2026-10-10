@@ -24,12 +24,16 @@ export interface RocketNode {
   gridX: number;
   gridY: number;
   parentId: string | null;
-  parentPort: PortDirection | null; // Port on parent that this node is attached to
+  parentPort: PortDirection | null;
   childrenIds: string[];
   finOrientation?: 'LEFT' | 'RIGHT';
   mass: number;
   fuel: number;
   thrust: number;
+}
+
+export interface HierarchicalRocketNode extends RocketNode {
+  children: HierarchicalRocketNode[];
 }
 
 export interface RocketTelemetry {
@@ -39,5 +43,5 @@ export interface RocketTelemetry {
   totalThrust: number;
   totalFuel: number;
   twr: number;
-  tree: RocketNode;
+  tree: HierarchicalRocketNode;
 }

@@ -1,5 +1,5 @@
 import { PART_DEFINITIONS } from './partDefinitions';
-import { PartType, PortDirection, RocketNode, RocketTelemetry } from './types';
+import { HierarchicalRocketNode, PartType, PortDirection, RocketNode, RocketTelemetry } from './types';
 
 export interface AvailablePort {
   nodeId: string;
@@ -21,7 +21,7 @@ export interface AttachmentValidation {
 }
 
 export class RocketTree {
-  private rootId = 'node_cockpit';
+  private rootId = '0';
   private nodes: Map<string, RocketNode> = new Map();
   private gridOccupancy: Map<string, string> = new Map(); // "x,y" -> nodeId
 
@@ -91,12 +91,10 @@ export class RocketTree {
 
       if (node.type === 'COCKPIT' || node.type === 'FUEL_TANK' || node.type === 'STRUCTURAL') {
         exposedDirections.push('NORTH', 'SOUTH', 'EAST', 'WEST');
-      } else if (node.type === 'ENGINE' || node.type === 'NOSE_CONE' || node.type === 'FIN') {
-        // Terminal pieces do not expose extra attachment ports
       }
 
       for (const dir of exposedDirections) {
-        // Check if this port is the one connected to the node's parent
+        // If this port is connected to parent, it's not open
         if (node.parentPort && this.getOppositeDirection(node.parentPort) === dir) {
           continue;
         }
@@ -122,12 +120,10 @@ export class RocketTree {
   }
 
   public validateAttachment(gridX: number, gridY: number, childType: PartType): AttachmentValidation {
-    // 1. Check if cell is already occupied
     if (this.gridOccupancy.has(`${gridX},${gridY}`)) {
       return { valid: false, reason: 'Cell is already occupied' };
     }
 
-    // 2. Find available ports pointing to this cell
     const ports = this.getAvailablePorts().filter(
       p => p.targetGridX === gridX && p.targetGridY === gridY
     );
@@ -136,16 +132,14 @@ export class RocketTree {
       return { valid: false, reason: 'No adjacent open connection socket' };
     }
 
-    // Check each port candidate for directional compatibility
     for (const port of ports) {
       const parent = this.nodes.get(port.nodeId);
       if (!parent) continue;
 
       const neededChildPort = this.getOppositeDirection(port.direction);
 
-      // Verify child directional rules
       if (childType === 'ENGINE') {
-        // Engine must connect via its top (NORTH) port, so parent port must be SOUTH
+        // Engine attaches below an open South port using its North port
         if (port.direction === 'SOUTH') {
           return {
             valid: true,
@@ -155,7 +149,7 @@ export class RocketTree {
           };
         }
       } else if (childType === 'NOSE_CONE') {
-        // Nose Cone must connect via its bottom (SOUTH) port, so parent port must be NORTH
+        // Nose Cone attaches above an open North port using its South port
         if (port.direction === 'NORTH') {
           return {
             valid: true,
@@ -165,21 +159,22 @@ export class RocketTree {
           };
         }
       } else if (childType === 'FIN') {
-        // Fin connects either on West (Left Fin) or East (Right Fin)
+        // Left Fin: on the left side of parent (parent's West port connects to Fin's East port)
         if (port.direction === 'WEST') {
           return {
             valid: true,
             parentNode: parent,
             parentPort: port.direction,
-            childPort: neededChildPort,
+            childPort: neededChildPort, // EAST port on fin
             finOrientation: 'LEFT'
           };
         } else if (port.direction === 'EAST') {
+          // Right Fin: on the right side of parent (parent's East port connects to Fin's West port)
           return {
             valid: true,
             parentNode: parent,
             parentPort: port.direction,
-            childPort: neededChildPort,
+            childPort: neededChildPort, // WEST port on fin
             finOrientation: 'RIGHT'
           };
         }
@@ -204,7 +199,7 @@ export class RocketTree {
     }
 
     const def = PART_DEFINITIONS[childType];
-    const newId = `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const newId = String(this.nodes.size);
 
     const newNode: RocketNode = {
       id: newId,
@@ -220,7 +215,6 @@ export class RocketTree {
       thrust: def.thrust
     };
 
-    // Register node
     this.nodes.set(newId, newNode);
     this.gridOccupancy.set(`${gridX},${gridY}`, newId);
     validation.parentNode.childrenIds.push(newId);
@@ -242,7 +236,6 @@ export class RocketTree {
       return { success: false, reason: 'Cannot remove block: Remove attached child parts first!' };
     }
 
-    // Detach from parent
     if (node.parentId) {
       const parent = this.nodes.get(node.parentId);
       if (parent) {
@@ -250,11 +243,22 @@ export class RocketTree {
       }
     }
 
-    // Remove from occupancy and map
     this.gridOccupancy.delete(`${node.gridX},${node.gridY}`);
     this.nodes.delete(id);
 
     return { success: true };
+  }
+
+  private buildHierarchicalNode(nodeId: string): HierarchicalRocketNode {
+    const node = this.nodes.get(nodeId);
+    if (!node) {
+      throw new Error(`Node ${nodeId} not found`);
+    }
+    const children = node.childrenIds.map(cId => this.buildHierarchicalNode(cId));
+    return {
+      ...JSON.parse(JSON.stringify(node)),
+      children
+    };
   }
 
   public getTelemetry(): RocketTelemetry {
@@ -283,7 +287,7 @@ export class RocketTree {
       totalThrust,
       totalFuel,
       twr,
-      tree: JSON.parse(JSON.stringify(this.getRootNode()))
+      tree: this.buildHierarchicalNode(this.rootId)
     };
   }
 }

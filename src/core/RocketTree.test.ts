@@ -8,7 +8,7 @@ describe('RocketTree', () => {
 
     expect(root).toBeDefined();
     expect(root.type).toBe('COCKPIT');
-    expect(root.id).toBe('node_cockpit');
+    expect(root.id).toBe('0');
     expect(root.gridX).toBe(7);
     expect(root.gridY).toBe(5);
     expect(root.parentId).toBeNull();
@@ -38,7 +38,7 @@ describe('RocketTree', () => {
 
   it('disallows removing the root Cockpit', () => {
     const tree = new RocketTree(7, 5);
-    const result = tree.removeNode('node_cockpit');
+    const result = tree.removeNode('0');
 
     expect(result.success).toBe(false);
     expect(result.reason).toContain('Cockpit');
@@ -158,7 +158,7 @@ describe('RocketTree Full Lifecycle & Telemetry', () => {
 
     // Cockpit's south port is now available again
     const availablePorts = tree.getAvailablePorts();
-    const southPort = availablePorts.find(p => p.direction === 'SOUTH' && p.nodeId === 'node_cockpit');
+    const southPort = availablePorts.find(p => p.direction === 'SOUTH' && p.nodeId === '0');
     expect(southPort).toBeDefined();
     expect(southPort?.targetGridY).toBe(6);
   });
