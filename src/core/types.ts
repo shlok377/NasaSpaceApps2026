@@ -16,6 +16,7 @@ export interface PartDefinition {
   fuel: number;
   thrust: number;
   color: number;
+  textureKey: string;
 }
 
 export interface RocketNode {

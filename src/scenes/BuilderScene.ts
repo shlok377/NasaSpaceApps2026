@@ -2,72 +2,159 @@ import Phaser from 'phaser';
 import { RocketTree } from '../core/RocketTree';
 import { PART_DEFINITIONS } from '../core/partDefinitions';
 import { PartType, PortDirection, RocketNode } from '../core/types';
+import { TextureGenerator } from '../graphics/TextureGenerator';
 
-interface PaletteButton {
+interface PaletteBay {
   type: PartType;
+  label: string;
+  iconTexture: string;
   container: Phaser.GameObjects.Container;
-  bg: Phaser.GameObjects.Graphics;
+  frameImg: Phaser.GameObjects.Image;
+  hotkeyNum: string;
 }
 
 export class BuilderScene extends Phaser.Scene {
   public static readonly GRID_COLS = 15;
-  public static readonly GRID_ROWS = 20;
-  public static readonly CELL_SIZE = 48;
+  public static readonly GRID_ROWS = 15;
+  public static readonly CELL_SIZE = 56;
 
   private rocketTree!: RocketTree;
+  private sceneryGraphics!: Phaser.GameObjects.Graphics;
   private gridGraphics!: Phaser.GameObjects.Graphics;
   private blocksContainer!: Phaser.GameObjects.Container;
-  private socketsGraphics!: Phaser.GameObjects.Graphics;
-  private ghostGraphics!: Phaser.GameObjects.Graphics;
+  private socketsContainer!: Phaser.GameObjects.Container;
+  private ghostContainer!: Phaser.GameObjects.Container;
+  private ghostImage!: Phaser.GameObjects.Image;
+  private ghostOutline!: Phaser.GameObjects.Graphics;
+  private hudContainer!: Phaser.GameObjects.Container;
+
   private blockDisplayMap: Map<string, Phaser.GameObjects.Container> = new Map();
 
   private gridOriginX = 0;
   private gridOriginY = 0;
 
   private selectedPartType: PartType | null = null;
-  private paletteButtons: PaletteButton[] = [];
+  private paletteBays: PaletteBay[] = [];
+
+  // HUD text objects
+  private hudStatusText!: Phaser.GameObjects.Text;
+  private hudStatsText!: Phaser.GameObjects.Text;
 
   constructor() {
     super('BuilderScene');
   }
 
   create(): void {
+    // 1. Generate retro procedural textures
+    TextureGenerator.generateAll(this, BuilderScene.CELL_SIZE);
+
+    // 2. Layout coordinates (Leave 130px at bottom for parts console)
     const totalGridWidth = BuilderScene.GRID_COLS * BuilderScene.CELL_SIZE;
     const totalGridHeight = BuilderScene.GRID_ROWS * BuilderScene.CELL_SIZE;
 
-    // Perfectly centered grid
     this.gridOriginX = Math.floor((this.scale.width - totalGridWidth) / 2);
-    this.gridOriginY = Math.floor((this.scale.height - totalGridHeight) / 2);
+    this.gridOriginY = Math.floor((this.scale.height - totalGridHeight - 130) / 2 + 10);
 
-    this.rocketTree = new RocketTree(7, 5);
+    // 3. Initialize core RocketTree model
+    this.rocketTree = new RocketTree(7, 4);
 
-    // Create rendering layers
+    // 4. Rendering layers in order
+    this.sceneryGraphics = this.add.graphics();
     this.gridGraphics = this.add.graphics();
     this.blocksContainer = this.add.container(0, 0);
-    this.socketsGraphics = this.add.graphics();
-    this.ghostGraphics = this.add.graphics();
+    this.socketsContainer = this.add.container(0, 0);
+    this.ghostContainer = this.add.container(0, 0);
+    this.hudContainer = this.add.container(0, 0);
 
+    this.createGhostPreview();
+    this.drawScenery();
     this.drawGrid();
-    this.createPalette();
+    this.createBottomPartsTray();
+    this.createHud();
     this.renderRocket();
     this.setupInputHandlers();
 
-    // Initial telemetry output and exportable state
+    // 5. Initial sync and global debug handle
     this.syncExportableState('[RocketBuilder] Initialized rocket:');
-
-    // Debug handle
     (window as unknown as { __ROCKET_TREE__: RocketTree }).__ROCKET_TREE__ = this.rocketTree;
     (window as unknown as { __BUILDER_SCENE__: BuilderScene }).__BUILDER_SCENE__ = this;
   }
 
-  private syncExportableState(logPrefix?: string): void {
-    const telemetry = this.rocketTree.getTelemetry();
-    (window as unknown as { __ROCKET_STATE__: unknown }).__ROCKET_STATE__ = telemetry;
-    (window as unknown as { getRocketState: () => unknown }).getRocketState = () => this.rocketTree.getTelemetry();
+  private drawScenery(): void {
+    this.sceneryGraphics.clear();
+    const w = this.scale.width;
+    const h = this.scale.height;
 
-    if (logPrefix) {
-      console.log(logPrefix, telemetry);
-    }
+    // Sky gradient (Soft sage / mint #8fb8a8 to #a1c5b6)
+    this.sceneryGraphics.fillGradientStyle(0x8fb8a8, 0x8fb8a8, 0xa3c7b8, 0xa3c7b8, 1);
+    this.sceneryGraphics.fillRect(0, 0, w, h);
+
+    // Distant jagged mountains (#182932)
+    this.sceneryGraphics.fillStyle(0x182932, 1);
+    this.sceneryGraphics.beginPath();
+    this.sceneryGraphics.moveTo(0, h * 0.72);
+    this.sceneryGraphics.lineTo(w * 0.12, h * 0.38);
+    this.sceneryGraphics.lineTo(w * 0.28, h * 0.65);
+    this.sceneryGraphics.lineTo(w * 0.42, h * 0.45);
+    this.sceneryGraphics.lineTo(w * 0.60, h * 0.68);
+    this.sceneryGraphics.lineTo(w * 0.75, h * 0.35);
+    this.sceneryGraphics.lineTo(w * 0.90, h * 0.55);
+    this.sceneryGraphics.lineTo(w, h * 0.42);
+    this.sceneryGraphics.lineTo(w, h);
+    this.sceneryGraphics.lineTo(0, h);
+    this.sceneryGraphics.closePath();
+    this.sceneryGraphics.fill();
+
+    // Midground mountains (#223a46) with snow caps
+    this.sceneryGraphics.fillStyle(0x223a46, 1);
+    this.sceneryGraphics.beginPath();
+    this.sceneryGraphics.moveTo(0, h * 0.55);
+    this.sceneryGraphics.lineTo(w * 0.18, h * 0.26);
+    this.sceneryGraphics.lineTo(w * 0.35, h * 0.70);
+    this.sceneryGraphics.lineTo(w * 0.65, h * 0.70);
+    this.sceneryGraphics.lineTo(w * 0.85, h * 0.24);
+    this.sceneryGraphics.lineTo(w, h * 0.45);
+    this.sceneryGraphics.lineTo(w, h);
+    this.sceneryGraphics.lineTo(0, h);
+    this.sceneryGraphics.closePath();
+    this.sceneryGraphics.fill();
+
+    // Snow caps on left and right peaks (Cream white #f4efe2)
+    // Left mountain snow cap
+    this.sceneryGraphics.fillStyle(0xf4efe2, 1);
+    this.sceneryGraphics.beginPath();
+    this.sceneryGraphics.moveTo(w * 0.18, h * 0.26);
+    this.sceneryGraphics.lineTo(w * 0.25, h * 0.42);
+    this.sceneryGraphics.lineTo(w * 0.21, h * 0.40);
+    this.sceneryGraphics.lineTo(w * 0.18, h * 0.44);
+    this.sceneryGraphics.lineTo(w * 0.14, h * 0.38);
+    this.sceneryGraphics.lineTo(w * 0.09, h * 0.45);
+    this.sceneryGraphics.closePath();
+    this.sceneryGraphics.fill();
+
+    // Right mountain snow cap
+    this.sceneryGraphics.beginPath();
+    this.sceneryGraphics.moveTo(w * 0.85, h * 0.24);
+    this.sceneryGraphics.lineTo(w * 0.93, h * 0.42);
+    this.sceneryGraphics.lineTo(w * 0.89, h * 0.38);
+    this.sceneryGraphics.lineTo(w * 0.85, h * 0.43);
+    this.sceneryGraphics.lineTo(w * 0.81, h * 0.39);
+    this.sceneryGraphics.lineTo(w * 0.77, h * 0.45);
+    this.sceneryGraphics.closePath();
+    this.sceneryGraphics.fill();
+
+    // Foreground mountain foothills (#15232a)
+    this.sceneryGraphics.fillStyle(0x15232a, 1);
+    this.sceneryGraphics.beginPath();
+    this.sceneryGraphics.moveTo(0, h * 0.70);
+    this.sceneryGraphics.lineTo(w * 0.22, h * 0.82);
+    this.sceneryGraphics.lineTo(w * 0.50, h * 0.88);
+    this.sceneryGraphics.lineTo(w * 0.78, h * 0.82);
+    this.sceneryGraphics.lineTo(w, h * 0.68);
+    this.sceneryGraphics.lineTo(w, h);
+    this.sceneryGraphics.lineTo(0, h);
+    this.sceneryGraphics.closePath();
+    this.sceneryGraphics.fill();
   }
 
   private drawGrid(): void {
@@ -76,16 +163,16 @@ export class BuilderScene extends Phaser.Scene {
     const width = BuilderScene.GRID_COLS * BuilderScene.CELL_SIZE;
     const height = BuilderScene.GRID_ROWS * BuilderScene.CELL_SIZE;
 
-    // Background of grid workspace
-    this.gridGraphics.fillStyle(0x161a23, 1);
+    // Faint blueprint workspace backing
+    this.gridGraphics.fillStyle(0x102129, 0.25);
     this.gridGraphics.fillRect(this.gridOriginX, this.gridOriginY, width, height);
 
-    // Grid border
-    this.gridGraphics.lineStyle(2, 0x334155, 1);
+    // Grid outer border
+    this.gridGraphics.lineStyle(1.5, 0x48717d, 0.4);
     this.gridGraphics.strokeRect(this.gridOriginX, this.gridOriginY, width, height);
 
-    // Grid cell lines
-    this.gridGraphics.lineStyle(1, 0x1f2937, 0.8);
+    // Subtle dotted / fine grid lines
+    this.gridGraphics.lineStyle(1, 0x48717d, 0.15);
     for (let c = 1; c < BuilderScene.GRID_COLS; c++) {
       const x = this.gridOriginX + c * BuilderScene.CELL_SIZE;
       this.gridGraphics.lineBetween(x, this.gridOriginY, x, this.gridOriginY + height);
@@ -96,78 +183,186 @@ export class BuilderScene extends Phaser.Scene {
     }
   }
 
-  private createPalette(): void {
-    const paletteTypes: PartType[] = [
-      'FUEL_TANK',
-      'ENGINE',
-      'NOSE_CONE',
-      'FIN',
-      'STRUCTURAL'
-    ];
+  private createBottomPartsTray(): void {
+    const w = this.scale.width;
+    const h = 126;
+    const trayY = this.scale.height - h;
 
-    const startX = 24;
-    let currentY = this.gridOriginY + 20;
-    const btnWidth = 120;
-    const btnHeight = 44;
+    // 1. PCB Circuit Background banner
+    const bgImage = this.add.image(w / 2, trayY + h / 2, 'tex_tray_bg');
+    bgImage.setDisplaySize(w, h);
 
-    this.add.text(startX, this.gridOriginY - 15, 'PARTS TRAY', {
-      fontSize: '12px',
-      color: '#94a3b8',
-      fontStyle: 'bold'
+    // 2. Vertical "PARTS" typography on the left
+    const partsLabelContainer = this.add.container(48, trayY + h / 2);
+    const chars = ['P', 'A', 'R', 'T', 'S'];
+    chars.forEach((char, idx) => {
+      const t = this.add.text(0, (idx - 2) * 20, char, {
+        fontSize: '18px',
+        color: '#943c2c',
+        fontStyle: 'bold',
+        stroke: '#ecd5b3',
+        strokeThickness: 2
+      }).setOrigin(0.5);
+      partsLabelContainer.add(t);
     });
 
-    for (const type of paletteTypes) {
-      const def = PART_DEFINITIONS[type];
-      const container = this.add.container(startX, currentY);
-      const bg = this.add.graphics();
+    // 3. The 5 Arched Bays matching the inspiration screenshot:
+    // BLOCK | CONE | THRUST | FUEL | FINS
+    const bayConfigs: Array<{ type: PartType; label: string; iconTex: string; hotkey: string }> = [
+      { type: 'STRUCTURAL', label: 'BLOCK', iconTex: 'tex_hull', hotkey: '1' },
+      { type: 'NOSE_CONE', label: 'CONE', iconTex: 'tex_cone', hotkey: '2' },
+      { type: 'ENGINE', label: 'THRUST', iconTex: 'tex_engine', hotkey: '3' },
+      { type: 'FUEL_TANK', label: 'FUEL', iconTex: 'tex_fuel', hotkey: '4' },
+      { type: 'FIN', label: 'FINS', iconTex: 'tex_fin_left', hotkey: '5' }
+    ];
 
-      this.drawPaletteButtonBg(bg, false, btnWidth, btnHeight);
+    const bayWidth = 92;
+    const baySpacing = 16;
+    const totalBaysWidth = bayConfigs.length * bayWidth + (bayConfigs.length - 1) * baySpacing;
+    const startX = (w - totalBaysWidth) / 2 + bayWidth / 2 + 30;
+    const bayY = trayY + h / 2;
 
-      const icon = this.add.graphics();
-      icon.fillStyle(def.color, 1);
-      icon.fillRect(8, 10, 24, 24);
-      icon.lineStyle(1, 0xffffff, 0.5);
-      icon.strokeRect(8, 10, 24, 24);
+    this.paletteBays = [];
 
-      const label = this.add.text(38, 14, def.label, {
-        fontSize: '11px',
-        color: '#f8fafc',
+    bayConfigs.forEach((cfg, idx) => {
+      const bx = startX + idx * (bayWidth + baySpacing);
+      const bayContainer = this.add.container(bx, bayY);
+
+      // Frame image
+      const frameImg = this.add.image(0, 0, 'tex_bay_normal').setOrigin(0.5);
+
+      // Part Icon sprite
+      const iconImg = this.add.image(0, -12, cfg.iconTex).setOrigin(0.5);
+      iconImg.setDisplaySize(44, 44);
+
+      // Label below
+      const labelText = this.add.text(0, 32, cfg.label, {
+        fontSize: '13px',
+        color: '#8b4b1a',
         fontStyle: 'bold'
-      });
+      }).setOrigin(0.5);
 
-      container.add([bg, icon, label]);
-      container.setSize(btnWidth, btnHeight);
-      container.setInteractive(new Phaser.Geom.Rectangle(0, 0, btnWidth, btnHeight), Phaser.Geom.Rectangle.Contains);
+      // Small Hotkey tag in corner
+      const hotkeyText = this.add.text(-32, -38, cfg.hotkey, {
+        fontSize: '10px',
+        color: '#b36a28',
+        fontStyle: 'bold'
+      }).setOrigin(0.5);
 
-      container.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-        if (pointer.button === 0) {
-          this.selectPaletteItem(type);
+      bayContainer.add([frameImg, iconImg, labelText, hotkeyText]);
+      bayContainer.setSize(bayWidth, 104);
+      bayContainer.setInteractive(new Phaser.Geom.Rectangle(-bayWidth / 2, -52, bayWidth, 104), Phaser.Geom.Rectangle.Contains);
+
+      // Hover and click animations
+      bayContainer.on('pointerover', () => {
+        if (this.selectedPartType !== cfg.type) {
+          this.tweens.add({
+            targets: bayContainer,
+            y: bayY - 4,
+            duration: 120,
+            ease: 'Power2'
+          });
         }
       });
 
-      this.paletteButtons.push({ type, container, bg });
-      currentY += btnHeight + 12;
-    }
+      bayContainer.on('pointerout', () => {
+        if (this.selectedPartType !== cfg.type) {
+          this.tweens.add({
+            targets: bayContainer,
+            y: bayY,
+            duration: 120,
+            ease: 'Power2'
+          });
+        }
+      });
+
+      bayContainer.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+        if (pointer.button === 0) {
+          this.selectPaletteItem(cfg.type);
+        }
+      });
+
+      this.paletteBays.push({
+        type: cfg.type,
+        label: cfg.label,
+        iconTexture: cfg.iconTex,
+        container: bayContainer,
+        frameImg,
+        hotkeyNum: cfg.hotkey
+      });
+    });
   }
 
-  private drawPaletteButtonBg(
-    gfx: Phaser.GameObjects.Graphics,
-    isSelected: boolean,
-    w: number,
-    h: number
-  ): void {
-    gfx.clear();
-    if (isSelected) {
-      gfx.fillStyle(0x1e293b, 1);
-      gfx.fillRect(0, 0, w, h);
-      gfx.lineStyle(2, 0x38bdf8, 1);
-      gfx.strokeRect(0, 0, w, h);
+  private createHud(): void {
+    const padX = 24;
+    const padY = 20;
+
+    // Vintage CRT / Mission Control Panel in Top Left
+    const panelBg = this.add.graphics();
+    panelBg.fillStyle(0x10232a, 0.85);
+    panelBg.fillRoundedRect(padX, padY, 280, 96, 8);
+    panelBg.lineStyle(2, 0x477884, 0.9);
+    panelBg.strokeRoundedRect(padX, padY, 280, 96, 8);
+
+    const titleText = this.add.text(padX + 14, padY + 10, 'MISSION TELEMETRY', {
+      fontSize: '11px',
+      color: '#8bd9e6',
+      fontStyle: 'bold'
+    });
+
+    this.hudStatusText = this.add.text(padX + 14, padY + 28, 'STATUS: [ INCOMPLETE ]', {
+      fontSize: '12px',
+      color: '#f59e0b',
+      fontStyle: 'bold'
+    });
+
+    this.hudStatsText = this.add.text(padX + 14, padY + 50, 'MASS: 100 kg   THRUST: 0 kN\nFUEL: 0 L     TWR: 0.00', {
+      fontSize: '11px',
+      color: '#e2f4f7',
+      lineSpacing: 4
+    });
+
+    this.hudContainer.add([panelBg, titleText, this.hudStatusText, this.hudStatsText]);
+
+    // Top Right Controls Helper Badge
+    const helperBg = this.add.graphics();
+    const helperW = 340;
+    const helperX = this.scale.width - helperW - 24;
+    helperBg.fillStyle(0x10232a, 0.85);
+    helperBg.fillRoundedRect(helperX, padY, helperW, 36, 6);
+    helperBg.lineStyle(1.5, 0x3f6b76, 0.8);
+    helperBg.strokeRoundedRect(helperX, padY, helperW, 36, 6);
+
+    const helperText = this.add.text(helperX + 14, padY + 11, '1-5: Select  •  L-Click: Place  •  R-Click: Remove', {
+      fontSize: '11px',
+      color: '#b8e4ec',
+      fontStyle: 'bold'
+    });
+    this.hudContainer.add([helperBg, helperText]);
+  }
+
+  private updateHud(telemetry: ReturnType<RocketTree['getTelemetry']>): void {
+    if (telemetry.valid) {
+      this.hudStatusText.setText('STATUS: [ FLIGHT READY ]');
+      this.hudStatusText.setColor('#22c55e');
     } else {
-      gfx.fillStyle(0x0f172a, 0.9);
-      gfx.fillRect(0, 0, w, h);
-      gfx.lineStyle(1, 0x334155, 1);
-      gfx.strokeRect(0, 0, w, h);
+      this.hudStatusText.setText('STATUS: [ INCOMPLETE ]');
+      this.hudStatusText.setColor('#f59e0b');
     }
+
+    this.hudStatsText.setText(
+      `MASS: ${telemetry.totalMass} kg   THRUST: ${telemetry.totalThrust} kN\nFUEL: ${telemetry.totalFuel} L    TWR: ${telemetry.twr.toFixed(2)}`
+    );
+  }
+
+  private createGhostPreview(): void {
+    this.ghostContainer.setVisible(false);
+    this.ghostImage = this.add.image(0, 0, 'tex_hull').setOrigin(0.5);
+    this.ghostImage.setDisplaySize(BuilderScene.CELL_SIZE, BuilderScene.CELL_SIZE);
+    this.ghostImage.setAlpha(0.7);
+
+    this.ghostOutline = this.add.graphics();
+    this.ghostContainer.add([this.ghostImage, this.ghostOutline]);
   }
 
   public selectPaletteItem(type: PartType): void {
@@ -177,24 +372,43 @@ export class BuilderScene extends Phaser.Scene {
     }
 
     this.selectedPartType = type;
+    this.ghostContainer.setVisible(true);
     this.updatePaletteSelectionUI();
   }
 
   public deselectPart(): void {
     this.selectedPartType = null;
-    this.ghostGraphics.clear();
+    this.ghostContainer.setVisible(false);
     this.updatePaletteSelectionUI();
   }
 
   private updatePaletteSelectionUI(): void {
-    for (const btn of this.paletteButtons) {
-      const isSelected = btn.type === this.selectedPartType;
-      this.drawPaletteButtonBg(btn.bg, isSelected, 120, 44);
+    const h = 126;
+    const trayY = this.scale.height - h;
+    const bayY = trayY + h / 2;
+
+    for (const bay of this.paletteBays) {
+      const isSelected = bay.type === this.selectedPartType;
+      bay.frameImg.setTexture(isSelected ? 'tex_bay_active' : 'tex_bay_normal');
+
+      this.tweens.add({
+        targets: bay.container,
+        y: isSelected ? bayY - 6 : bayY,
+        duration: 150,
+        ease: 'Power2'
+      });
     }
   }
 
   private setupInputHandlers(): void {
     this.input.mouse?.disableContextMenu();
+
+    // Hotkeys 1 - 5 for instant selection
+    this.input.keyboard?.on('keydown-ONE', () => this.selectPaletteItem('STRUCTURAL'));
+    this.input.keyboard?.on('keydown-TWO', () => this.selectPaletteItem('NOSE_CONE'));
+    this.input.keyboard?.on('keydown-THREE', () => this.selectPaletteItem('ENGINE'));
+    this.input.keyboard?.on('keydown-FOUR', () => this.selectPaletteItem('FUEL_TANK'));
+    this.input.keyboard?.on('keydown-FIVE', () => this.selectPaletteItem('FIN'));
 
     this.input.keyboard?.on('keydown-ESC', () => {
       this.deselectPart();
@@ -222,7 +436,8 @@ export class BuilderScene extends Phaser.Scene {
       row >= 0 &&
       row < BuilderScene.GRID_ROWS &&
       pointer.x >= this.gridOriginX &&
-      pointer.y >= this.gridOriginY;
+      pointer.y >= this.gridOriginY &&
+      pointer.y < this.scale.height - 130; // Exclude bottom console tray
 
     return { col, row, inside };
   }
@@ -241,51 +456,64 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   private updateGhostPreview(pointer: Phaser.Input.Pointer): void {
-    this.ghostGraphics.clear();
-    if (!this.selectedPartType) return;
+    if (!this.selectedPartType) {
+      this.ghostContainer.setVisible(false);
+      return;
+    }
 
-    const { col, row, inside } = this.getGridCellAtPointer(pointer);
+    this.ghostContainer.setVisible(true);
     const size = BuilderScene.CELL_SIZE;
     const def = PART_DEFINITIONS[this.selectedPartType];
 
-    if (inside) {
-      const px = this.gridOriginX + col * size;
-      const py = this.gridOriginY + row * size;
+    const { col, row, inside } = this.getGridCellAtPointer(pointer);
 
+    if (inside) {
       const validation = this.rocketTree.validateAttachment(col, row, this.selectedPartType);
 
       if (validation.valid) {
-        // Snapped to valid open socket: green indicator
-        this.ghostGraphics.fillStyle(def.color, 0.45);
-        this.ghostGraphics.fillRect(px + 2, py + 2, size - 4, size - 4);
-        this.ghostGraphics.lineStyle(2, 0x22c55e, 1);
-        this.ghostGraphics.strokeRect(px + 2, py + 2, size - 4, size - 4);
+        // Snapped to socket!
+        const snapX = this.gridOriginX + col * size + size / 2;
+        const snapY = this.gridOriginY + row * size + size / 2;
+
+        let texKey = def.textureKey;
+        if (this.selectedPartType === 'FIN') {
+          texKey = validation.finOrientation === 'LEFT' ? 'tex_fin_left' : 'tex_fin_right';
+        }
+
+        this.ghostImage.setTexture(texKey);
+        this.ghostContainer.setPosition(snapX, snapY);
+
+        this.ghostOutline.clear();
+        this.ghostOutline.lineStyle(3, 0x22c55e, 0.95); // Glowing green
+        this.ghostOutline.strokeRoundedRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4, 6);
         return;
       }
 
-      // Check if adjacent to an open socket or occupied block
+      // Check if near socket or occupied for red indicator
       const hasAdjacentSocket = this.rocketTree.getAvailablePorts().some(
         p => p.targetGridX === col && p.targetGridY === row
       );
       const isOccupied = this.rocketTree.getNodeAt(col, row) !== undefined;
 
       if (hasAdjacentSocket || isOccupied) {
-        // In socket proximity or hovering occupied block: red snap warning
-        this.ghostGraphics.fillStyle(0xef4444, 0.25);
-        this.ghostGraphics.fillRect(px + 2, py + 2, size - 4, size - 4);
-        this.ghostGraphics.lineStyle(2, 0xef4444, 0.9);
-        this.ghostGraphics.strokeRect(px + 2, py + 2, size - 4, size - 4);
+        const snapX = this.gridOriginX + col * size + size / 2;
+        const snapY = this.gridOriginY + row * size + size / 2;
+        this.ghostImage.setTexture(def.textureKey);
+        this.ghostContainer.setPosition(snapX, snapY);
+
+        this.ghostOutline.clear();
+        this.ghostOutline.lineStyle(3, 0xef4444, 0.9); // Red warning
+        this.ghostOutline.strokeRoundedRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4, 6);
         return;
       }
     }
 
     // Floating smoothly under cursor
-    const floatX = pointer.x - size / 2;
-    const floatY = pointer.y - size / 2;
-    this.ghostGraphics.fillStyle(def.color, 0.5);
-    this.ghostGraphics.fillRect(floatX, floatY, size, size);
-    this.ghostGraphics.lineStyle(1, 0x94a3b8, 0.8);
-    this.ghostGraphics.strokeRect(floatX, floatY, size, size);
+    this.ghostImage.setTexture(def.textureKey);
+    this.ghostContainer.setPosition(pointer.x, pointer.y);
+    this.ghostOutline.clear();
+    this.ghostOutline.lineStyle(1.5, 0x8ecad6, 0.6);
+    this.ghostOutline.strokeRoundedRect(-size / 2, -size / 2, size, size, 4);
   }
 
   private handleLeftClick(pointer: Phaser.Input.Pointer): void {
@@ -293,15 +521,30 @@ export class BuilderScene extends Phaser.Scene {
 
     const { col, row, inside } = this.getGridCellAtPointer(pointer);
     if (!inside) {
-      this.deselectPart();
+      if (pointer.y < this.scale.height - 130) {
+        this.deselectPart();
+      }
       return;
     }
 
     const attachResult = this.rocketTree.attachPart(col, row, this.selectedPartType);
-    if (attachResult.success) {
+    if (attachResult.success && attachResult.node) {
       this.renderRocket();
       this.updateGhostPreview(pointer);
       this.syncExportableState('[RocketBuilder] Part attached:');
+
+      // Docking tactile bounce and spark effect
+      const blockContainer = this.blockDisplayMap.get(attachResult.node.id);
+      if (blockContainer) {
+        blockContainer.setScale(1.12);
+        this.tweens.add({
+          targets: blockContainer,
+          scaleX: 1,
+          scaleY: 1,
+          duration: 180,
+          ease: 'Back.easeOut'
+        });
+      }
     }
   }
 
@@ -328,19 +571,17 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   private flashAndShakeBlock(node: RocketNode): void {
-    const px = this.gridOriginX + node.gridX * BuilderScene.CELL_SIZE;
-    const py = this.gridOriginY + node.gridY * BuilderScene.CELL_SIZE;
     const size = BuilderScene.CELL_SIZE;
+    const px = this.gridOriginX + node.gridX * size;
+    const py = this.gridOriginY + node.gridY * size;
 
     const flash = this.add.graphics();
-    flash.fillStyle(0xef4444, 0.6);
-    flash.fillRect(px + 2, py + 2, size - 4, size - 4);
+    flash.fillStyle(0xef4444, 0.65);
+    flash.fillRoundedRect(px + 2, py + 2, size - 4, size - 4, 6);
     flash.lineStyle(3, 0xff0000, 1);
-    flash.strokeRect(px + 2, py + 2, size - 4, size - 4);
+    flash.strokeRoundedRect(px + 2, py + 2, size - 4, size - 4, 6);
 
     const blockDisplay = this.blockDisplayMap.get(node.id);
-
-    // Shake both the block and the flash overlay
     const targetsToShake: object[] = [flash];
     if (blockDisplay) {
       targetsToShake.push(blockDisplay);
@@ -348,13 +589,13 @@ export class BuilderScene extends Phaser.Scene {
 
     this.tweens.add({
       targets: targetsToShake,
-      x: { from: -4, to: 4 },
+      x: { from: -5, to: 5 },
       duration: 35,
       yoyo: true,
       repeat: 3,
       onComplete: () => {
         if (blockDisplay) {
-          blockDisplay.x = 0;
+          blockDisplay.x = px + size / 2;
         }
         flash.destroy();
       }
@@ -364,7 +605,7 @@ export class BuilderScene extends Phaser.Scene {
   public renderRocket(): void {
     this.blocksContainer.removeAll(true);
     this.blockDisplayMap.clear();
-    this.socketsGraphics.clear();
+    this.socketsContainer.removeAll(true);
 
     const nodes = this.rocketTree.getAllNodes();
     for (const node of nodes) {
@@ -376,44 +617,58 @@ export class BuilderScene extends Phaser.Scene {
 
   private renderBlock(node: RocketNode): void {
     const def = PART_DEFINITIONS[node.type];
-    const px = this.gridOriginX + node.gridX * BuilderScene.CELL_SIZE;
-    const py = this.gridOriginY + node.gridY * BuilderScene.CELL_SIZE;
     const size = BuilderScene.CELL_SIZE;
+    const cx = this.gridOriginX + node.gridX * size + size / 2;
+    const cy = this.gridOriginY + node.gridY * size + size / 2;
 
-    const blockContainer = this.add.container(0, 0);
+    const blockContainer = this.add.container(cx, cy);
 
-    const blockGfx = this.add.graphics();
-    blockGfx.fillStyle(def.color, 1);
-    blockGfx.fillRect(px + 2, py + 2, size - 4, size - 4);
-    blockGfx.lineStyle(2, 0xffffff, 0.6);
-    blockGfx.strokeRect(px + 2, py + 2, size - 4, size - 4);
+    let texKey = def.textureKey;
+    if (node.type === 'FIN') {
+      texKey = node.finOrientation === 'LEFT' ? 'tex_fin_left' : 'tex_fin_right';
+    }
 
-    let displayLabel = def.label.substring(0, 3).toUpperCase();
-    if (node.type === 'COCKPIT') displayLabel = 'CMD';
-    else if (node.type === 'FIN') displayLabel = node.finOrientation === 'LEFT' ? 'L-FIN' : 'R-FIN';
+    const sprite = this.add.image(0, 0, texKey).setOrigin(0.5);
+    sprite.setDisplaySize(size, size);
 
-    const label = this.add.text(px + size / 2, py + size / 2, displayLabel, {
-      fontSize: node.type === 'FIN' ? '9px' : '11px',
-      color: '#ffffff',
-      fontStyle: 'bold'
-    }).setOrigin(0.5);
-
-    blockContainer.add([blockGfx, label]);
+    blockContainer.add(sprite);
     this.blocksContainer.add(blockContainer);
     this.blockDisplayMap.set(node.id, blockContainer);
   }
 
   private renderAvailableSockets(): void {
     const ports = this.rocketTree.getAvailablePorts();
-    const radius = 6;
 
     for (const port of ports) {
       const pos = this.getPortPixelPosition(port.gridX, port.gridY, port.direction);
 
-      this.socketsGraphics.fillStyle(0x0284c7, 0.9);
-      this.socketsGraphics.fillCircle(pos.x, pos.y, radius);
-      this.socketsGraphics.lineStyle(2, 0x38bdf8, 1);
-      this.socketsGraphics.strokeCircle(pos.x, pos.y, radius);
+      const socketSprite = this.add.image(pos.x, pos.y, 'tex_docking_port').setOrigin(0.5);
+      socketSprite.setDisplaySize(18, 18);
+
+      // Subtle breathing idle pulse on open sockets
+      this.tweens.add({
+        targets: socketSprite,
+        alpha: { from: 0.65, to: 1.0 },
+        scale: { from: 0.95, to: 1.15 },
+        duration: 900,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+      });
+
+      this.socketsContainer.add(socketSprite);
+    }
+  }
+
+  private syncExportableState(logPrefix?: string): void {
+    const telemetry = this.rocketTree.getTelemetry();
+    (window as unknown as { __ROCKET_STATE__: unknown }).__ROCKET_STATE__ = telemetry;
+    (window as unknown as { getRocketState: () => unknown }).getRocketState = () => this.rocketTree.getTelemetry();
+
+    this.updateHud(telemetry);
+
+    if (logPrefix) {
+      console.log(logPrefix, telemetry);
     }
   }
 
