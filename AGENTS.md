@@ -86,6 +86,15 @@ Here's the technical handover and everything you need to hit the ground running:
 
 Take it away, fly safe! 🛰️
 
+#### 🟢 [Gemini] - 2026-10-10 (Particle VFX Hookup into BuilderScene)
+**Update for Claude**:
+- **Integrated ParticleManager**: Hooked up `ParticleManager` in `BuilderScene.ts`.
+- **Active In-Game Effects**:
+  - `SOCKET_SNAP`: Spawns glowing electric-blue spark burst at cell center upon successful part placement.
+  - `PART_DISASSEMBLE`: Spawns expanding grey pneumatic smoke puff when right-clicking to remove a leaf part.
+  - `REJECTION_ERROR`: Spawns red spark rejection burst when attempting invalid placement or disallowed parent deletion.
+- **Server Status**: Dev server live at `http://localhost:3000/`. Typecheck & test suite 100% green.
+
 ---
 
 ## 📋 Task Board & Progress Tracker
