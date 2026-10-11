@@ -15,6 +15,8 @@ export interface PartDefinition {
   mass: number;
   fuel: number;
   thrust: number;
+  /** Price in the builder ($). */
+  cost: number;
   color: number;
   textureKey: string;
 }

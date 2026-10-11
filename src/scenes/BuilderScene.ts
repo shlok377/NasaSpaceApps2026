@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import { RocketTree } from '../core/RocketTree';
+import { currentMission, rocketCost } from '../game/missions';
+import { loadProgress, saveProgress, withGrant } from '../game/progress';
 import { PART_DEFINITIONS } from '../core/partDefinitions';
 import { PartType, PortDirection, RocketNode } from '../core/types';
 import { ParticleManager } from '../particles';
@@ -44,6 +46,13 @@ export class BuilderScene extends Phaser.Scene {
   // HUD text objects
   private hudStatusText!: Phaser.GameObjects.Text;
   private hudStatsText!: Phaser.GameObjects.Text;
+  private launchButtonBg!: Phaser.GameObjects.Graphics;
+  private launchButtonText!: Phaser.GameObjects.Text;
+  private launchReady = false;
+  private launchBlockedReason = '';
+  private economyText!: Phaser.GameObjects.Text;
+  private missionText!: Phaser.GameObjects.Text;
+  private money = 0;
 
   constructor() {
     super('BuilderScene');
@@ -76,6 +85,7 @@ export class BuilderScene extends Phaser.Scene {
     this.drawGrid();
     this.createBottomPartsTray();
     this.createHud();
+    this.refreshEconomy();
     this.renderRocket();
     this.setupInputHandlers();
 
@@ -314,6 +324,7 @@ export class BuilderScene extends Phaser.Scene {
     });
 
     this.hudContainer.add([panelBg, titleText, this.hudStatusText, this.hudStatsText]);
+    this.createLaunchButton(padX, padY + this.hudHeight + 10);
 
     // Top Right Controls Helper Badge
     const helperBg = this.add.graphics();
@@ -332,6 +343,74 @@ export class BuilderScene extends Phaser.Scene {
       fontFamily: 'system-ui, sans-serif'
     });
     this.hudContainer.add([helperBg, helperText]);
+
+    // Mission + money badge under the controls helper.
+    const econY = padY + helperH + 8;
+    const econBg = this.add.graphics();
+    econBg.fillStyle(0x111c30, 0.95);
+    econBg.fillRoundedRect(helperX, econY, helperW, 58, 8);
+    econBg.lineStyle(2, 0x334d6e, 1);
+    econBg.strokeRoundedRect(helperX, econY, helperW, 58, 8);
+    this.missionText = this.add.text(helperX + 16, econY + 9, '', { fontSize: '13px', color: '#facc15', fontStyle: 'bold', fontFamily: 'system-ui, sans-serif' });
+    this.economyText = this.add.text(helperX + 16, econY + 31, '', { fontSize: '13px', color: '#ffffff', fontStyle: 'bold', fontFamily: 'system-ui, sans-serif' });
+    this.hudContainer.add([econBg, this.missionText, this.economyText]);
+  }
+
+  /** Reload money/missions (they change after every flight) and top up broke players. */
+  private refreshEconomy(): void {
+    const { progress, grant } = withGrant(loadProgress());
+    if (grant > 0) saveProgress(progress);
+    this.money = progress.money;
+    const mission = currentMission(progress.completedMissions);
+    this.missionText.setText(mission ? `MISSION: ${mission.goal}  (+$${mission.reward})` : 'All missions complete — chase the high score!');
+    if (grant > 0) this.missionText.setText(`Space agency grant: +$${grant}  ·  ${this.missionText.text}`);
+  }
+
+  private createLaunchButton(x: number, y: number): void {
+    const w = 360;
+    const h = 44;
+    this.launchButtonBg = this.add.graphics();
+    this.launchButtonText = this.add.text(x + w / 2, y + h / 2, '', {
+      fontSize: '15px',
+      color: '#ffffff',
+      fontStyle: 'bold',
+      fontFamily: 'system-ui, sans-serif'
+    }).setOrigin(0.5);
+
+    const zone = this.add.zone(x + w / 2, y + h / 2, w, h).setInteractive();
+    zone.on('pointerover', () => {
+      if (this.game.canvas) this.game.canvas.style.cursor = this.launchReady ? 'pointer' : 'not-allowed';
+    });
+    zone.on('pointerout', (pointer: Phaser.Input.Pointer) => this.updateCursorStyle(pointer));
+    zone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.button === 0) this.launchFlight();
+    });
+
+    this.hudContainer.add([this.launchButtonBg, this.launchButtonText, zone]);
+    this.drawLaunchButton(x, y, w, h);
+  }
+
+  private drawLaunchButton(x = 24, y = this.hudY + this.hudHeight + 10, w = 360, h = 44): void {
+    const g = this.launchButtonBg;
+    g.clear();
+    g.fillStyle(this.launchReady ? 0x14532d : 0x1e293b, 0.95);
+    g.fillRoundedRect(x, y, w, h, 8);
+    g.lineStyle(2, this.launchReady ? 0x22c55e : 0x334d6e, 1);
+    g.strokeRoundedRect(x, y, w, h, 8);
+    this.launchButtonText.setText(this.launchReady ? 'LAUNCH  ▶  (ENTER)' : this.launchBlockedReason);
+    this.launchButtonText.setColor(this.launchReady ? '#ffffff' : '#64748b');
+  }
+
+  /** Hand the assembled rocket to the flight simulator; the builder sleeps so the design is kept. */
+  public launchFlight(): void {
+    const telemetry = this.rocketTree.getTelemetry();
+    if (!this.launchReady) {
+      this.cameras.main.shake(120, 0.004);
+      return;
+    }
+    this.deselectPart();
+    this.scene.launch('FlightScene', { tree: telemetry.tree });
+    this.scene.sleep();
   }
 
   private updateHud(telemetry: ReturnType<RocketTree['getTelemetry']>): void {
@@ -343,9 +422,22 @@ export class BuilderScene extends Phaser.Scene {
       this.hudStatusText.setColor('#f59e0b');
     }
 
+    // TWR with the tanks full — what the rocket actually has to lift off the pad.
+    const wetMass = telemetry.totalMass + telemetry.totalFuel;
+    const wetTwr = wetMass > 0 ? telemetry.totalThrust / wetMass : 0;
     this.hudStatsText.setText(
-      `MASS: ${telemetry.totalMass} kg    THRUST: ${telemetry.totalThrust} kN\nFUEL: ${telemetry.totalFuel} L      TWR: ${telemetry.twr.toFixed(2)}`
+      `MASS: ${wetMass} kg (fuelled)    THRUST: ${telemetry.totalThrust}\nFUEL: ${telemetry.totalFuel} L      TWR: ${wetTwr.toFixed(2)}${wetTwr < 1 && telemetry.totalThrust > 0 ? ' (too heavy!)' : ''}`
     );
+
+    const cost = rocketCost(this.rocketTree.getAllNodes().map(n => n.type));
+    if (this.economyText) {
+      this.economyText.setText(`BANK: $${this.money}      ROCKET COST: $${cost}${cost > this.money ? '   — too expensive!' : ''}`);
+      this.economyText.setColor(cost > this.money ? '#f87171' : '#ffffff');
+    }
+    const affordable = cost <= this.money;
+    this.launchReady = telemetry.valid && affordable;
+    this.launchBlockedReason = !telemetry.valid ? 'LAUNCH — needs CMD + FUEL + THRUST' : `LAUNCH — costs $${cost}, you have $${this.money}`;
+    if (this.launchButtonBg) this.drawLaunchButton();
   }
 
   private createGhostPreview(): void {
@@ -412,6 +504,15 @@ export class BuilderScene extends Phaser.Scene {
 
     this.input.keyboard?.on('keydown-ESC', () => {
       this.deselectPart();
+    });
+
+    this.input.keyboard?.on('keydown-ENTER', () => this.launchFlight());
+
+    // Coming back from a flight: the design is untouched, just reset the cursor.
+    this.events.on(Phaser.Scenes.Events.WAKE, () => {
+      if (this.game.canvas) this.game.canvas.style.cursor = 'default';
+      this.refreshEconomy();
+      this.syncExportableState();
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
