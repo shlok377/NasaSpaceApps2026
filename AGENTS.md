@@ -86,6 +86,66 @@ Here's the technical handover and everything you need to hit the ground running:
 
 Take it away, fly safe! 🛰️
 
+#### 🟣 [Claude] - 2026-10-10 (Physics & Flight Engine Landed)
+**Update for Gemini**:
+- **Physics engine** (`src/physics/`, pure TS, no Phaser — fully unit-tested):
+  - `vehicle.ts` turns the builder tree into a `FlightVehicle`: dry/wet mass, thrust line, centre of mass, moment of inertia, drag area (per-column nose-cone vs blunt top), centre of pressure (cone/body/fin normal forces). `analyzeVehicle()` gives liftoff TWR, Δv, burn time, stability margin.
+  - `FlightSim.ts`: fixed-step (100 Hz) 2-D planet-centred sim — inverse-square gravity, thrust with Isp blending sea-level→vacuum, mass flow, barometric drag with transonic drag rise, aero normal force + pitch damping, thrust-offset torque, reaction wheel + engine gimbal, SAS, ground contact, crash (>10 m/s) and aerodynamic break-up (q·sin α > 6 kPa). Semi-implicit Euler keeps orbits closed.
+  - `orbit.ts`: Keplerian elements (Ap/Pe/period/escape) + conic sampling for the map. `mission.ts`: outcome (Orbit / Suborbital / Atmospheric / Failed), score, stars, and an "engineering debrief" tying results back to design choices.
+  - `constants.ts`: the planet is a **scaled Earth** (R = 200 km, g = 9.81, H = 4 km, atmosphere/edge of space = 40 km, orbit ≈ 1.3 km/s) so a well-built single stage *can* reach orbit. Swap in Earth values for realism.
+- **`FlightScene`** (`src/scenes/FlightScene.ts`): pad + countdown, flames/smoke, zoom-out camera, clouds → stars → curved horizon, flight-data HUD, attitude ball with prograde marker, minimap + full orbital map (M), time warp (`,`/`.`, capped 4× in atmosphere), explosion, debrief with Fly Again / Back to Builder.
+- **Builder hook (small edit in your scene, hope that's OK)**: added a `LAUNCH ▶ (ENTER)` button under the telemetry panel + Enter hotkey → `launchFlight()` sleeps the builder and launches `FlightScene`, so the design survives the round trip.
+- **Heads-up on units**: builder TWR is `thrust / mass` and `valid` uses dry mass, so thrust is effectively **kgf**, and fuel weight isn't counted. Physics uses 1 L fuel = 1 kg, so a "FLIGHT READY" rocket can still have liftoff TWR < 1 when fuelled (it then burns on the pad until light enough — the debrief explains it). Consider showing *wet* TWR in the builder HUD.
+- **Verification**: 31/31 tests (`npm test`, incl. an autopilot gravity turn that reaches orbit with the 3-engine reference design), `npm run typecheck`, `npm run build` all green. Played end-to-end in the browser (orbit + break-up + retry + back-to-builder).
+- **Next for you**: decouplers/staging parts would make orbit much easier — the sim already supports dropping mass; I'd just need a `stage()` that removes parts from the `FlightVehicle`. Rows 11–12 of the grid sit under the parts tray, so the lowest engines are hard to see/place.
+
+#### 🟣 [Claude] - 2026-10-10 (The Moon + Faster Pacing)
+**Update for Gemini**:
+- **The Moon is in**: 40 km radius, 0.8 m/s² gravity, circular orbit at 1,000 km (period ≈ 3.6 h), orbiting clockwise like an eastward launch. Real 3-body-ish gravity (planet + Moon act on the rocket), sphere of influence 135 km. Outcomes now go to 5★: Orbit (3★) → Lunar flyby / impact (4★) → Lunar orbit (4★) → **Moon landing (5★)**.
+- **Pacing**: planet gravity is now 6 m/s² (0.6 g) so builder rockets climb briskly (the basic rocket now lifts at TWR ≈ 1.9 and reaches orbit in ~4 min game time). Warp goes to **10,000×**: 10× in the atmosphere, 100× while burning/steering or within 30 km of the Moon, 10,000× while coasting — coasting uses a cheap long-step leapfrog integrator (`FlightSim.canCoast` / `coastStep`). A full launch → Moon landing takes ~1.5 min of real time.
+- **Map** shows a numerically predicted path (planet + Moon gravity) with an **ENCOUNTER** ghost-Moon marker so players can time the transfer burn; inside the Moon's SOI the map and camera switch to Moon-centred.
+- **Builder-relevant**: the pad readout now says what a design *can reach* (Suborbital / Orbit / Moon flyby / Moon landing) from its Δv: orbit ≈ 1,900 m/s, Moon flyby ≈ 2,150, landing ≈ 2,650. Worth surfacing in the builder HUD too. The 3-tank/1-centre-tank/3-engine design with cone + fins (Δv 2,712) lands on the Moon with ~30 kg spare.
+- **Verification**: 35/35 tests (incl. a Hohmann transfer that reaches the Moon, Moon landing vs impact, high-warp orbit stability), typecheck and build green; flew launch → orbit → transfer → landing in the browser.
+
+#### 🟣 [Claude] - 2026-10-10 (Fin Rule, Wind & Fun Layer)
+**Update for Gemini**:
+- **Flat shapes only** in flight (no window/stripe/crater details) — ready for sprites later. Your `src/graphics/TextureGenerator.ts` is still unused; I left it alone.
+- **Fin rule** (`FINS` in `constants.ts`): fewer than 2 fins ⇒ aerodynamically unstable (wobble grows, "WOBBLE!" warning); 2+ fins ⇒ stable but leans a few degrees into **gusty crosswind** (`physics/wind.ts`, jet stream ~9 km). Fins also add steering authority in thick air; fins all on one side make it lean. `FlightVehicle.finStable` / `VehicleReport.finStable` — worth showing "needs 2 fins" in the builder HUD.
+- **Arcade mercy**: touchdowns at 10–25 m/s bounce ("BOING!") instead of exploding.
+- **Fun layer** (`src/game/`, pure + tested): ★ stars and green fuel cans along the ascent arc, low orbit, deep space and around the Moon (fuel cans refill 12 % of capacity); `StuntTracker` awards flips, sonic boom, Max-Q, Moon skim, gravity slingshot, butter landing, escape velocity. Bonus adds to the mission score and is itemised in the debrief.
+- **Juice**: liftoff rumble/shake, sonic-boom shockwave ring, speed streaks, re-entry glow, score popups, pickups on the big map.
+- **Verification**: 45/45 tests, typecheck, build green; flew no-fin (wobbles) and 2-fin (stable, leans ≤ 8°) rockets in the browser.
+
+#### 🟣 [Claude] - 2026-10-10 (Mission Dashboard, Earth→Moon Track & Money)
+**Update for Gemini**:
+- **Flight HUD panels** (`src/ui/`): `MissionDashboard` (Height bar with best-height marker · Fuel ring · Mass segments · Money · "Simulate flight"/"End flight" button) along the bottom, and `MoonTrack` (Earth — LEO — Van Allen belt — 🚀 — Lunar approach — Moon, "X km of 760 km") along the top. Styling in `src/ui/theme.ts`.
+- **Money & records persist** (`src/game/progress.ts`, localStorage key `nasa2026.progress`): stars $3, fuel cans $1, stunts $1/100 pts, plus a mission payout (orbit $40 … Moon landing $250), banked when the flight ends. **Nothing spends money yet** — part prices in the builder would close the loop (that's the "Budget ($) vs Mass vs Δv" task); `loadProgress()` / `saveProgress()` are ready to use from `BuilderScene`.
+- **Verification**: 47/47 tests, typecheck, build green; clicked Simulate flight → orbit → End flight in the browser, confirmed $ and best height persist into the next flight.
+
+#### 🟣 [Claude] - 2026-10-10 (Faster Moon trip, clean HUD, cruise mini-game)
+**Update for Gemini** (player feedback: too slow, too much fuel, too much on screen, nothing to do in space):
+- **Rebalance**: Moon is now **fixed in the sky** (up-and-east of the pad, 650 km centre distance) — no launch windows/parking orbits; planet g = 5 m/s²; engines Isp 340/380 s. Flight runs at 3× real time; the coast auto-warps. A 3-engine/2-tank rocket goes pad → Moon landing in ~1:45 of real time.
+- **Guidance, not data**: a Moon arrow at the screen edge; engines auto-cut once the (drag-aware) trajectory prediction says ON COURSE; landing assist auto-points the rocket and **holding W flies an efficient suicide burn**; a speed/height readout appears next to the rocket only while landing.
+- **Cruise mini-game** (`src/game/cruise.ts`): during the coast, stars / fuel cans / warp rings / comets / rocks stream at the rocket; A/D slide it to grab or dodge (rocks cost 3 % fuel, never below 15 %).
+- **HUD rebuilt as game widgets** (`src/ui/`): JourneyArc (Earth→Moon arc, milestone flags that pay out), Altimeter (log scale, BEST flag), FuelTank (draining tank + mass), CoinCounter, LaunchButton (big red, with "Can reach the Moon — and land!" verdict). Old data panels/attitude ball/minimap/map view removed. Flight scene split into `src/scenes/flight/WorldRenderer.ts` + `Effects.ts`.
+- **Verification**: 50/50 tests, typecheck, build green; full launch → cruise → landing flown in the browser.
+
+#### 🟣 [Claude] - 2026-10-11 (Rebuild: compact Moo-style world, staging, missions, money)
+**Update for Gemini** — the user asked for Major Moo–style physics, so the flight model was rebuilt:
+- **Compact world** (`src/physics/constants.ts`, `bodies.ts`): flat ground, the Moon a 2 km-radius circle whose underside is 5 km above the pad. Earth's pull fades with height (L = 5 km), the Moon's takes over at ~4.77 km — then "down" flips and you land on the Moon's underside. One camera follows the rocket the whole way (~70 s real time pad → Moon landing).
+- **Physics** (`FlightSim.ts`, `vehicle.ts`): square 1 m cells; per-tank fuel drained outermost-first; **automatic staging** (a tank whose cluster has its own engine drops off when empty, if the rest can still fly); **joints snap** under air load / fast spin; rocks knock off the part they hit; debris tumbles in projectile motion. **No autopilot** — balance (thrust line vs centre of mass) decides whether it flies straight; A/D is a light nudge; attitude RCS works only with engines off (so you can flip to land, but can't fight a lopsided engine). Landing must be upright and < 10 m/s.
+- **Game layer** (`src/game/`): `missions.ts` (10 missions, goals + constraints + cash), `progress.ts` (money, completed missions, landing mode; $100 start; grant floor $50; half the rocket's cost refunded for landing it back home), `rocks.ts` (rock belt 3.3–4.3 km: near-miss combos, shields, rare fuel).
+- **⚠️ Your files, small edits**: `PartDefinition.cost` added in `src/core/types.ts` + `partDefinitions.ts` (CMD $0, tank $12, engine $20, cone $6, fin $4, block $3). `BuilderScene`: TWR now shown *fuelled*, a mission + bank badge under the controls helper, LAUNCH blocked with a reason when the rocket costs more than the bank, economy refreshed on wake.
+- **Verification**: 38/38 tests, typecheck, build green; flew staged rocket pad → boosters dropped → rock belt (near-miss combo, shield) → Moon landing (6 m/s, 30 % fuel), and a lopsided rocket that tips over on the pad.
+
+#### 🟣 [Claude] - 2026-10-11 (3-phase mission + JSON config + no zoom-out)
+**Update for Gemini** — the user asked for a three-phase mission flown as one continuous flight, and one file holding every tunable:
+- **`src/config/game.json`** (read via `src/config/index.ts` → `CONFIG`): part mass / fuel litres / thrust / cost, engine Isp, world, Moon, rock belt, airframe, fins, wind, steering, limits, camera scales, economy (start money, phase rewards), game speed, and every phase/problem number. **⚠️ Your file, small edit**: `partDefinitions.ts` now reads mass/fuel/thrust/cost from `CONFIG.parts` (same values as before).
+- **Gravity is now patched conics**: inside the Moon's sphere of influence (3.4 km from its centre) only the Moon pulls; outside, only Earth. That makes real orbits possible (`src/physics/orbit.ts`).
+- **Phases** (`src/game/phases.ts`, a pure `PhaseRunner` state machine, tested with a bot pilot in `phases.test.ts`): **1 Lunar orbiter**: hold an orbit with low ≥ 150 m, high ≤ 1,200 m for 3 s. **2 Lunar rover**: debris ring / stuck thruster / fuel leak (press F in the green) / orbit decay, then SPACE drops the rover onto the green zone (1 spare). **3 Human landing**: deorbit, then boulders move the site, the engine flames out (hold E), the radar fails. Each phase pays its reward on completion and saves a checkpoint; a failed phase 2/3 can be retried free from it.
+- **Camera**: no zoom during the climb (fixed 22 px/m, speed streaks + a growing Moon in the sky, red chevrons for rocks ahead); cuts to an orbit map inside the Moon's pull, then to descent/touchdown close-ups.
+- **Verification**: 46/46 tests, typecheck, build green; in the browser: climb, orbit capture → phase 2, all four problems, rover drop into the zone → phase 3, failed landing → retry phase 3 → easy-mode landing with flameout + radar failure → "Crew on the Moon".
+
 ---
 
 ## 📋 Task Board & Progress Tracker
@@ -101,15 +161,19 @@ Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLA
 - [ ] Staging sequencer (Stage 1, Stage 2, Decouplers).
 
 ### 🌌 Flight & Mission Simulation (Claude)
-- [/] [CLAIMED: CLAUDE] Create `FlightScene.ts` with launchpad camera and countdown timer.
-- [/] [CLAIMED: CLAUDE] Ascent physics loop: gravity, engine thrust curves, atmospheric density/drag.
-- [ ] Staging trigger system: spacebar to activate next stage & jettison spent stages.
-- [ ] In-flight HUD: altitude, velocity, fuel remaining, apogee tracker.
-- [ ] Mission outcome evaluation (Suborbital, Orbit achieved, or Mission Failed report).
+- [x] Create `FlightScene.ts` with launchpad camera and countdown timer.
+- [x] Ascent physics loop: gravity, engine thrust curves, atmospheric density/drag.
+- [x] Aerodynamic stability (CoM vs CoP), steering torque, SAS, Max-Q break-up.
+- [x] Orbital mechanics: apoapsis/periapsis, map view, time warp.
+- [x] Staging: empty booster clusters (tank + own engine) drop off automatically; joints snap under load. (A decoupler part could add manual staging.)
+- [x] In-flight HUD: altitude, velocity, fuel remaining, apogee tracker.
+- [x] Mission outcome evaluation (Suborbital, Orbit achieved, or Mission Failed report).
+- [x] The Moon: gravity, SOI, encounter prediction, lunar orbit & landing outcomes, high time warp.
+- [x] Fin rule (2+ fins), crosswind, bounce landings, pickups, stunts & screen juice.
 
 ### ⚖️ Shared Engineering & Mission Economy
-- [ ] Mission resource constraints: Budget ($) vs Mass (kg) vs Delta-V.
-- [ ] Mission selection / objectives menu (e.g., Low Earth Orbit, Moon Probe).
+- [x] Mission resource constraints: part prices, bank, launch cost, payouts, grant floor.
+- [x] Missions: 10 goals with constraints (`src/game/missions.ts`), shown in builder and on the pad.
 
 ---
 
