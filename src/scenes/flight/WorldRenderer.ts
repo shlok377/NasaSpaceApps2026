@@ -7,6 +7,7 @@ import { gravityAt, insideMoonSoi, localUp, moonAltitude, moonSurfacePoint } fro
 import { MOON, MOON_CENTER, ROCK_BELT, WORLD } from '../../physics/constants';
 import { FlightSim, FlightTelemetry } from '../../physics/FlightSim';
 import { FlightPart } from '../../physics/vehicle';
+import { GAME_ASSETS, getPartTextureKey } from '../../core/assets';
 
 export const SCREEN_CX = 640;
 export const SCREEN_CY = 400;
@@ -106,8 +107,12 @@ function partShape(p: FlightPart, h: number): number[] {
 export class WorldRenderer {
   public camera: Camera = { x: 0, y: 0, upAngle: Math.PI / 2, scale: CELL_PX, rocketScale: CELL_PX, mode: 'ASCENT' };
   private readonly skyGfx: Phaser.GameObjects.Graphics;
+  private readonly skyMoonSprite: Phaser.GameObjects.Image;
   private readonly worldGfx: Phaser.GameObjects.Graphics;
   private readonly rocketGfx: Phaser.GameObjects.Graphics;
+  private readonly partSpritesContainer: Phaser.GameObjects.Container;
+  private readonly partSpritesPool: Phaser.GameObjects.Image[] = [];
+  private activeSpriteCount = 0;
   private readonly labels: Phaser.GameObjects.Text[] = [];
   private labelIndex = 0;
   private clouds: Array<{ x: number; y: number; puffs: Array<{ dx: number; dy: number; r: number }> }> = [];
@@ -129,8 +134,10 @@ export class WorldRenderer {
     });
     this.dust = Array.from({ length: 34 }, () => ({ x: rng.realInRange(-30, 30), y: rng.realInRange(-20, 20) }));
     this.skyGfx = scene.add.graphics();
+    this.skyMoonSprite = scene.add.image(0, 0, GAME_ASSETS.UI_MOON.key).setVisible(false);
     this.worldGfx = scene.add.graphics();
     this.rocketGfx = scene.add.graphics();
+    this.partSpritesContainer = scene.add.container(0, 0);
   }
 
   /** World → screen, using the current camera. */
@@ -281,12 +288,12 @@ export class WorldRenderer {
       const r = 26 + 210 * k * k;
       const cx = 900 - Phaser.Math.Clamp(sim.state.x * 0.08, -200, 200) - 200 * k;
       const cy = 230 - 120 * k;
-      g.fillStyle(0xe5e7eb, 0.18 + 0.7 * (1 - air * 0.6));
-      g.fillCircle(cx, cy, r);
-      g.fillStyle(0x9ca3af, 0.35 * (1 - air * 0.6));
-      g.fillCircle(cx - r * 0.3, cy + r * 0.15, r * 0.18);
-      g.fillCircle(cx + r * 0.25, cy - r * 0.2, r * 0.12);
-      g.fillCircle(cx + r * 0.1, cy + r * 0.4, r * 0.09);
+      this.skyMoonSprite.setPosition(cx, cy);
+      this.skyMoonSprite.setDisplaySize(r * 2, r * 2);
+      this.skyMoonSprite.setAlpha(0.25 + 0.75 * (1 - air * 0.5));
+      this.skyMoonSprite.setVisible(true);
+    } else {
+      this.skyMoonSprite.setVisible(false);
     }
   }
 
@@ -694,11 +701,31 @@ export class WorldRenderer {
     }
   }
 
+  private renderPartSprite(p: FlightPart, sx: number, sy: number, rot: number, cellPx: number, alpha: number, fuelRemaining?: number): void {
+    let img = this.partSpritesPool[this.activeSpriteCount];
+    if (!img) {
+      img = this.scene.add.image(0, 0, GAME_ASSETS.PART_COCKPIT.key);
+      this.partSpritesContainer.add(img);
+      this.partSpritesPool.push(img);
+    }
+    this.activeSpriteCount++;
+
+    const texKey = getPartTextureKey(p.type, p.finOrientation, fuelRemaining);
+    img.setTexture(texKey);
+    img.setPosition(sx, sy);
+    img.setRotation(rot);
+    img.setDisplaySize(cellPx, cellPx);
+    img.setAlpha(alpha);
+    img.setVisible(true);
+  }
+
   private drawRocketAndDebris(sim: FlightSim, t: FlightTelemetry, alive: boolean, shield: boolean): void {
     const g = this.rocketGfx;
     g.clear();
     const cellPx = this.camera.rocketScale;
     const visual = cellPx / this.camera.scale; // metres-per-cell as drawn
+    this.activeSpriteCount = 0;
+    const useSprites = this.camera.mode !== 'ORBIT' && cellPx > 8;
 
     // Tumbling debris (not on the orbit map, where it would just be clutter).
     if (this.camera.mode !== 'ORBIT') {
@@ -712,11 +739,20 @@ export class WorldRenderer {
           const wy = d.y + da * Math.sin(d.theta) - du * Math.cos(d.theta);
           const sp = this.toScreen(wx, wy);
           if (sp.x < -100 || sp.x > 1380 || sp.y < -100 || sp.y > 820) continue;
-          this.drawPart(g, p, sp.x, sp.y, rot, cellPx, alpha);
+          if (useSprites) {
+            this.renderPartSprite(p, sp.x, sp.y, rot, cellPx, alpha, 0);
+          } else {
+            this.drawPart(g, p, sp.x, sp.y, rot, cellPx, alpha);
+          }
         }
       }
     }
-    if (!alive) return;
+    if (!alive) {
+      for (let i = this.activeSpriteCount; i < this.partSpritesPool.length; i++) {
+        this.partSpritesPool[i].setVisible(false);
+      }
+      return;
+    }
 
     const s = sim.state;
     const com = sim.com;
@@ -749,7 +785,17 @@ export class WorldRenderer {
         polygon(g, inner, true);
       });
     }
-    parts.forEach((p, i) => this.drawPart(g, p, positions[i].x, positions[i].y, rot, cellPx, 1));
+
+    if (useSprites) {
+      parts.forEach((p, i) => this.renderPartSprite(p, positions[i].x, positions[i].y, rot, cellPx, 1, sim.tanks.get(p.id)));
+    } else {
+      parts.forEach((p, i) => this.drawPart(g, p, positions[i].x, positions[i].y, rot, cellPx, 1));
+    }
+
+    // Hide any unused pooled sprites
+    for (let i = this.activeSpriteCount; i < this.partSpritesPool.length; i++) {
+      this.partSpritesPool[i].setVisible(false);
+    }
 
     if (shield) {
       const c = this.toScreen(s.x, s.y);

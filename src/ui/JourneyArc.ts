@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { formatDistance, TEXT_STYLE, UI } from './theme';
+import { GAME_ASSETS } from '../core/assets';
 
 export interface Milestone {
   label: string;
@@ -24,6 +25,8 @@ export interface JourneyState {
  */
 export class JourneyArc {
   private readonly gfx: Phaser.GameObjects.Graphics;
+  private readonly earthSprite: Phaser.GameObjects.Image;
+  private readonly moonSprite: Phaser.GameObjects.Image;
   private readonly distanceText: Phaser.GameObjects.Text;
   private readonly courseText: Phaser.GameObjects.Text;
   private readonly flagTexts: Phaser.GameObjects.Text[];
@@ -42,6 +45,9 @@ export class JourneyArc {
     backdrop.fillRoundedRect(cx - 320, 6, 640, 98, 18);
 
     this.gfx = scene.add.graphics();
+    this.earthSprite = scene.add.image(this.start.x, this.start.y, GAME_ASSETS.UI_EARTH.key).setDisplaySize(26, 26);
+    this.moonSprite = scene.add.image(this.end.x, this.end.y, GAME_ASSETS.UI_MOON.key).setDisplaySize(24, 24);
+
     const earth = scene.add.text(this.start.x, this.start.y + 18, 'Earth', TEXT_STYLE(12, UI.textMuted)).setOrigin(0.5, 0);
     const moon = scene.add.text(this.end.x, this.end.y + 18, 'Moon', TEXT_STYLE(12, UI.textMuted)).setOrigin(0.5, 0);
     this.flagTexts = milestones.map(m => {
@@ -51,7 +57,17 @@ export class JourneyArc {
     this.distanceText = scene.add.text(cx, 80, '', TEXT_STYLE(13)).setOrigin(0.5, 0);
     this.courseText = scene.add.text(this.end.x - 4, this.end.y - 34, 'ON COURSE', TEXT_STYLE(11, UI.greenText)).setOrigin(0.5, 1);
 
-    this.container = scene.add.container(0, 0, [backdrop, this.gfx, earth, moon, ...this.flagTexts, this.distanceText, this.courseText]);
+    this.container = scene.add.container(0, 0, [
+      backdrop,
+      this.gfx,
+      this.earthSprite,
+      this.moonSprite,
+      earth,
+      moon,
+      ...this.flagTexts,
+      this.distanceText,
+      this.courseText
+    ]);
   }
 
   public setVisible(visible: boolean): void {
@@ -87,18 +103,11 @@ export class JourneyArc {
       }
     }
 
-    // Earth and Moon.
-    g.fillStyle(UI.blue, 1);
-    g.fillCircle(this.start.x, this.start.y, 13);
-    g.fillStyle(UI.green, 1);
-    g.fillCircle(this.start.x - 4, this.start.y - 3, 5);
-    g.fillCircle(this.start.x + 5, this.start.y + 4, 3);
+    // Earth and Moon glow/aura when on course
     if (state.onCourse) {
       g.fillStyle(UI.green, 0.25 + 0.15 * Math.sin(time / 200));
-      g.fillCircle(this.end.x, this.end.y, 18);
+      g.fillCircle(this.end.x, this.end.y, 20);
     }
-    g.fillStyle(UI.moon, 1);
-    g.fillCircle(this.end.x, this.end.y, 10);
     this.courseText.setVisible(state.onCourse);
 
     // Milestone flags.

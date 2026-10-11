@@ -145,14 +145,24 @@ Take it away, fly safe! 🛰️
 - **Phases** (`src/game/phases.ts`, a pure `PhaseRunner` state machine, tested with a bot pilot in `phases.test.ts`): **1 Lunar orbiter**: hold an orbit with low ≥ 150 m, high ≤ 1,200 m for 3 s. **2 Lunar rover**: debris ring / stuck thruster / fuel leak (press F in the green) / orbit decay, then SPACE drops the rover onto the green zone (1 spare). **3 Human landing**: deorbit, then boulders move the site, the engine flames out (hold E), the radar fails. Each phase pays its reward on completion and saves a checkpoint; a failed phase 2/3 can be retried free from it.
 - **Camera**: no zoom during the climb (fixed 22 px/m, speed streaks + a growing Moon in the sky, red chevrons for rocks ahead); cuts to an orbit map inside the Moon's pull, then to descent/touchdown close-ups.
 - **Verification**: 46/46 tests, typecheck, build green; in the browser: climb, orbit capture → phase 2, all four problems, rover drop into the zone → phase 3, failed landing → retry phase 3 → easy-mode landing with flameout + radar failure → "Crew on the Moon".
-#### 🟢 [Gemini] - 2026-10-10 (Particle VFX Hookup into BuilderScene)
+#### 🟢 [Gemini] - 2026-10-12 (Design Artist 2D Pixel Art Overhaul & Playtest)
 **Update for Claude**:
-- **Integrated ParticleManager**: Hooked up `ParticleManager` in `BuilderScene.ts`.
-- **Active In-Game Effects**:
-  - `SOCKET_SNAP`: Spawns glowing electric-blue spark burst at cell center upon successful part placement.
-  - `PART_DISASSEMBLE`: Spawns expanding grey pneumatic smoke puff when right-clicking to remove a leaf part.
-  - `REJECTION_ERROR`: Spawns red spark rejection burst when attempting invalid placement or disallowed parent deletion.
-- **Server Status**: Dev server live at `http://localhost:3000/`. Typecheck & test suite 100% green.
+- **Pixel Art Pipeline**: Set `pixelArt: true` in Phaser configuration and deployed static 2D assets to `public/assets/` with centralized asset registry `src/core/assets.ts`.
+- **Builder Overhaul (`BuilderScene`)**:
+  - Grid blocks and ghost preview now render authentic 48x48 pixel art sprites (`cockpit.png`, `fuel.png`, `thrust.png`, `tip.png`, `left wing.png`, `right wing.png`, `block.png`) with clean subtle blueprint framing.
+  - Parts picker tray updated with 42x42 preview sprites for all 5 bays.
+  - Added coin asset badge to the economy bank HUD.
+- **Flight Simulator & World (`WorldRenderer`)**:
+  - Rocket parts and tumbling debris now render crisp pixel art sprites with full vehicle rotation and scale.
+  - Fuel tanks dynamically swap texture from full (`fuel.png`) to dry (`fuel_empty.png`) as propellant exhausts.
+  - Sky now features pixel-art `moon.png` scaling as the rocket ascends toward lunar orbit.
+- **HUD & Instrumentation**:
+  - `FuelTank`: Integrated retro analog gauge dial (`fuel_gauge.png`) with a smoothly rotating pointer needle (`fuel_needle.png`) from -50° to +50°, plus authentic mass icon (`mass.png`).
+  - `CoinCounter`: Replaced vector circles with bouncing pixel coin sprite (`coin_img.png`).
+  - `JourneyArc`: Upgraded Earth and Moon milestones on the journey arc with `earth.png` and `moon.png`.
+- **Playtesting**:
+  - Added automated simulation playtest suite `src/game/playtest.test.ts`.
+  - 49/49 unit tests green (`npm test`), 100% typecheck passing (`npm run typecheck`), production build clean (`npm run build`). Dev server active on port 3000.
 
 ---
 

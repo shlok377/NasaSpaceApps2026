@@ -28,6 +28,7 @@ import { JourneyArc, Milestone } from '../ui/JourneyArc';
 import { LaunchButton } from '../ui/LaunchButton';
 import { OrbitGauge, PhaseStrip, ProblemCard } from '../ui/PhaseHud';
 import { formatDistance, TEXT_STYLE, UI } from '../ui/theme';
+import { preloadGameAssets } from '../core/assets';
 import { Effects } from './flight/Effects';
 import { CameraMode, MissionOverlay, WorldRenderer, WORLD_COLORS } from './flight/WorldRenderer';
 
@@ -215,6 +216,10 @@ export class FlightScene extends Phaser.Scene {
     this.dropMarker = null;
     this.impactMarker = null;
     this.markerAt = -Infinity;
+  }
+
+  preload(): void {
+    preloadGameAssets(this);
   }
 
   create(): void {

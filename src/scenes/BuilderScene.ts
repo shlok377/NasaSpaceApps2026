@@ -5,6 +5,7 @@ import { loadProgress, saveProgress, withGrant } from '../game/progress';
 import { PART_DEFINITIONS } from '../core/partDefinitions';
 import { PartType, PortDirection, RocketNode } from '../core/types';
 import { ParticleManager } from '../particles';
+import { preloadGameAssets, getPartTextureKey, GAME_ASSETS } from '../core/assets';
 
 interface PaletteBay {
   type: PartType;
@@ -31,6 +32,7 @@ export class BuilderScene extends Phaser.Scene {
   private socketsContainer!: Phaser.GameObjects.Container;
   private ghostContainer!: Phaser.GameObjects.Container;
   private ghostGfx!: Phaser.GameObjects.Graphics;
+  private ghostSprite!: Phaser.GameObjects.Image;
   private ghostText!: Phaser.GameObjects.Text;
   private hudContainer!: Phaser.GameObjects.Container;
 
@@ -56,6 +58,10 @@ export class BuilderScene extends Phaser.Scene {
 
   constructor() {
     super('BuilderScene');
+  }
+
+  preload(): void {
+    preloadGameAssets(this);
   }
 
   create(): void {
@@ -198,21 +204,17 @@ export class BuilderScene extends Phaser.Scene {
     bayConfigs.forEach((cfg, idx) => {
       const bx = startX + idx * (bayWidth + baySpacing);
       const bayContainer = this.add.container(bx, bayY);
-      const def = PART_DEFINITIONS[cfg.type];
 
       // Bay background graphics
       const bgGfx = this.add.graphics();
       this.drawBayBg(bgGfx, false, bayWidth, bayHeight);
 
-      // Blank square icon preview (enlarged to 36x36)
-      const iconGfx = this.add.graphics();
-      iconGfx.fillStyle(def.color, 1);
-      iconGfx.fillRect(-18, -26, 36, 36);
-      iconGfx.lineStyle(2, 0xffffff, 0.8);
-      iconGfx.strokeRect(-18, -26, 36, 36);
+      // Pixel art icon preview (42x42)
+      const texKey = getPartTextureKey(cfg.type, 'LEFT');
+      const iconSprite = this.add.image(0, -10, texKey).setDisplaySize(42, 42);
 
       // Label below (clearly readable 13px bold)
-      const labelText = this.add.text(0, 22, cfg.label, {
+      const labelText = this.add.text(0, 24, cfg.label, {
         fontSize: '13px',
         color: '#ffffff',
         fontStyle: 'bold',
@@ -227,7 +229,7 @@ export class BuilderScene extends Phaser.Scene {
         fontFamily: 'system-ui, sans-serif'
       }).setOrigin(0.5);
 
-      bayContainer.add([bgGfx, iconGfx, labelText, hotkeyText]);
+      bayContainer.add([bgGfx, iconSprite, labelText, hotkeyText]);
       bayContainer.setSize(bayWidth, bayHeight);
       bayContainer.setInteractive(
         new Phaser.Geom.Rectangle(0, 0, bayWidth, bayHeight),
@@ -443,6 +445,7 @@ export class BuilderScene extends Phaser.Scene {
   private createGhostPreview(): void {
     this.ghostContainer.setVisible(false);
     this.ghostGfx = this.add.graphics();
+    this.ghostSprite = this.add.image(0, 0, GAME_ASSETS.PART_COCKPIT.key).setDisplaySize(BuilderScene.CELL_SIZE - 4, BuilderScene.CELL_SIZE - 4);
     this.ghostText = this.add.text(0, 0, '', {
       fontSize: '14px',
       color: '#ffffff',
@@ -452,7 +455,7 @@ export class BuilderScene extends Phaser.Scene {
       strokeThickness: 3
     }).setOrigin(0.5);
 
-    this.ghostContainer.add([this.ghostGfx, this.ghostText]);
+    this.ghostContainer.add([this.ghostGfx, this.ghostSprite, this.ghostText]);
   }
 
   public selectPaletteItem(type: PartType): void {
@@ -625,9 +628,13 @@ export class BuilderScene extends Phaser.Scene {
           displayLabel = validation.finOrientation === 'LEFT' ? 'L-FIN' : 'R-FIN';
         }
 
+        const texKey = getPartTextureKey(this.selectedPartType, validation.finOrientation ?? 'LEFT');
+        this.ghostSprite.setTexture(texKey);
+        this.ghostSprite.setVisible(true);
+        this.ghostSprite.setAlpha(0.85);
+        this.ghostSprite.clearTint();
+
         this.ghostGfx.clear();
-        this.ghostGfx.fillStyle(def.color, 0.55);
-        this.ghostGfx.fillRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
         this.ghostGfx.lineStyle(2.5, 0x22c55e, 1);
         this.ghostGfx.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
 
@@ -644,7 +651,13 @@ export class BuilderScene extends Phaser.Scene {
 
       this.ghostGfx.clear();
       if (isOccupied || hasAdjacentSocket) {
-        this.ghostGfx.fillStyle(0xef4444, 0.3);
+        const texKey = getPartTextureKey(this.selectedPartType, 'LEFT');
+        this.ghostSprite.setTexture(texKey);
+        this.ghostSprite.setVisible(true);
+        this.ghostSprite.setAlpha(0.4);
+        this.ghostSprite.setTint(0xef4444);
+
+        this.ghostGfx.fillStyle(0xef4444, 0.25);
         this.ghostGfx.fillRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
         this.ghostGfx.lineStyle(2.5, 0xef4444, 0.9);
         this.ghostGfx.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
@@ -653,6 +666,12 @@ export class BuilderScene extends Phaser.Scene {
         this.ghostText.setColor('#fca5a5');
       } else {
         // Empty cell not adjacent to any open socket - soft translucent guide
+        const texKey = getPartTextureKey(this.selectedPartType, 'LEFT');
+        this.ghostSprite.setTexture(texKey);
+        this.ghostSprite.setVisible(true);
+        this.ghostSprite.setAlpha(0.2);
+        this.ghostSprite.clearTint();
+
         this.ghostGfx.fillStyle(0x334155, 0.2);
         this.ghostGfx.fillRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
         this.ghostGfx.lineStyle(1.5, 0x64748b, 0.6);
@@ -666,9 +685,13 @@ export class BuilderScene extends Phaser.Scene {
 
     // Floating smoothly under cursor when outside grid
     this.ghostContainer.setPosition(pointer.worldX, pointer.worldY);
+    const texKey = getPartTextureKey(this.selectedPartType, 'LEFT');
+    this.ghostSprite.setTexture(texKey);
+    this.ghostSprite.setVisible(true);
+    this.ghostSprite.setAlpha(0.7);
+    this.ghostSprite.clearTint();
+
     this.ghostGfx.clear();
-    this.ghostGfx.fillStyle(def.color, 0.6);
-    this.ghostGfx.fillRect(-size / 2, -size / 2, size, size);
     this.ghostGfx.lineStyle(2, 0x94a3b8, 0.85);
     this.ghostGfx.strokeRect(-size / 2, -size / 2, size, size);
 
@@ -809,27 +832,29 @@ export class BuilderScene extends Phaser.Scene {
 
     const blockContainer = this.add.container(cx, cy);
 
-    // Clean blank colored square
+    // Pixel art sprite representing the part
+    const texKey = getPartTextureKey(node.type, node.finOrientation);
+    const sprite = this.add.image(0, 0, texKey).setDisplaySize(size - 2, size - 2);
+
+    // Subtle framing border
     const blockGfx = this.add.graphics();
-    blockGfx.fillStyle(def.color, 1);
-    blockGfx.fillRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
-    blockGfx.lineStyle(2, 0xffffff, 0.7);
+    blockGfx.lineStyle(1.5, 0xffffff, 0.35);
     blockGfx.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
 
     let displayLabel = def.label;
     if (node.type === 'COCKPIT') displayLabel = 'CMD';
     else if (node.type === 'FIN') displayLabel = node.finOrientation === 'LEFT' ? 'L-FIN' : 'R-FIN';
 
-    const label = this.add.text(0, 0, displayLabel, {
-      fontSize: node.type === 'FIN' ? '12px' : '14px',
+    const label = this.add.text(size / 2 - 4, size / 2 - 4, displayLabel, {
+      fontSize: '9px',
       color: '#ffffff',
       fontStyle: 'bold',
       fontFamily: 'system-ui, sans-serif',
       stroke: '#000000',
       strokeThickness: 3
-    }).setOrigin(0.5);
+    }).setOrigin(1, 1);
 
-    blockContainer.add([blockGfx, label]);
+    blockContainer.add([sprite, blockGfx, label]);
     this.blocksContainer.add(blockContainer);
     this.blockDisplayMap.set(node.id, blockContainer);
   }
