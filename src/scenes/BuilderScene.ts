@@ -4,6 +4,7 @@ import { currentMission, rocketCost } from '../game/missions';
 import { loadProgress, saveProgress, withGrant } from '../game/progress';
 import { PART_DEFINITIONS } from '../core/partDefinitions';
 import { PartType, PortDirection, RocketNode } from '../core/types';
+import { ParticleManager } from '../particles';
 
 interface PaletteBay {
   type: PartType;
@@ -40,6 +41,7 @@ export class BuilderScene extends Phaser.Scene {
 
   private selectedPartType: PartType | null = null;
   public paletteBays: PaletteBay[] = [];
+  public particleManager!: ParticleManager;
 
   // HUD text objects
   private hudStatusText!: Phaser.GameObjects.Text;
@@ -66,8 +68,9 @@ export class BuilderScene extends Phaser.Scene {
     // Centered vertically: (720 - 702) / 2 = 9 (fills screen with UI floating on top)
     this.gridOriginY = Math.round((this.scale.height - totalGridHeight) / 2);
 
-    // 2. Initialize core RocketTree model (immovable Cockpit at center column 7, row 8)
+    // 2. Initialize core RocketTree model & ParticleManager
     this.rocketTree = new RocketTree(7, 8);
+    this.particleManager = new ParticleManager(this);
 
     // 3. Rendering layers in order
     this.sceneryGraphics = this.add.graphics();
@@ -90,6 +93,7 @@ export class BuilderScene extends Phaser.Scene {
     this.syncExportableState('[RocketBuilder] Initialized rocket:');
     (window as unknown as { __ROCKET_TREE__: RocketTree }).__ROCKET_TREE__ = this.rocketTree;
     (window as unknown as { __BUILDER_SCENE__: BuilderScene }).__BUILDER_SCENE__ = this;
+    (window as unknown as { __PARTICLE_MANAGER__: ParticleManager }).__PARTICLE_MANAGER__ = this.particleManager;
 
     // 5. Keep input bounds strictly synchronized with window layout/scroll
     this.scale.updateBounds();
@@ -692,6 +696,11 @@ export class BuilderScene extends Phaser.Scene {
       this.updateGhostPreview(pointer);
       this.syncExportableState('[RocketBuilder] Part attached:');
 
+      // VFX: Trigger snap burst particles
+      const snapX = this.gridOriginX + attachResult.node.gridX * BuilderScene.CELL_SIZE + BuilderScene.CELL_SIZE / 2;
+      const snapY = this.gridOriginY + attachResult.node.gridY * BuilderScene.CELL_SIZE + BuilderScene.CELL_SIZE / 2;
+      this.particleManager.triggerEffect('SOCKET_SNAP', snapX, snapY);
+
       // Docking tactile bounce
       const blockContainer = this.blockDisplayMap.get(attachResult.node.id);
       if (blockContainer) {
@@ -704,6 +713,9 @@ export class BuilderScene extends Phaser.Scene {
           ease: 'Back.easeOut'
         });
       }
+    } else {
+      // VFX: Rejection error burst when attempting invalid placement
+      this.particleManager.triggerEffect('REJECTION_ERROR', pointer.worldX, pointer.worldY);
     }
   }
 
@@ -723,6 +735,12 @@ export class BuilderScene extends Phaser.Scene {
 
     const removeResult = this.rocketTree.removeNode(targetNode.id);
     if (removeResult.success) {
+      // VFX: Disassemble puff particles
+      const size = BuilderScene.CELL_SIZE;
+      const rx = this.gridOriginX + col * size + size / 2;
+      const ry = this.gridOriginY + row * size + size / 2;
+      this.particleManager.triggerEffect('PART_DISASSEMBLE', rx, ry);
+
       this.renderRocket();
       this.syncExportableState('[RocketBuilder] Part removed:');
     } else {
@@ -735,6 +753,9 @@ export class BuilderScene extends Phaser.Scene {
     const size = BuilderScene.CELL_SIZE;
     const cx = this.gridOriginX + node.gridX * size + size / 2;
     const cy = this.gridOriginY + node.gridY * size + size / 2;
+
+    // VFX: Rejection error burst on forbidden deletion
+    this.particleManager.triggerEffect('REJECTION_ERROR', cx, cy);
 
     const flash = this.add.graphics();
     flash.setPosition(cx, cy);
