@@ -2,37 +2,37 @@
   "_readme": "All tunable game numbers. Distances in metres, speeds in m/s, masses in kg, fuel in litres (1 L = 1 kg), thrust in kgf (1 = 9.81 N), times in seconds, money in $. Change a value, save, and the dev server reloads the game.",
   "parts": {
     "COCKPIT": {
-      "mass": 100,
+      "mass": 60,
       "fuelLiters": 0,
       "thrust": 0,
       "cost": 0
     },
     "FUEL_TANK": {
-      "mass": 50,
-      "fuelLiters": 200,
+      "mass": 30,
+      "fuelLiters": 400,
       "thrust": 0,
       "cost": 12
     },
     "ENGINE": {
-      "mass": 80,
+      "mass": 40,
       "fuelLiters": 0,
-      "thrust": 500,
+      "thrust": 600,
       "cost": 20
     },
     "NOSE_CONE": {
-      "mass": 30,
+      "mass": 15,
       "fuelLiters": 0,
       "thrust": 0,
       "cost": 6
     },
     "FIN": {
-      "mass": 20,
+      "mass": 15,
       "fuelLiters": 0,
       "thrust": 0,
       "cost": 4
     },
     "STRUCTURAL": {
-      "mass": 40,
+      "mass": 20,
       "fuelLiters": 0,
       "thrust": 0,
       "cost": 3

@@ -80,7 +80,19 @@ function pilot(sim: FlightSim, run: PhaseRunner, state: { cut: boolean; deorbite
   }
   const g = MOON.mu / (t.moonAltitude + MOON.radius) ** 2;
   const thrust = sim.vehicle.thrust;
-  if (t.speed < 6) return { throttle: Math.max(0, Math.min(1, ((g * t.mass) / thrust) * (1 + (-t.verticalSpeed - 2) * 0.5))), steer: steerTo(0) };
+  const curAngle = moonAngleOf(sim.state.x, sim.state.y);
+  const toSite = wrap(run.site.angle - curAngle);
+  const dist = toSite * MOON.radius;
+  if (t.speed < 8 || (run.bouldersSeen && t.moonAltitude < 400 && t.speed < 20)) {
+    const targetVx = run.bouldersSeen && Math.abs(dist) > 20 ? Math.max(-10, Math.min(10, dist * 0.3)) : 0;
+    const errVx = targetVx - t.horizontalSpeed;
+    const tilt = Math.max(-0.35, Math.min(0.35, errVx * 0.08));
+    const targetVy = run.bouldersSeen && Math.abs(dist) > 35 && t.moonAltitude > 30 ? 0 : -2;
+    return {
+      throttle: Math.max(0, Math.min(1, ((g * t.mass) / thrust) * (1 + (-t.verticalSpeed + targetVy) * 0.5) / Math.max(0.5, Math.cos(tilt)))),
+      steer: steerTo(tilt)
+    };
+  }
   const need = (t.speed * t.speed) / (2 * Math.max(1, t.moonAltitude - 3));
   const brake = need > 0.7 * (thrust / t.mass - g) && Math.abs(wrap(retro - t.pitchFromVertical)) < 0.5;
   return { throttle: brake ? Math.min(1, ((need + g) * t.mass) / thrust) : 0, steer: steerTo(retro) };

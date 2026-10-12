@@ -30,11 +30,18 @@ export class Effects {
   private readonly gfx: Phaser.GameObjects.Graphics;
   private sparks: Spark[] = [];
   private rings: Ring[] = [];
-  private popups: Array<{ text: Phaser.GameObjects.Text; age: number }> = [];
+  private readonly popupPool: Array<{ text: Phaser.GameObjects.Text; age: number; active: boolean }> = [];
   private readonly streaks = Array.from({ length: 36 }, () => ({ x: Math.random() * 1280, y: Math.random() * 720, len: 30 + Math.random() * 70 }));
 
-  constructor(private readonly scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, maxPopups = 16) {
     this.gfx = scene.add.graphics();
+    for (let i = 0; i < maxPopups; i++) {
+      const text = scene.add.text(0, 0, '', TEXT_STYLE(18, '#ffffff'))
+        .setOrigin(0.5)
+        .setDepth(50)
+        .setVisible(false);
+      this.popupPool.push({ text, age: 0, active: false });
+    }
   }
 
   public explode(x: number, y: number): void {
@@ -64,8 +71,33 @@ export class Effects {
   }
 
   public popup(x: number, y: number, label: string, color: string, size = 18): void {
-    const offset = this.popups.length * 24;
-    this.popups.push({ text: this.scene.add.text(x, y - offset, label, TEXT_STYLE(size, color)).setOrigin(0.5).setDepth(50), age: 0 });
+    let target = this.popupPool.find(p => !p.active);
+    if (!target) {
+      let oldestAge = -1;
+      let oldestIdx = 0;
+      for (let i = 0; i < this.popupPool.length; i++) {
+        if (this.popupPool[i].age > oldestAge) {
+          oldestAge = this.popupPool[i].age;
+          oldestIdx = i;
+        }
+      }
+      target = this.popupPool[oldestIdx];
+    }
+
+    let activeCount = 0;
+    for (let i = 0; i < this.popupPool.length; i++) {
+      if (this.popupPool[i].active) activeCount++;
+    }
+    const offset = activeCount * 24;
+
+    target.active = true;
+    target.age = 0;
+    target.text.setText(label);
+    target.text.setColor(color);
+    target.text.setFontSize(`${size}px`);
+    target.text.setPosition(x, y - offset);
+    target.text.setAlpha(1);
+    target.text.setVisible(true);
   }
 
   public update(realDt: number, t: FlightTelemetry, cruising: boolean): void {
@@ -82,22 +114,43 @@ export class Effects {
         if (st.y > 820) st.y -= 920;
       }
     }
-    for (const sp of this.sparks) {
+
+    let writeSparks = 0;
+    for (let i = 0; i < this.sparks.length; i++) {
+      const sp = this.sparks[i];
       if (!sp.fireball) sp.vy += 220 * realDt;
       sp.x += sp.vx * realDt;
       sp.y += sp.vy * realDt;
       sp.age += realDt;
+      if (sp.age < sp.life) {
+        if (writeSparks !== i) this.sparks[writeSparks] = sp;
+        writeSparks++;
+      }
     }
-    this.sparks = this.sparks.filter(sp => sp.age < sp.life);
-    for (const r of this.rings) r.age += realDt;
-    this.rings = this.rings.filter(r => r.age < r.life);
-    for (const p of this.popups) {
+    this.sparks.length = writeSparks;
+
+    let writeRings = 0;
+    for (let i = 0; i < this.rings.length; i++) {
+      const r = this.rings[i];
+      r.age += realDt;
+      if (r.age < r.life) {
+        if (writeRings !== i) this.rings[writeRings] = r;
+        writeRings++;
+      }
+    }
+    this.rings.length = writeRings;
+
+    for (let i = 0; i < this.popupPool.length; i++) {
+      const p = this.popupPool[i];
+      if (!p.active) continue;
       p.age += realDt;
       p.text.y -= 45 * realDt;
       p.text.setAlpha(Math.min(1, 2 * (1 - p.age / POPUP_LIFE)));
+      if (p.age >= POPUP_LIFE) {
+        p.active = false;
+        p.text.setVisible(false);
+      }
     }
-    for (const p of this.popups.filter(q => q.age >= POPUP_LIFE)) p.text.destroy();
-    this.popups = this.popups.filter(p => p.age < POPUP_LIFE);
   }
 
   public draw(t: FlightTelemetry, rocket: { x: number; y: number }, alive: boolean, cruising: boolean): void {

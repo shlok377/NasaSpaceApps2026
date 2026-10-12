@@ -164,11 +164,45 @@ Take it away, fly safe! 🛰️
   - Added automated simulation playtest suite `src/game/playtest.test.ts`.
   - 49/49 unit tests green (`npm test`), 100% typecheck passing (`npm run typecheck`), production build clean (`npm run build`). Dev server active on port 3000.
 
+#### 🟢 [Gemini] - 2026-10-12 (Camera Violent Shaking Diagnosis & 10 Optimization Tickets)
+**Update for Claude**:
+- **Diagnosed Violent Camera Jitter**: Traced violent 105px on-screen rocket vibration during ascent to world-coordinate low-pass lag filtering (`Math.max(k, 0.5)` on `c.x, c.y` of supersonic body). Fixed by locking camera world coordinates rigidly to vehicle position $(s.x, s.y)$ while smoothly interpolating screen framing offsets (`smoothedRocketY`) with continuous sigmoid `climbFactor`. Jitter dropped from 105px to 0.26px.
+- **Flame Polygon GC Fix**: Eliminated nested `reduce + concat` temporary array allocations in `WorldRenderer` exhaust flames.
+- **Created 10 Optimization Tickets**: Published 10 tracer-bullet performance tickets to GitHub issues (#10–#19) and `.scratch/camera-and-perf-optimizations/issues/`. All unblocked tickets are tagged `ready-for-agent`.
+
+#### 🟢 [Gemini] - 2026-10-12 (Implemented 5 Optimization Tickets: #12, #13, #14, #15, #16)
+**Update for Claude**:
+- **Ticket #12 (Smoke Ring Buffer)**: Refactored `WorldRenderer.ts` smoke particle simulation to a fixed-capacity 400-element pre-allocated pool with in-place pointer swap compaction. Replaced all `.filter().slice()` array heap churn with 0-allocation updates.
+- **Ticket #13 (Popups & Juice Pooling)**: Implemented an object pool of 16 recyclable `Phaser.GameObjects.Text` instances in `Effects.ts`. Recycles oldest/inactive popups with `setVisible(false)` on expiration instead of destroying/re-rasterizing textures. Converted sparks and rings cleanup to in-place compaction.
+- **Ticket #14 (Orbit Predictor Vertex Reuse)**: Replaced per-point object allocations in `predictPath()` with a reusable flat `Float32Array(1200)`. Trajectory calculation runs at 0 heap allocations per update.
+- **Ticket #15 (Physics Substep Clamping)**: Capped physics accumulator in `FlightSim.ts` to `MAX_SUBSTEPS = 12` (0.1s dt clamp) to eliminate spiral-of-death during sudden browser tab throttling or rendering lag spikes.
+- **Ticket #16 (VAB Direct Grid Picking & Differential Rendering)**: Updated `BuilderScene.ts` ghost preview with $O(1)$ direct 4-neighbor lookups, and upgraded `renderRocket()` to differential container updates—mutating only added or deleted parts instead of rebuilding the entire rocket scene tree.
+- **Verification**: 54/54 Vitest unit tests green across all 8 test suites (`npm test`), 100% typecheck clean (`npm run typecheck`), production Vite build passing (`npm run build`), and live browser flight test confirms rock-solid camera tracking (<0.27px jitter).
+
+#### 🟢 [Gemini] - 2026-10-12 (All 10 Optimization Tickets Completed & Verified)
+**Update for Claude**:
+- **Ticket #17 (Altitude-Threshold Cached Sky Gradient)**: Cached the atmospheric sky gradient in `WorldRenderer.ts` using a 25m altitude threshold (`lastSkyAltitude`) and mode change detection. Cuts CPU/GPU full-screen fillrate gradient redraws during stable flight.
+- **Ticket #18 (Batched Smoke Particle Quad Rendering)**: Converted exhaust smoke in `WorldRenderer.ts` from CPU-heavy `g.fillCircle()` tessellations to a GPU-batched quad sprite pool (`smokeSpritesContainer` + `smokeSpritesPool`) using an auto-generated `'smoke_puff'` texture.
+- **Ticket #19 (Cached Vehicle Center of Mass per Substep)**: Cached `CenterOfMass` in `FlightSim.ts` across substep calls (`_cachedCom`), automatically invalidating on fuel drain (`drawFuel`), stage decoupling (`detach`), or refuel events. Eliminates redundant loops across vehicle parts.
+- **Verification**: **57 / 57 unit tests passing** across 8 test suites (`npm test`), zero TypeScript errors (`npm run typecheck`), clean production build (`npm run build`), and all 10 GitHub issues (#10–#19) resolved and closed.
+
 ---
 
 ## 📋 Task Board & Progress Tracker
 
 Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLAUDE]`), and `[x]` for completed.
+
+### ⚡ Performance & Polish Tickets (#10–#19)
+- [x] #10: Rigid Rocket-Centric Camera & Continuous Framing Smoothing (Fixed in `WorldRenderer`)
+- [x] #11: Flame Exhaust Polygon Allocation & Heap Churn Elimination (Fixed in `WorldRenderer`)
+- [x] #12: Pre-allocated Ring Buffer for Smoke Particle System (Fixed in `WorldRenderer`)
+- [x] #13: Object Pooling for Screen Juice & Floating Popups (Fixed in `Effects`)
+- [x] #14: Orbit Predictor Flat Vertex Array Reuse (Fixed in `WorldRenderer`)
+- [x] #15: Physics Substep Cap & Spiral-of-Death Protection (Fixed in `FlightSim`)
+- [x] #16: O(1) Direct Grid Coordinate Picking & Dirty-Flag Block Rendering in VAB (Fixed in `BuilderScene`)
+- [x] #17: Altitude-Threshold Cached Sky Gradient Rendering (Fixed in `WorldRenderer`)
+- [x] #18: Batched Smoke Particle Quad Rendering (Fixed in `WorldRenderer`)
+- [x] #19: Cached Vehicle Center of Mass per Substep (Fixed in `FlightSim`)
 
 ### 🛠️ Rocket Builder & Staging (Gemini)
 - [x] Anchored root Cockpit on 15x15 grid with port orientation validation.

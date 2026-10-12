@@ -643,14 +643,16 @@ export class BuilderScene extends Phaser.Scene {
         return;
       }
 
-      // Check if occupied or adjacent to socket for invalid indicator
+      // Direct O(1) check if occupied or adjacent to any existing block
       const isOccupied = this.rocketTree.getNodeAt(col, row) !== undefined;
-      const hasAdjacentSocket = this.rocketTree.getAvailablePorts().some(
-        p => p.targetGridX === col && p.targetGridY === row
-      );
+      const hasAdjacentNeighbor =
+        this.rocketTree.getNodeAt(col, row - 1) !== undefined ||
+        this.rocketTree.getNodeAt(col, row + 1) !== undefined ||
+        this.rocketTree.getNodeAt(col - 1, row) !== undefined ||
+        this.rocketTree.getNodeAt(col + 1, row) !== undefined;
 
       this.ghostGfx.clear();
-      if (isOccupied || hasAdjacentSocket) {
+      if (isOccupied || hasAdjacentNeighbor) {
         const texKey = getPartTextureKey(this.selectedPartType, 'LEFT');
         this.ghostSprite.setTexture(texKey);
         this.ghostSprite.setVisible(true);
@@ -812,13 +814,25 @@ export class BuilderScene extends Phaser.Scene {
 
   public renderRocket(): void {
     this.tweens.killTweensOf(this.socketsContainer.list);
-    this.blocksContainer.removeAll(true);
-    this.blockDisplayMap.clear();
     this.socketsContainer.removeAll(true);
 
     const nodes = this.rocketTree.getAllNodes();
+    const activeNodeIds = new Set(nodes.map(n => n.id));
+
+    // Remove only deleted block containers
+    for (const [id, container] of this.blockDisplayMap.entries()) {
+      if (!activeNodeIds.has(id)) {
+        this.tweens.killTweensOf(container);
+        container.destroy();
+        this.blockDisplayMap.delete(id);
+      }
+    }
+
+    // Add containers only for newly added nodes
     for (const node of nodes) {
-      this.renderBlock(node);
+      if (!this.blockDisplayMap.has(node.id)) {
+        this.renderBlock(node);
+      }
     }
 
     this.renderAvailableSockets();
