@@ -235,11 +235,29 @@ Take it away, fly safe! 🛰️
 - **Published Tickets #26–#28**: Created local specs in `.scratch/twr-gauge-repurpose/issues/` and published GitHub issues #26, #27, #28 with `ready-for-agent` labels.
 - **Recalibrated Needle Scale (0° to 100°)**: Normalized TWR needle angle representation to rotate cleanly from $0^\circ$ (idle / pad rest) all the way to $100^\circ$ (peak punch), with center tick at $50^\circ$ and red boundary at $25^\circ$. All 63 tests passing.
 
+#### 🟢 [Gemini] - 2026-10-19 (Debris Challenge Overhaul: Evasive Lane Runner & Bullet-Time Tickets #29–#33)
+**Update for Claude**:
+- **Diagnosed Debris Challenge Problem**: Ascent through the 2,700m–3,400m rock belt was humanly impossible to dodge due to vacuum rotational inertia and rocks rushing down at >3,600 px/s with only 4 m/s² lateral RCS.
+- **Concluded /grill-me Session & Published Tickets #29–#33**: Created vertical slice tracer-bullet tickets on GitHub (#29–#33) and `.scratch/debris-lane-runner/issues/`.
+- **Ticket #29 (5-Lane Track Spawner & Telegraphed Wave Generator)**: Procedural wave spawner in `rocks.ts` across 5 discrete lanes `[-20m, -10m, 0m, +10m, +20m]`. Guarantees 1–2 open safe lanes per wave and places shields/fuel pickups in safe corridors.
+- **Ticket #30 (Manual Space Prompt & Bullet-Time Activation Flow)**: At 2,400m, HUD displays a 3s countdown prompt: `DEBRIS FIELD AHEAD: PRESS [SPACE] TO ENGAGE EVASIVE RUNNER`. Pressing SPACE drops simulation time step to 35% speed (bullet-time) and aligns target lane to nearest lane. Missing the prompt leaves standard physics active as a strict manual challenge.
+- **Ticket #31 (Center-Locked Camera, Retro Runway Lines & Threat HUD)**: When active, camera smoothly centers on $x=0$, rendering retro dotted runway lines with $L1$–$L5$ markers and top threat chevrons on incoming danger lanes.
+- **Ticket #32 (Snappy 120ms Lane Shifting Controls & Thruster FX)**: Tapping A/D or Left/Right arrows glides the rocket to adjacent lanes in 120ms with lateral RCS thruster smoke puffs and a subtle starfighter banking tilt (±10°), with attitude strictly upright ($\theta = \pi/2 + \text{tilt}$).
+- **Ticket #33 (Major-Moo Physical Collisions, Combos & Seamless Exit Restoration)**: Colliding with a rock shears off outer parts into tumbling debris (unless protected by a shield); near misses award combo score; at 3,400m, runway lines fade out, speed ramps back to 100%, camera unlocks, and banner displays `DEBRIS CLEARED // FULL THRUST RESTORED`.
+- **Verification**: 76/76 unit tests green across all 11 test suites (`npm test`), 100% clean TypeScript typecheck (`npm run typecheck`), production Vite build clean (`npm run build`).
+
 ---
 
 ## 📋 Task Board & Progress Tracker
 
 Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLAUDE]`), and `[x]` for completed.
+
+### 🛡️ Debris Challenge Overhaul: Evasive Lane Runner (#29–#33)
+- [x] #29: 01: 5-Lane Track Spawner & Telegraphed Wave Generator (`rocks.ts`, `game.json`)
+- [x] #30: 02: Manual Space Prompt & Bullet-Time Activation Flow (`evasiveRunner.ts`, `FlightScene.ts`)
+- [x] #31: 03: Center-Locked Camera, Retro Runway Lines & Threat HUD (`WorldRenderer.ts`)
+- [x] #32: 04: Snappy 120ms Lane-Shifting Controls & Thruster FX (`evasiveRunner.ts`, `FlightScene.ts`, `WorldRenderer.ts`)
+- [x] #33: 05: Major-Moo Physical Collisions, Combos & Seamless Exit Restoration (`FlightScene.ts`, `WorldRenderer.ts`, `evasive_runner.test.ts`)
 
 ### 🎛️ TWR Analog Gauge Repurpose & 3-Column Cockpit HUD Tickets (#26–#28)
 - [x] #26: 01: Decouple Analog Dial from Fuel Tank & Declutter Liquid Tank Column (`FuelTank.ts`)

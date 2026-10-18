@@ -14,7 +14,8 @@ import {
   PROBLEM_INFO
 } from '../game/phases';
 import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, PlayerProgress, saveProgress } from '../game/progress';
-import { checkBelt, Combo, generateBelt, Rock } from '../game/rocks';
+import { checkBelt, Combo, generateBelt, generateLaneWaves, Rock } from '../game/rocks';
+import { createEvasiveRunnerState, EvasiveRunnerState, updateEvasiveRunner, RUNNER_CONFIG } from '../game/evasiveRunner';
 import { Award, StuntTracker } from '../game/stunts';
 import { gravityAt, localUp, moonSoiAltitude } from '../physics/bodies';
 import { ENGINE, FINS, G0, LIMITS, ROCK_BELT, WORLD } from '../physics/constants';
@@ -177,6 +178,9 @@ export class FlightScene extends Phaser.Scene {
   private dropMarker: { x: number; y: number } | null = null;
   private impactMarker: { x: number; y: number } | null = null;
   private markerAt = -Infinity;
+  public runnerState: EvasiveRunnerState = createEvasiveRunnerState();
+  private spacePressedThisFrame = false;
+  private laneSteerInput = 0;
 
   constructor() {
     super('FlightScene');
@@ -202,6 +206,9 @@ export class FlightScene extends Phaser.Scene {
     this.repairPressed = false;
     this.timeScale = 1;
     this.titleTimer = 0;
+    this.runnerState = createEvasiveRunnerState();
+    this.spacePressedThisFrame = false;
+    this.laneSteerInput = 0;
     this.progress = loadProgress();
     this.progressBeforeFinish = null;
     this.checkpoint = null;
@@ -327,8 +334,15 @@ export class FlightScene extends Phaser.Scene {
     this.keys = this.input.keyboard!.addKeys('W,S,SHIFT,CTRL,Z,X,A,D,E,F,LEFT,RIGHT,UP,DOWN,SPACE,ENTER,ESC,R,B,L') as Keys;
     this.keys.SPACE.on('down', () => {
       if (this.sim.phase === 'PRELAUNCH') this.startCountdown();
+      else if (this.runnerState.promptActive) this.spacePressedThisFrame = true;
       else if (this.runner.dropRover(this.sim)) this.fx.ring(this.world.rocketScreen(this.sim).x, this.world.rocketScreen(this.sim).y, WORLD_COLORS.rover, 50, 0.5);
     });
+    const onLeftDown = () => { if (this.runnerState.active) this.laneSteerInput = -1; };
+    const onRightDown = () => { if (this.runnerState.active) this.laneSteerInput = 1; };
+    this.keys.A.on('down', onLeftDown);
+    this.keys.LEFT.on('down', onLeftDown);
+    this.keys.D.on('down', onRightDown);
+    this.keys.RIGHT.on('down', onRightDown);
     this.keys.F.on('down', () => (this.repairPressed = true));
     this.keys.Z.on('down', () => (this.throttle = 1));
     this.keys.X.on('down', () => (this.throttle = 0));
@@ -372,7 +386,7 @@ export class FlightScene extends Phaser.Scene {
   }
 
   private currentInput(t: FlightTelemetry): ControlInput {
-    const steer = this.steerKey();
+    const steer = this.runnerState.active ? 0 : this.steerKey();
     if (this.landingAssist) {
       const k = this.keys;
       const braking = k.W.isDown || k.UP.isDown || k.SHIFT.isDown || k.Z.isDown;
@@ -420,11 +434,43 @@ export class FlightScene extends Phaser.Scene {
     let t = this.sim.getTelemetry();
 
     if (!this.result) {
+      const ev = updateEvasiveRunner(
+        this.runnerState,
+        t.earthAltitude,
+        dt,
+        this.spacePressedThisFrame,
+        this.laneSteerInput,
+        this.sim.state.x
+      );
+      this.spacePressedThisFrame = false;
+      this.laneSteerInput = 0;
+
+      if (ev.promptTriggered) {
+        this.showBanner(`DEBRIS FIELD AHEAD: PRESS [SPACE] TO ENGAGE EVASIVE RUNNER (${Math.ceil(this.runnerState.promptTimer)}s)`, '#38bdf8');
+      }
+      if (ev.engaged) {
+        this.rocks = generateLaneWaves(Math.floor(Math.random() * 1e9));
+        const p = this.world.rocketScreen(this.sim);
+        this.fx.ring(p.x, p.y, WORLD_COLORS.shield, 180, 0.6);
+        this.showBanner('EVASIVE RUNNER ENGAGED // TIME DILATION 35%', '#22d3ee');
+      }
+      if (ev.cleared) {
+        this.showBanner('DEBRIS CLEARED // FULL THRUST RESTORED', '#34d399');
+      }
+
       this.readThrottle(dt);
       this.tickCountdown(dt);
-      this.timeScale = this.runner.timeScale(this.sim);
+      this.timeScale = this.runnerState.active ? RUNNER_CONFIG.timeScale : this.runner.timeScale(this.sim);
       const gameDt = dt * GAME_SPEED * this.timeScale;
       this.sim.advance(gameDt, this.currentInput(t));
+
+      if (this.runnerState.active) {
+        this.sim.state.x = this.runnerState.currentX;
+        this.sim.state.vx = 0;
+        this.sim.state.omega = 0;
+        this.sim.state.theta = Math.PI / 2 + this.runnerState.tilt;
+      }
+
       if (this.launched) this.runner.update(this.sim, gameDt, { repairPressed: this.repairPressed, relightHeld: this.keys.E.isDown });
       this.repairPressed = false;
       const events = this.sim.drainEvents();
@@ -457,9 +503,9 @@ export class FlightScene extends Phaser.Scene {
       this.cameras.main.shake(180, 0.006);
     }
 
-    this.world.updateCamera(this.sim, t, dt, this.chooseCameraMode(t));
-    this.world.updateSmoke(dt * GAME_SPEED * this.timeScale, this.sim, t, !this.exploded);
-    this.world.render(this.sim, t, this.rocks, !this.exploded, this.shield, this.overlay());
+    this.world.updateCamera(this.sim, t, dt, this.chooseCameraMode(t), this.runnerState.active);
+    this.world.updateSmoke(dt * GAME_SPEED * this.timeScale, this.sim, t, !this.exploded, this.runnerState);
+    this.world.render(this.sim, t, this.rocks, !this.exploded, this.shield, this.overlay(), this.runnerState);
     this.fx.update(dt, t, false);
     this.fx.draw(t, this.world.rocketScreen(this.sim), !this.exploded, false);
     this.updateHud(t, dt);
@@ -657,6 +703,9 @@ export class FlightScene extends Phaser.Scene {
     this.bannerQueue = [];
     this.dropMarker = null;
     this.impactMarker = null;
+    this.runnerState = createEvasiveRunnerState();
+    this.spacePressedThisFrame = false;
+    this.laneSteerInput = 0;
   }
 
   private showBanner(message: string, color = '#ffffff'): void {

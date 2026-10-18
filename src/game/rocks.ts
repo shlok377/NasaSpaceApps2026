@@ -20,9 +20,12 @@ export interface Rock {
   seed: number;
   /** Already scored as a near miss / used up. */
   spent: boolean;
+  laneIndex?: number;
 }
 
 const RB = CONFIG.rockBelt;
+export const RUNNER_CONFIG = RB.evasiveRunner;
+export const RUNNER_LANES = RUNNER_CONFIG.lanes;
 export const BELT = {
   /** Rocks crowd the flight corridor, this far either side of the Moon's axis (m). */
   halfWidth: RB.halfWidth,
@@ -86,6 +89,89 @@ export function generateBelt(seed = 2026): Rock[] {
     }
   }
   return rocks;
+}
+
+export function generateLaneWaves(seed = 2026): Rock[] {
+  const rand = mulberry32(seed);
+  const items: Rock[] = [];
+  const cfg = RUNNER_CONFIG;
+  const lanes = cfg.lanes;
+  const interval = cfg.waveInterval;
+
+  let waveIndex = 0;
+  for (let y = ROCK_BELT.bottom + interval; y < ROCK_BELT.top; y += interval) {
+    const numSafe = cfg.minSafeLanes + Math.floor(rand() * (cfg.maxSafeLanes - cfg.minSafeLanes + 1));
+    const indices = [0, 1, 2, 3, 4];
+    for (let i = indices.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      const temp = indices[i];
+      indices[i] = indices[j];
+      indices[j] = temp;
+    }
+    const safeLaneIndices = new Set(indices.slice(0, numSafe));
+
+    for (let laneIdx = 0; laneIdx < lanes.length; laneIdx++) {
+      const laneX = lanes[laneIdx];
+      if (safeLaneIndices.has(laneIdx)) {
+        if (waveIndex % 2 === 1 && rand() < 0.75) {
+          const kind: RockKind = rand() < 0.5 ? 'SHIELD' : 'FUEL';
+          items.push({
+            id: items.length,
+            kind,
+            x0: laneX,
+            y,
+            vx: 0,
+            radius: 2.5,
+            seed: rand(),
+            spent: false,
+            laneIndex: laneIdx
+          });
+        }
+      } else {
+        const radius = RB.rockRadiusMin + rand() * (RB.rockRadiusMax - RB.rockRadiusMin) * 0.65;
+        items.push({
+          id: items.length,
+          kind: 'ROCK',
+          x0: laneX,
+          y: y + (rand() - 0.5) * 4,
+          vx: 0,
+          radius,
+          seed: rand(),
+          spent: false,
+          laneIndex: laneIdx
+        });
+      }
+    }
+    waveIndex++;
+  }
+
+  // Guarantee at least one SHIELD and one FUEL pickup across the run
+  const kinds: RockKind[] = ['SHIELD', 'FUEL'];
+  for (const kind of kinds) {
+    if (!items.some(i => i.kind === kind)) {
+      for (let y = ROCK_BELT.bottom + interval; y < ROCK_BELT.top; y += interval) {
+        const waveItems = items.filter(i => Math.abs(i.y - y) < 15);
+        const usedLanes = new Set(waveItems.map(i => i.x0));
+        const openLanes = lanes.filter(l => !usedLanes.has(l));
+        if (openLanes.length > 0) {
+          items.push({
+            id: items.length,
+            kind,
+            x0: openLanes[0],
+            y,
+            vx: 0,
+            radius: 2.5,
+            seed: rand(),
+            spent: false,
+            laneIndex: lanes.indexOf(openLanes[0])
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  return items;
 }
 
 export function rockX(rock: Rock, time: number): number {

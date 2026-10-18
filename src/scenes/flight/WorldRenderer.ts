@@ -3,6 +3,7 @@ import { CONFIG } from '../../config';
 import { PART_DEFINITIONS } from '../../core/partDefinitions';
 import { BOULDER_FIELD, ROVER_ZONE, RoverCapsule, SurfaceZone } from '../../game/phases';
 import { Rock, rockX } from '../../game/rocks';
+import { EvasiveRunnerState, RUNNER_LANES } from '../../game/evasiveRunner';
 import { gravityAt, insideMoonSoi, localUp, moonAltitude, moonSurfacePoint } from '../../physics/bodies';
 import { MOON, MOON_CENTER, ROCK_BELT, WORLD } from '../../physics/constants';
 import { FlightSim, FlightTelemetry } from '../../physics/FlightSim';
@@ -195,7 +196,7 @@ export class WorldRenderer {
    * Frame the flight for the given mode. Scales are fixed per mode; changing
    * mode is a cut, not a zoom.
    */
-  public updateCamera(sim: FlightSim, t: FlightTelemetry, dt: number, mode: CameraMode): void {
+  public updateCamera(sim: FlightSim, t: FlightTelemetry, dt: number, mode: CameraMode, runnerActive = false): void {
     const c = this.camera;
     const snap = mode !== c.mode;
     c.mode = mode;
@@ -226,7 +227,12 @@ export class WorldRenderer {
         this.smoothedRocketY += (targetRocketY - this.smoothedRocketY) * (1 - Math.exp(-dt * 3));
         c.upAngle = targetUp;
       }
-      c.x = s.x;
+      const targetCameraX = runnerActive ? 0 : s.x;
+      if (snap) {
+        c.x = targetCameraX;
+      } else {
+        c.x += (targetCameraX - c.x) * (1 - Math.exp(-dt * 4));
+      }
       c.y = s.y + (this.smoothedRocketY - SCREEN_CY) / c.scale;
     } else {
       c.scale = mode === 'DESCENT' ? cam.descentScale : cam.touchdownScale;
@@ -272,7 +278,7 @@ export class WorldRenderer {
     p.life = life;
   }
 
-  public updateSmoke(simDt: number, sim: FlightSim, t: FlightTelemetry, alive: boolean): void {
+  public updateSmoke(simDt: number, sim: FlightSim, t: FlightTelemetry, alive: boolean, runnerState?: EvasiveRunnerState): void {
     // 1. Advance existing smoke particles first
     const damp = Math.exp(-2.2 * simDt);
     let writeIdx = 0;
@@ -333,6 +339,19 @@ export class WorldRenderer {
         }
       }
     }
+
+    // 3. Lateral RCS puffs during runner lane shift
+    if (alive && runnerState?.active && runnerState.shiftProgress < 1) {
+      const s = sim.state;
+      const visual = this.camera.rocketScale / this.camera.scale;
+      const movingRight = RUNNER_LANES[runnerState.targetLaneIndex] > runnerState.startX;
+      const puffSide = movingRight ? -1 : 1;
+      const puffX = s.x + puffSide * 1.2 * visual;
+      const puffY = s.y;
+      const vx = puffSide * (18 + Math.random() * 6);
+      const vy = (Math.random() - 0.5) * 4;
+      this.spawnSmoke(puffX, puffY, vx, vy, 0.4 + Math.random() * 0.3);
+    }
   }
 
   private hideSmokeSprites(): void {
@@ -341,7 +360,7 @@ export class WorldRenderer {
     }
   }
 
-  public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, shield: boolean, overlay: MissionOverlay): void {
+  public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, shield: boolean, overlay: MissionOverlay, runnerState?: EvasiveRunnerState): void {
     this.labelIndex = 0;
     this.drawSky(sim, t);
     const g = this.worldGfx;
@@ -350,7 +369,7 @@ export class WorldRenderer {
       this.hideSmokeSprites();
       this.drawOrbitMap(sim, t, overlay);
     } else if (this.camera.mode === 'ASCENT') {
-      this.drawAscent(sim, t, rocks);
+      this.drawAscent(sim, t, rocks, runnerState);
     } else {
       this.hideSmokeSprites();
       this.drawMoonCloseUp(sim, overlay);
@@ -410,10 +429,37 @@ export class WorldRenderer {
   // The climb
   // ---------------------------------------------------------------------------
 
-  private drawAscent(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[]): void {
+  private drawAscent(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], runnerState?: EvasiveRunnerState): void {
     const g = this.worldGfx;
     const scale = this.camera.scale;
     const s = sim.state;
+
+    // Retro dotted runway lines for the 5 lanes during evasive runner mode
+    if (runnerState?.active) {
+      const step = 28;
+      const dash = 14;
+      const scrollOffset = Math.floor((s.y * scale) % step);
+
+      // Subtle outer boundary borders
+      const leftBound = this.toScreen(RUNNER_LANES[0] - 6, s.y).x;
+      const rightBound = this.toScreen(RUNNER_LANES[RUNNER_LANES.length - 1] + 6, s.y).x;
+      g.lineStyle(2, 0x0284c7, 0.4);
+      g.lineBetween(leftBound, 0, leftBound, 720);
+      g.lineBetween(rightBound, 0, rightBound, 720);
+
+      // Dashed lane lines
+      for (let i = 0; i < RUNNER_LANES.length; i++) {
+        const lx = RUNNER_LANES[i];
+        const p = this.toScreen(lx, s.y);
+        const isCurrent = i === runnerState.currentLaneIndex;
+        g.lineStyle(isCurrent ? 2 : 1.5, isCurrent ? 0x38bdf8 : 0x0ea5e9, isCurrent ? 0.65 : 0.35);
+        for (let py = -scrollOffset; py < 720; py += step) {
+          g.lineBetween(p.x, py, p.x, py + dash);
+        }
+        // Lane indicator at the bottom
+        this.label(p.x, 702, `L${i + 1}`, isCurrent ? '#38bdf8' : '#64748b', 12);
+      }
+    }
 
     // Ground: a flat plain below y = 0, plus the pad and its tower.
     if (s.y < 60) {
