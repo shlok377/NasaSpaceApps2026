@@ -5,6 +5,7 @@ import {
   TWR_MIN_ANGLE,
   TWR_RED_TRANSITION_ANGLE,
   TWR_CENTER_ANGLE,
+  TWR_GREEN_ENTRY_ANGLE,
   TWR_MAX_ANGLE
 } from './twr';
 
@@ -27,8 +28,10 @@ describe('TWR to Needle Angle Mapping', () => {
     expect(twrToNeedleAngle(1.5, true)).toBe(TWR_CENTER_ANGLE);
   });
 
-  it('maps green zone for high acceleration up to max clamp (TWR 1.5 to 4.0+)', () => {
-    expect(twrToNeedleAngle(2.75, true)).toBeCloseTo(25, 1); // Entry of green zone
+  it('maps green zone entry at TWR 2.5 (+25 deg) and max clamp at 4.0+ (+50 deg)', () => {
+    expect(twrToNeedleAngle(2.0, true)).toBeCloseTo(12.5, 1);
+    expect(twrToNeedleAngle(2.5, true)).toBe(TWR_GREEN_ENTRY_ANGLE); // Exactly +25 deg
+    expect(twrToNeedleAngle(3.25, true)).toBeCloseTo(37.5, 1);
     expect(twrToNeedleAngle(4.0, true)).toBe(TWR_MAX_ANGLE);
     expect(twrToNeedleAngle(10.0, true)).toBe(TWR_MAX_ANGLE); // Clamped at +50 deg
   });

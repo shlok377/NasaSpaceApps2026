@@ -6,13 +6,19 @@
  * - Red zone: -50 deg to -25 deg (0.0x to 1.0x TWR - underpowered, cannot lift off)
  * - Neutral zone to center tick: -25 deg to 0 deg (1.0x to 1.5x TWR)
  * - Center tick: 0 deg (1.5x TWR - nominal cruising acceleration)
- * - Green zone: +25 deg to +50 deg (2.5x to 4.0x+ TWR - peak punch)
+ * - Green zone entry: +25 deg (2.5x TWR)
+ * - Green zone max: +50 deg (4.0x+ TWR - peak punch)
  */
 
 export const TWR_MIN_ANGLE = -50;
 export const TWR_RED_TRANSITION_ANGLE = -25;
 export const TWR_CENTER_ANGLE = 0;
+export const TWR_GREEN_ENTRY_ANGLE = 25;
 export const TWR_MAX_ANGLE = 50;
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * Math.max(0, Math.min(1, t));
+}
 
 /**
  * Maps real-time TWR to the analog gauge needle angle in degrees [-50..+50].
@@ -27,23 +33,24 @@ export function twrToNeedleAngle(twr: number, throttleActive: boolean): number {
 
   if (twr < 1.0) {
     // 0.0 -> -50 deg, 1.0 -> -25 deg
-    const factor = Math.max(0, twr);
-    return TWR_MIN_ANGLE + factor * (TWR_RED_TRANSITION_ANGLE - TWR_MIN_ANGLE);
+    return lerp(TWR_MIN_ANGLE, TWR_RED_TRANSITION_ANGLE, twr / 1.0);
   }
 
   if (twr < 1.5) {
     // 1.0 -> -25 deg, 1.5 -> 0 deg
-    const factor = (twr - 1.0) / 0.5;
-    return TWR_RED_TRANSITION_ANGLE + factor * (TWR_CENTER_ANGLE - TWR_RED_TRANSITION_ANGLE);
+    return lerp(TWR_RED_TRANSITION_ANGLE, TWR_CENTER_ANGLE, (twr - 1.0) / 0.5);
+  }
+
+  if (twr < 2.5) {
+    // 1.5 -> 0 deg, 2.5 -> +25 deg (green zone entry)
+    return lerp(TWR_CENTER_ANGLE, TWR_GREEN_ENTRY_ANGLE, (twr - 1.5) / 1.0);
   }
 
   if (twr <= 4.0) {
-    // 1.5 -> 0 deg, 4.0 -> +50 deg (with ~2.75 entering the green arc at +25 deg)
-    const factor = (twr - 1.5) / 2.5;
-    return TWR_CENTER_ANGLE + factor * (TWR_MAX_ANGLE - TWR_CENTER_ANGLE);
+    // 2.5 -> +25 deg, 4.0 -> +50 deg (green zone max)
+    return lerp(TWR_GREEN_ENTRY_ANGLE, TWR_MAX_ANGLE, (twr - 2.5) / 1.5);
   }
 
-  // Clamped at max deflection (+50 deg)
   return TWR_MAX_ANGLE;
 }
 

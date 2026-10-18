@@ -3,6 +3,16 @@ import { TEXT_STYLE, UI } from './theme';
 import { GAME_ASSETS } from '../core/assets';
 import { twrToNeedleAngle, isLowThrustAlert, TWR_MIN_ANGLE } from '../physics/twr';
 
+export interface ClusterTelemetry {
+  fraction: number;
+  mass: number;
+  wetMass: number;
+  twr?: number;
+  throttleActive?: boolean;
+  time?: number;
+  dt?: number;
+}
+
 /**
  * Three-column cockpit instrument cluster:
  * 1. Minimalist glass fuel tank with sloshing propellant & percentage
@@ -18,7 +28,7 @@ export class FuelTank {
   private readonly twrValueText: Phaser.GameObjects.Text;
   private readonly massText: Phaser.GameObjects.Text;
   private readonly container: Phaser.GameObjects.Container;
-  private readonly w = 54;
+  private readonly w = 58;
   private readonly h = 128;
   private static readonly MASS_SEGMENTS = 8;
   private needleAngle: number = TWR_MIN_ANGLE;
@@ -26,7 +36,7 @@ export class FuelTank {
   constructor(scene: Phaser.Scene, private readonly x: number, private readonly y: number) {
     const bg = scene.add.graphics();
     bg.fillStyle(UI.backdrop, UI.backdropAlpha);
-    bg.fillRoundedRect(x - 14, y - 34, 304, this.h + 48, 16);
+    bg.fillRoundedRect(x - 14, y - 34, 308, this.h + 48, 16);
 
     // Column 1: Minimalist Fuel Tank
     const fuelLabel = scene.add
@@ -34,7 +44,7 @@ export class FuelTank {
       .setOrigin(0.5, 0);
 
     // Column 2: TWR Analog Dial
-    const col2CenterX = x + 114;
+    const col2CenterX = x + 118;
     const twrLabel = scene.add
       .text(col2CenterX, y - 26, 'TWR', TEXT_STYLE(11, UI.textMuted))
       .setOrigin(0.5, 0);
@@ -53,7 +63,7 @@ export class FuelTank {
       .setOrigin(0.5, 0);
 
     // Column 3: Vehicle Mass Segments
-    const col3X = x + 172;
+    const col3X = x + 176;
     const massLabel = scene.add.text(col3X, y - 26, 'MASS', TEXT_STYLE(11, UI.textMuted));
     this.massText = scene.add.text(col3X, y + 8, '', TEXT_STYLE(16));
 
@@ -122,9 +132,9 @@ export class FuelTank {
 
     // Tank shell; blinks red when nearly empty.
     const blink = low && Math.floor(time / 300) % 2 === 0;
-    g.lineStyle(3, blink ? UI.red : 0xe5e7eb, 1);
+    g.lineStyle(3, blink ? UI.red : UI.backdrop, 1);
     g.strokeRoundedRect(x, y, w, h, 14);
-    g.lineStyle(2, 0xe5e7eb, 0.6);
+    g.lineStyle(2, UI.dim, 0.8);
     g.lineBetween(x + w * 0.3, y - 6, x + w * 0.7, y - 6);
     this.percentText.setText(`${Math.round(f * 100)}%`);
 
@@ -137,15 +147,19 @@ export class FuelTank {
 
     if (throttleActive && twr > 0) {
       if (isLowThrustAlert(twr, throttleActive)) {
-        const alertBlink = Math.floor(time / 250) % 2 === 0;
-        this.twrValueText.setColor(alertBlink ? UI.redText : UI.amberText);
+        // Subtle glowing red alert when underpowered
+        const glowAlpha = 0.75 + Math.sin(time / 200) * 0.25;
+        this.twrValueText.setColor(UI.redText);
+        this.twrValueText.setAlpha(glowAlpha);
         this.twrValueText.setText(`${twr.toFixed(1)}× LOW`);
       } else {
-        this.twrValueText.setColor(twr >= 2.0 ? UI.greenText : '#ffffff');
+        this.twrValueText.setColor(UI.text);
+        this.twrValueText.setAlpha(1.0);
         this.twrValueText.setText(`${twr.toFixed(1)}×`);
       }
     } else {
       this.twrValueText.setColor(UI.textMuted);
+      this.twrValueText.setAlpha(1.0);
       this.twrValueText.setText('0.0×');
     }
 
