@@ -6,6 +6,7 @@ import { PART_DEFINITIONS } from '../core/partDefinitions';
 import { PartType, PortDirection, RocketNode } from '../core/types';
 import { ParticleManager } from '../particles';
 import { preloadGameAssets, getPartTextureKey, GAME_ASSETS } from '../core/assets';
+import { UI } from '../ui/theme';
 
 interface PaletteBay {
   type: PartType;
@@ -178,7 +179,7 @@ export class BuilderScene extends Phaser.Scene {
         fontSize: '15px',
         color: '#94a3b8',
         fontStyle: 'bold',
-        fontFamily: 'system-ui, sans-serif'
+        fontFamily: UI.font
       }).setOrigin(0.5);
       partsLabelContainer.add(t);
     });
@@ -218,7 +219,7 @@ export class BuilderScene extends Phaser.Scene {
         fontSize: '13px',
         color: '#ffffff',
         fontStyle: 'bold',
-        fontFamily: 'system-ui, sans-serif'
+        fontFamily: UI.font
       }).setOrigin(0.5);
 
       // Hotkey badge in corner
@@ -226,7 +227,7 @@ export class BuilderScene extends Phaser.Scene {
         fontSize: '13px',
         color: '#94a3b8',
         fontStyle: 'bold',
-        fontFamily: 'system-ui, sans-serif'
+        fontFamily: UI.font
       }).setOrigin(0.5);
 
       bayContainer.add([bgGfx, iconSprite, labelText, hotkeyText]);
@@ -307,21 +308,21 @@ export class BuilderScene extends Phaser.Scene {
       fontSize: '13px',
       color: '#38bdf8',
       fontStyle: 'bold',
-      fontFamily: 'system-ui, sans-serif'
+      fontFamily: UI.font
     });
 
     this.hudStatusText = this.add.text(padX + 16, padY + 31, 'STATUS: [ INCOMPLETE ]', {
       fontSize: '15px',
       color: '#f59e0b',
       fontStyle: 'bold',
-      fontFamily: 'system-ui, sans-serif'
+      fontFamily: UI.font
     });
 
     this.hudStatsText = this.add.text(padX + 16, padY + 54, 'MASS: 100 kg    THRUST: 0 kN\nFUEL: 0 L      TWR: 0.00', {
       fontSize: '13px',
       color: '#ffffff',
       fontStyle: 'bold',
-      fontFamily: 'system-ui, sans-serif',
+      fontFamily: UI.font,
       lineSpacing: 4
     });
 
@@ -342,7 +343,7 @@ export class BuilderScene extends Phaser.Scene {
       fontSize: '13px',
       color: '#ffffff',
       fontStyle: 'bold',
-      fontFamily: 'system-ui, sans-serif'
+      fontFamily: UI.font
     });
     this.hudContainer.add([helperBg, helperText]);
 
@@ -353,8 +354,8 @@ export class BuilderScene extends Phaser.Scene {
     econBg.fillRoundedRect(helperX, econY, helperW, 58, 8);
     econBg.lineStyle(2, 0x334d6e, 1);
     econBg.strokeRoundedRect(helperX, econY, helperW, 58, 8);
-    this.missionText = this.add.text(helperX + 16, econY + 9, '', { fontSize: '13px', color: '#facc15', fontStyle: 'bold', fontFamily: 'system-ui, sans-serif' });
-    this.economyText = this.add.text(helperX + 16, econY + 31, '', { fontSize: '13px', color: '#ffffff', fontStyle: 'bold', fontFamily: 'system-ui, sans-serif' });
+    this.missionText = this.add.text(helperX + 16, econY + 9, '', { fontSize: '13px', color: '#facc15', fontStyle: 'bold', fontFamily: UI.font });
+    this.economyText = this.add.text(helperX + 16, econY + 31, '', { fontSize: '13px', color: '#ffffff', fontStyle: 'bold', fontFamily: UI.font });
     this.hudContainer.add([econBg, this.missionText, this.economyText]);
   }
 
@@ -376,7 +377,7 @@ export class BuilderScene extends Phaser.Scene {
       fontSize: '15px',
       color: '#ffffff',
       fontStyle: 'bold',
-      fontFamily: 'system-ui, sans-serif'
+      fontFamily: UI.font
     }).setOrigin(0.5);
 
     const zone = this.add.zone(x + w / 2, y + h / 2, w, h).setInteractive();
@@ -450,7 +451,7 @@ export class BuilderScene extends Phaser.Scene {
       fontSize: '14px',
       color: '#ffffff',
       fontStyle: 'bold',
-      fontFamily: 'system-ui, sans-serif',
+      fontFamily: UI.font,
       stroke: '#000000',
       strokeThickness: 3
     }).setOrigin(0.5);
@@ -863,7 +864,7 @@ export class BuilderScene extends Phaser.Scene {
       fontSize: '9px',
       color: '#ffffff',
       fontStyle: 'bold',
-      fontFamily: 'system-ui, sans-serif',
+      fontFamily: UI.font,
       stroke: '#000000',
       strokeThickness: 3
     }).setOrigin(1, 1);

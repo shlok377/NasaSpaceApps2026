@@ -204,11 +204,33 @@ Take it away, fly safe! 🛰️
   - Browser diagnostic `scripts/diagnose-orbit-browser.mjs` verifies active pixel art sprites in Orbit View with normal time scale (`timeScale: 1`).
   - **58 / 58 tests passing** (`npm test`), strict TypeScript typecheck clean (`npm run typecheck`), production Vite build clean (`npm run build`).
 
+#### 🟢 [Gemini] - 2026-10-18 (8-Segment Mass Bar, Anti-Aliasing & Mozilla Headline Font)
+**Update for Claude**:
+- **Ticket #20 (8-Segment Dual-Variant Mass Indicator Bar)**:
+  - Replaced the solid red vector progress bar and top single weight icon in `FuelTank.ts` with an 8-segment pixel art progress meter.
+  - Dynamically alternates between `GAME_ASSETS.UI_MASS` (`mass.png`, filled orange weight) and `GAME_ASSETS.UI_MASS_EMPTY` (`mass_empty.png`, hollow weight) sized at 10×15 px spanning 94 px beneath the mass readout.
+  - Depletion proceeds from right to left based on `Math.round((mass / wetMass) * 8)`. When fuel is exhausted, the filled weights accurately reflect the dry structural metal mass remaining on the vehicle.
+- **Ticket #21 (Crisp Canvas & Anti-Aliased UI Rendering)**:
+  - Fixed global canvas pixelation on high-res displays by switching `src/main.ts` from `pixelArt: true` to `pixelArt: false`, `antialias: true`, and `roundPixels: true`.
+  - Enforced `FilterMode.NEAREST` on all 2D pixel art textures via `applyPixelArtTextureFilters()` in `src/core/assets.ts`. Vector curves, trajectory arcs, borders, and fonts now render silky-smooth with WebGL anti-aliasing while 2D pixel art sprites remain crisp, sharp, and pixel-exact.
+- **Ticket #22 (Google Font Mozilla Headline Integration)**:
+  - Imported Google Font "Mozilla Headline" (`wght@200..700`) via `<link>` in `index.html`.
+  - Added pre-boot font awaiting in `src/main.ts` (`document.fonts.load('16px "Mozilla Headline"')`) to eliminate Flash of Unstyled Text (FOUT).
+  - Unified all typography across `src/ui/theme.ts` (`UI.font`), `BuilderScene.ts`, and `WorldRenderer.ts`.
+- **Verification**:
+  - Headless Puppeteer browser test (`scripts/verify-ui-font-mass.mjs`) verified font rasterization and the 3 distinct mass indicator stages (Full: 8/8 filled, Half: 5/8 filled, Dry: 2/8 filled) with screenshot captures.
+  - **58 / 58 tests passing** (`npm test`), 100% typecheck passing (`npm run typecheck`), production build passing (`npm run build`).
+
 ---
 
 ## 📋 Task Board & Progress Tracker
 
 Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLAUDE]`), and `[x]` for completed.
+
+### 🎨 UI, Typography & Visual Polish Tickets (#20–#22)
+- [x] #20: 8-Segment Dual-Variant Mass Indicator Bar (`FuelTank.ts`)
+- [x] #21: Crisp Canvas & Anti-Aliased UI Rendering (`main.ts`, `assets.ts`)
+- [x] #22: Google Font Mozilla Headline Integration (`index.html`, `theme.ts`, `BuilderScene.ts`)
 
 ### ⚡ Performance & Polish Tickets (#10–#19)
 - [x] #10: Rigid Rocket-Centric Camera & Continuous Framing Smoothing (Fixed in `WorldRenderer`)

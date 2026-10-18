@@ -8,6 +8,7 @@ import { MOON, MOON_CENTER, ROCK_BELT, WORLD } from '../../physics/constants';
 import { FlightSim, FlightTelemetry } from '../../physics/FlightSim';
 import { FlightPart } from '../../physics/vehicle';
 import { GAME_ASSETS, getPartTextureKey } from '../../core/assets';
+import { UI } from '../../ui/theme';
 
 export const SCREEN_CX = 640;
 export const SCREEN_CY = 400;
@@ -362,7 +363,7 @@ export class WorldRenderer {
   private label(x: number, y: number, text: string, color: string, size = 12, originX = 0.5): void {
     let l = this.labels[this.labelIndex];
     if (!l) {
-      l = this.scene.add.text(0, 0, '', { fontSize: `${size}px`, color, fontStyle: 'bold', fontFamily: 'system-ui, sans-serif', stroke: '#000000', strokeThickness: 3 });
+      l = this.scene.add.text(0, 0, '', { fontSize: `${size}px`, color, fontStyle: 'bold', fontFamily: UI.font, stroke: '#000000', strokeThickness: 3 });
       this.labels.push(l);
     }
     this.labelIndex++;

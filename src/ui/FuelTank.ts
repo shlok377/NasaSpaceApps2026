@@ -10,12 +10,13 @@ export class FuelTank {
   private readonly gfx: Phaser.GameObjects.Graphics;
   private readonly gaugeSprite: Phaser.GameObjects.Image;
   private readonly needleSprite: Phaser.GameObjects.Image;
-  private readonly massIcon: Phaser.GameObjects.Image;
+  private readonly massSprites: Phaser.GameObjects.Image[];
   private readonly percentText: Phaser.GameObjects.Text;
   private readonly massText: Phaser.GameObjects.Text;
   private readonly container: Phaser.GameObjects.Container;
   private readonly w = 58;
   private readonly h = 128;
+  private static readonly MASS_SEGMENTS = 8;
 
   constructor(scene: Phaser.Scene, private readonly x: number, private readonly y: number) {
     const bg = scene.add.graphics();
@@ -29,8 +30,14 @@ export class FuelTank {
     this.gaugeSprite = scene.add.image(x + this.w / 2, y + 18, GAME_ASSETS.UI_FUEL_GAUGE.key).setDisplaySize(54, 30);
     this.needleSprite = scene.add.image(x + this.w / 2, y + 28, GAME_ASSETS.UI_FUEL_NEEDLE.key).setDisplaySize(6, 16).setOrigin(0.5, 0.85);
 
-    // Pixel art mass weight icon
-    this.massIcon = scene.add.image(x + 98, y + 15, GAME_ASSETS.UI_MASS.key).setDisplaySize(16, 24);
+    // 8-segment mass indicator progress bar
+    this.massSprites = [];
+    for (let i = 0; i < FuelTank.MASS_SEGMENTS; i++) {
+      const sprite = scene.add.image(x + 82 + i * 12, y + 80, GAME_ASSETS.UI_MASS.key)
+        .setOrigin(0, 0)
+        .setDisplaySize(10, 15);
+      this.massSprites.push(sprite);
+    }
 
     this.gfx = scene.add.graphics();
     this.percentText = scene.add.text(x + this.w / 2, y + this.h - 18, '', TEXT_STYLE(14)).setOrigin(0.5);
@@ -41,7 +48,7 @@ export class FuelTank {
       massLabel,
       this.gaugeSprite,
       this.needleSprite,
-      this.massIcon,
+      ...this.massSprites,
       this.gfx,
       this.percentText,
       this.massText
@@ -85,13 +92,15 @@ export class FuelTank {
     // Rotate analog needle: Empty (-50 deg) to Full (+50 deg)
     this.needleSprite.setAngle(Phaser.Math.Linear(-50, 50, f));
 
-    // Mass bar that shrinks as fuel burns off
-    const barW = 96;
+    // 8-segment mass indicator: turns empty from right to left as fuel burns off
     const share = wetMass > 0 ? Phaser.Math.Clamp(mass / wetMass, 0, 1) : 0;
-    g.fillStyle(0x1f2937, 1);
-    g.fillRoundedRect(x + 82, y + 80, barW, 8, 4);
-    g.fillStyle(UI.red, 1);
-    g.fillRoundedRect(x + 82, y + 80, Math.max(8, barW * share), 8, 4);
+    const activeCount = Math.round(share * FuelTank.MASS_SEGMENTS);
+    for (let i = 0; i < FuelTank.MASS_SEGMENTS; i++) {
+      const key = i < activeCount ? GAME_ASSETS.UI_MASS.key : GAME_ASSETS.UI_MASS_EMPTY.key;
+      if (this.massSprites[i].texture.key !== key) {
+        this.massSprites[i].setTexture(key);
+      }
+    }
     this.massText.setText(`${Math.round(mass).toLocaleString()} kg`);
   }
 }

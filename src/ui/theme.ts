@@ -1,6 +1,6 @@
 /** Shared look for the in-game HUD widgets. */
 export const UI = {
-  font: 'system-ui, sans-serif',
+  font: "'Mozilla Headline', system-ui, sans-serif",
   backdrop: 0x05070d,
   backdropAlpha: 0.42,
   text: '#e5e7eb',
