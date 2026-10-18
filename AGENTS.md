@@ -179,12 +179,18 @@ Take it away, fly safe! 🛰️
 - **Ticket #16 (VAB Direct Grid Picking & Differential Rendering)**: Updated `BuilderScene.ts` ghost preview with $O(1)$ direct 4-neighbor lookups, and upgraded `renderRocket()` to differential container updates—mutating only added or deleted parts instead of rebuilding the entire rocket scene tree.
 - **Verification**: 54/54 Vitest unit tests green across all 8 test suites (`npm test`), 100% typecheck clean (`npm run typecheck`), production Vite build passing (`npm run build`), and live browser flight test confirms rock-solid camera tracking (<0.27px jitter).
 
-#### 🟢 [Gemini] - 2026-10-12 (All 10 Optimization Tickets Completed & Verified)
+#### 🟢 [Gemini] - 2026-10-18 (Smoke Thruster Pivot & Exhaust Alignment Bugfix)
 **Update for Claude**:
-- **Ticket #17 (Altitude-Threshold Cached Sky Gradient)**: Cached the atmospheric sky gradient in `WorldRenderer.ts` using a 25m altitude threshold (`lastSkyAltitude`) and mode change detection. Cuts CPU/GPU full-screen fillrate gradient redraws during stable flight.
-- **Ticket #18 (Batched Smoke Particle Quad Rendering)**: Converted exhaust smoke in `WorldRenderer.ts` from CPU-heavy `g.fillCircle()` tessellations to a GPU-batched quad sprite pool (`smokeSpritesContainer` + `smokeSpritesPool`) using an auto-generated `'smoke_puff'` texture.
-- **Ticket #19 (Cached Vehicle Center of Mass per Substep)**: Cached `CenterOfMass` in `FlightSim.ts` across substep calls (`_cachedCom`), automatically invalidating on fuel drain (`drawFuel`), stage decoupling (`detach`), or refuel events. Eliminates redundant loops across vehicle parts.
-- **Verification**: **57 / 57 unit tests passing** across 8 test suites (`npm test`), zero TypeScript errors (`npm run typecheck`), clean production build (`npm run build`), and all 10 GitHub issues (#10–#19) resolved and closed.
+- **Diagnosed Smoke Disconnect / Pivot Bug**:
+  - Investigated issue reported with screenshot `media_1792328749733.png` where the smoke plume appeared detached and shifted into an arc $>90\text{px}$ away from the thrusters.
+  - Root cause was twofold: (1) smoke initial velocity previously added $(s.vx, s.vy)$, dragging smoke sideways along the flight trajectory whenever attitude differed from heading; (2) `updateSmoke` advanced new particles before their first render, displacing them $>20\text{px}$ on frame 0.
+- **Fixed Smoke Thruster Pivoting**:
+  - Refactored `updateSmoke` in `WorldRenderer.ts` so existing smoke particles advance and age *first*, and new particles spawn *after* at the exact nozzle position with `visual` scaling.
+  - Ejected smoke velocity is now pure backward thrust vector $-\mathbf{b} \cdot v_{\text{exhaust}}$ plus light atmospheric spread, eliminating sideways flight-velocity shear.
+- **Verification**:
+  - Added deterministic unit test `src/physics/smoke_alignment.test.ts` (min distance drops from $23.1\text{px}$ to $0.34\text{px}$).
+  - Added headless browser Puppeteer diagnostic `scripts/diagnose-smoke-browser.mjs` verifying min distance in Chromium WebGL is **$0.09\text{px}$** (down from $34.7\text{px}$) with screenshot proof (`smoke_alignment_verified.png`).
+  - **58 / 58 tests passing** (`npm test`), strict TypeScript typecheck clean (`npm run typecheck`), production Vite build clean (`npm run build`).
 
 ---
 

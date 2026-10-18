@@ -272,25 +272,7 @@ export class WorldRenderer {
   }
 
   public updateSmoke(simDt: number, sim: FlightSim, t: FlightTelemetry, alive: boolean): void {
-    if (alive && t.thrust > 0 && t.airDensity > 0.05) {
-      const s = sim.state;
-      const bx = Math.cos(s.theta);
-      const by = Math.sin(s.theta);
-      for (const { part, x, y } of sim.partPositions()) {
-        if (part.thrust <= 0) continue;
-        const count = Math.min(3, Math.ceil(simDt * 30));
-        for (let i = 0; i < count; i++) {
-          const spread = (Math.random() - 0.5) * 10;
-          this.spawnSmoke(
-            x - bx * 0.7,
-            y - by * 0.7,
-            s.vx - bx * 30 - by * spread,
-            s.vy - by * 30 + bx * spread,
-            2 + Math.random() * 2
-          );
-        }
-      }
-    }
+    // 1. Advance existing smoke particles first
     const damp = Math.exp(-2.2 * simDt);
     let writeIdx = 0;
     for (let i = 0; i < this.smokeCount; i++) {
@@ -310,6 +292,46 @@ export class WorldRenderer {
       }
     }
     this.smokeCount = writeIdx;
+
+    // 2. Spawn new smoke strictly pivoted to active thrusters
+    if (alive && t.thrust > 0 && t.airDensity > 0.05) {
+      const s = sim.state;
+      const bx = Math.cos(s.theta);
+      const by = Math.sin(s.theta);
+      const visual = this.camera.rocketScale / this.camera.scale;
+      const com = sim.com;
+
+      for (const part of sim.vehicle.parts) {
+        if (part.thrust <= 0) continue;
+        const du = (part.u - com.u) * visual;
+        const da = (part.a - com.a) * visual;
+        const engX = s.x + da * bx + du * by;
+        const engY = s.y + da * by - du * bx;
+
+        const nozzleDist = 0.5 * visual;
+        const count = Math.min(4, Math.max(1, Math.round(simDt * 60)));
+
+        for (let i = 0; i < count; i++) {
+          const spread = (Math.random() - 0.5) * 4;
+          const spawnDist = nozzleDist + Math.random() * 0.15;
+          const spawnX = engX - bx * spawnDist;
+          const spawnY = engY - by * spawnDist;
+
+          // Exhaust shoots strictly backwards along the thruster axis (-bx, -by)
+          const exhaustSpeed = 16 + Math.random() * 6;
+          const vx = -bx * exhaustSpeed - by * spread;
+          const vy = -by * exhaustSpeed + bx * spread;
+
+          this.spawnSmoke(
+            spawnX,
+            spawnY,
+            vx,
+            vy,
+            1.8 + Math.random() * 1.5
+          );
+        }
+      }
+    }
   }
 
   private hideSmokeSprites(): void {
