@@ -114,7 +114,7 @@
   },
   "camera": {
     "_note": "No zooming during the climb: the launch view's scale is kept the whole way up.",
-    "ascentScale": 22,
+    "ascentScale": 24,
     "descentScale": 1.6,
     "touchdownScale": 14,
     "descentViewBelow": 300,

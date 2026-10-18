@@ -24,19 +24,18 @@ export const GAME_ASSETS = {
 } as const;
 
 /**
- * Enable smooth pixel art rendering on all 2D pixel art textures.
- * setSmoothPixelArt(true) activates Phaser's derivative-based "fat pixel" shader
- * and applies LINEAR sampling so subpixel seam blending and rotation anti-aliasing work.
+ * Enforce crisp nearest-neighbor filtering on all 2D pixel art textures
+ * so pixels stay completely sharp, blocky, and authentic with zero blur.
+ * FilterMode 1 = NEAREST, 0 = LINEAR.
  */
 export function applyPixelArtTextureFilters(scene: Phaser.Scene): void {
   for (const asset of Object.values(GAME_ASSETS)) {
     if (scene.textures.exists(asset.key)) {
       const tex = scene.textures.get(asset.key);
       if (typeof tex.setSmoothPixelArt === 'function') {
-        tex.setSmoothPixelArt(true);
-      } else {
-        tex.setFilter(0); // LINEAR
+        tex.setSmoothPixelArt(false);
       }
+      tex.setFilter(1); // NEAREST
     }
   }
 }

@@ -221,23 +221,29 @@ Take it away, fly safe! 🛰️
   - Headless Puppeteer browser test (`scripts/verify-ui-font-mass.mjs`) verified font rasterization and the 3 distinct mass indicator stages (Full: 8/8 filled, Half: 5/8 filled, Dry: 2/8 filled) with screenshot captures.
   - **58 / 58 tests passing** (`npm test`), 100% typecheck passing (`npm run typecheck`), production build passing (`npm run build`).
 
-#### 🟢 [Gemini] - 2026-10-18 (Fat Pixel Anti-Aliased Shaders #23–#25)
+#### 🟢 [Gemini] - 2026-10-18 (Embracing Raw Pixel Art & Clean 2x Integer Scaling)
 **Update for Claude**:
-- **Ticket #23 (Smooth Pixel Art WebGL Pipeline Configuration)**:
-  - Enabled `smoothPixelArt: true` and set `roundPixels: false` in `src/main.ts`.
-  - Configures Phaser 4's derivative-based WebGL batch pipeline with `GL_OES_standard_derivatives`.
-- **Ticket #24 (Sprite Texture Filtering & SmoothPixelArt Flag Hookup)**:
-  - Updated `applyPixelArtTextureFilters()` in `src/core/assets.ts` to set `tex.setSmoothPixelArt(true)`.
-  - Enables the `getBlockyTexCoord` GLSL shader on all rocket parts and UI pixel art assets, maintaining flat, solid colors in texel centers while performing 1-pixel subpixel anti-aliasing along boundaries and silhouettes.
-- **Ticket #25 (Subpixel Rotation Diagnostics & Anti-Aliased Sprite Verification)**:
-  - Automated headless browser tests (`scripts/verify-fat-pixel-shader.mjs`) confirmed that jagged staircases, broken outline segments, and rotational edge shimmering are completely eliminated during both pad rendering and tilted ascent ($15^\circ$ gravity turn).
-  - All 58 unit tests passing, strict typecheck passing, production build green.
+- **Reverted Smooth Pixel Shader**: Per user preference ("embrace the pixel art not to make it smooth, now everything looks blurry"), disabled `smoothPixelArt` in `src/main.ts` and restored `tex.setFilter(Phaser.Textures.FilterMode.NEAREST)` with `tex.setSmoothPixelArt(false)` in `src/core/assets.ts`.
+- **Pure Unblurred Chunky Pixels**: Every sprite renders with 100% sharp nearest-neighbor sampling with zero blur.
+- **Clean 2× Integer Downscaling**: Updated `ascentScale` in `src/config/game.json` from `22` to `24`. Because all part textures are $48 \times 48\text{px}$, $48 / 24 = 2.0$ provides an exact integer ratio: every on-screen pixel maps cleanly to $2 \times 2$ texels, eliminating broken outlines, uneven pixel widths, and skipping artifacts while keeping the raw pixel-art aesthetic completely sharp.
+- **Verification**: 58/58 unit tests green (`npm test`), strict typecheck clean (`npm run typecheck`), production build green. Captured close-up screenshot `fat_pixel_launchpad_closeup.png` verifying uniform 1-pixel borders and razor-sharp texels.
+
+#### 🟢 [Gemini] - 2026-10-18 (TWR Analog Gauge Repurpose & 3-Column Cockpit Cluster Tickets #26–#28)
+**Update for Claude**:
+- **Repurposed Redundant Fuel Gauge**: Concluded `/grill-me` session with user to decouple the vintage dial gauge from fuel level and repurpose it as a **Thrust-to-Weight Ratio (TWR)** instrument.
+- **3-Column Cockpit Panel**: Expanded the bottom-left instrument panel into three side-by-side columns: (1) Minimalist glass fuel tank with unobstructed liquid sloshing, (2) TWR analog dial with smooth needle inertia and low-thrust red warning, and (3) Vehicle mass in kg with 8-segment weight sprites.
+- **Published Tickets #26–#28**: Created local specs in `.scratch/twr-gauge-repurpose/issues/` and published GitHub issues #26, #27, #28 with `ready-for-agent` labels.
 
 ---
 
 ## 📋 Task Board & Progress Tracker
 
 Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLAUDE]`), and `[x]` for completed.
+
+### 🎛️ TWR Analog Gauge Repurpose & 3-Column Cockpit HUD Tickets (#26–#28)
+- [ ] #26: 01: Decouple Analog Dial from Fuel Tank & Declutter Liquid Tank Column (`FuelTank.ts`)
+- [ ] #27: 02: TWR Telemetry Pipeline & Scale Mapping Unit Tests (`FlightSim.ts`, `FlightScene.ts`, `twr.test.ts`)
+- [ ] #28: 03: Three-Column Instrument Cluster, Analog Needle Inertia & Low-Thrust Alert (`FuelTank.ts`, `FlightScene.ts`)
 
 ### 🌟 Shaders & Anti-Aliasing Tickets (#23–#25)
 - [x] #23: Phaser Smooth Pixel Art WebGL Pipeline Configuration (`src/main.ts`)
