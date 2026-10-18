@@ -233,6 +233,7 @@ Take it away, fly safe! 🛰️
 - **Repurposed Redundant Fuel Gauge**: Concluded `/grill-me` session with user to decouple the vintage dial gauge from fuel level and repurpose it as a **Thrust-to-Weight Ratio (TWR)** instrument.
 - **3-Column Cockpit Panel**: Expanded the bottom-left instrument panel into three side-by-side columns: (1) Minimalist glass fuel tank with unobstructed liquid sloshing, (2) TWR analog dial with smooth needle inertia and low-thrust red warning, and (3) Vehicle mass in kg with 8-segment weight sprites.
 - **Published Tickets #26–#28**: Created local specs in `.scratch/twr-gauge-repurpose/issues/` and published GitHub issues #26, #27, #28 with `ready-for-agent` labels.
+- **Recalibrated Needle Scale (0° to 100°)**: Normalized TWR needle angle representation to rotate cleanly from $0^\circ$ (idle / pad rest) all the way to $100^\circ$ (peak punch), with center tick at $50^\circ$ and red boundary at $25^\circ$. All 63 tests passing.
 
 ---
 
