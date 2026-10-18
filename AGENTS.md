@@ -241,9 +241,9 @@ Take it away, fly safe! 🛰️
 Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLAUDE]`), and `[x]` for completed.
 
 ### 🎛️ TWR Analog Gauge Repurpose & 3-Column Cockpit HUD Tickets (#26–#28)
-- [ ] #26: 01: Decouple Analog Dial from Fuel Tank & Declutter Liquid Tank Column (`FuelTank.ts`)
-- [ ] #27: 02: TWR Telemetry Pipeline & Scale Mapping Unit Tests (`FlightSim.ts`, `FlightScene.ts`, `twr.test.ts`)
-- [ ] #28: 03: Three-Column Instrument Cluster, Analog Needle Inertia & Low-Thrust Alert (`FuelTank.ts`, `FlightScene.ts`)
+- [x] #26: 01: Decouple Analog Dial from Fuel Tank & Declutter Liquid Tank Column (`FuelTank.ts`)
+- [x] #27: 02: TWR Telemetry Pipeline & Scale Mapping Unit Tests (`FlightSim.ts`, `FlightScene.ts`, `twr.test.ts`)
+- [x] #28: 03: Three-Column Instrument Cluster, Analog Needle Inertia & Low-Thrust Alert (`FuelTank.ts`, `FlightScene.ts`)
 
 ### 🌟 Shaders & Anti-Aliasing Tickets (#23–#25)
 - [x] #23: Phaser Smooth Pixel Art WebGL Pipeline Configuration (`src/main.ts`)
