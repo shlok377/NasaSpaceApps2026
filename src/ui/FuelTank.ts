@@ -53,10 +53,10 @@ export class FuelTank {
       .image(col2CenterX, y + 42, GAME_ASSETS.UI_FUEL_GAUGE.key)
       .setDisplaySize(54, 30);
     this.needleSprite = scene.add
-      .image(col2CenterX, y + 52, GAME_ASSETS.UI_FUEL_NEEDLE.key)
-      .setDisplaySize(6, 16)
-      .setOrigin(0.5, 0.85);
-    this.needleSprite.setAngle(this.needleAngle - 50);
+      .image(col2CenterX, y + 56, GAME_ASSETS.UI_FUEL_NEEDLE.key)
+      .setDisplaySize(6, 17)
+      .setOrigin(0.5, 0.82);
+    this.needleSprite.setAngle(-70 + (this.needleAngle / 100) * 140);
 
     this.twrValueText = scene.add
       .text(col2CenterX, y + 78, '0.0×', TEXT_STYLE(14, UI.textMuted))
@@ -147,7 +147,7 @@ export class FuelTank {
     const safeDt = Math.min(Math.max(dt, 0.001), 0.1);
     // Smooth exponential damping towards target angle
     this.needleAngle += (targetAngle - this.needleAngle) * Math.min(1, safeDt * 10);
-    this.needleSprite.setAngle(this.needleAngle - 50);
+    this.needleSprite.setAngle(-70 + (this.needleAngle / 100) * 140);
 
     if (throttleActive && twr > 0) {
       if (isLowThrustAlert(twr, throttleActive)) {
