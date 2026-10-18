@@ -43,7 +43,7 @@ const THROTTLE_RATE = 0.9; // per second while a throttle key is held
 const APEX_INTERVAL_MS = 200;
 
 type Keys = Record<
-  'W' | 'S' | 'SHIFT' | 'CTRL' | 'Z' | 'X' | 'A' | 'D' | 'E' | 'F' | 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'SPACE' | 'ENTER' | 'ESC' | 'R' | 'B' | 'L' | 'PERIOD',
+  'W' | 'S' | 'SHIFT' | 'CTRL' | 'Z' | 'X' | 'A' | 'D' | 'E' | 'F' | 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'SPACE' | 'ENTER' | 'ESC' | 'R' | 'B' | 'L',
   Phaser.Input.Keyboard.Key
 >;
 
@@ -159,7 +159,6 @@ export class FlightScene extends Phaser.Scene {
   private lastVersion = 0;
   private repairPressed = false;
   private timeScale = 1;
-  private manualWarpOverride = 1;
   private titleTimer = 0;
 
   // Mission layer
@@ -202,7 +201,6 @@ export class FlightScene extends Phaser.Scene {
     this.lastVersion = 0;
     this.repairPressed = false;
     this.timeScale = 1;
-    this.manualWarpOverride = 1;
     this.titleTimer = 0;
     this.progress = loadProgress();
     this.progressBeforeFinish = null;
@@ -291,8 +289,7 @@ export class FlightScene extends Phaser.Scene {
     this.countdownText = this.add.text(640, 320, '', TEXT_STYLE(96, '#ffffff')).setOrigin(0.5).setVisible(false);
     this.readoutText = this.add.text(0, 0, '', TEXT_STYLE(15)).setOrigin(0, 0.5).setVisible(false).setDepth(10);
     this.comboText = this.add.text(640, 128, '', TEXT_STYLE(18, '#f0abfc')).setOrigin(0.5).setVisible(false);
-    this.warpText = this.add.text(1250, 80, '', TEXT_STYLE(14, '#93c5fd')).setOrigin(1, 0.5).setDepth(20).setInteractive({ useHandCursor: true });
-    this.warpText.on('pointerdown', () => this.cycleManualWarp());
+    this.warpText = this.add.text(1250, 80, '', TEXT_STYLE(14, '#93c5fd')).setOrigin(1, 0.5).setDepth(20);
     this.endButton = this.add.text(1250, 694, '■ End flight', TEXT_STYLE(13, UI.textMuted)).setOrigin(1, 0.5).setInteractive({ useHandCursor: true }).setVisible(false);
     this.endButton.on('pointerdown', () => {
       if (!this.result && this.launched) this.finishMission();
@@ -327,8 +324,7 @@ export class FlightScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
 
   private setupInput(): void {
-    this.keys = this.input.keyboard!.addKeys('W,S,SHIFT,CTRL,Z,X,A,D,E,F,LEFT,RIGHT,UP,DOWN,SPACE,ENTER,ESC,R,B,L,PERIOD') as Keys;
-    this.keys.PERIOD.on('down', () => this.cycleManualWarp());
+    this.keys = this.input.keyboard!.addKeys('W,S,SHIFT,CTRL,Z,X,A,D,E,F,LEFT,RIGHT,UP,DOWN,SPACE,ENTER,ESC,R,B,L') as Keys;
     this.keys.SPACE.on('down', () => {
       if (this.sim.phase === 'PRELAUNCH') this.startCountdown();
       else if (this.runner.dropRover(this.sim)) this.fx.ring(this.world.rocketScreen(this.sim).x, this.world.rocketScreen(this.sim).y, WORLD_COLORS.rover, 50, 0.5);
@@ -367,13 +363,6 @@ export class FlightScene extends Phaser.Scene {
   private steerKey(): number {
     const k = this.keys;
     return (k.A.isDown || k.LEFT.isDown ? 1 : 0) - (k.D.isDown || k.RIGHT.isDown ? 1 : 0);
-  }
-
-  private cycleManualWarp(): void {
-    if (this.sim.phase !== 'FLYING' || this.result) return;
-    if (this.manualWarpOverride === 1) this.manualWarpOverride = 4;
-    else if (this.manualWarpOverride === 4) this.manualWarpOverride = 8;
-    else this.manualWarpOverride = 1;
   }
 
   /** Easy mode, phase 3 only: once you're coming down, holding W lets the computer fly the braking burn. */
@@ -434,12 +423,6 @@ export class FlightScene extends Phaser.Scene {
       this.readThrottle(dt);
       this.tickCountdown(dt);
       this.timeScale = this.runner.timeScale(this.sim);
-      if (this.manualWarpOverride > 1) {
-        this.timeScale = Math.max(this.timeScale, this.manualWarpOverride);
-      }
-      if (this.steerKey() !== 0) {
-        this.timeScale = 1;
-      }
       const gameDt = dt * GAME_SPEED * this.timeScale;
       this.sim.advance(gameDt, this.currentInput(t));
       if (this.launched) this.runner.update(this.sim, gameDt, { repairPressed: this.repairPressed, relightHeld: this.keys.E.isDown });

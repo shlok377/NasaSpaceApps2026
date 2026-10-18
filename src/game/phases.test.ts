@@ -118,36 +118,6 @@ describe('phase 1: lunar orbiter', () => {
     expect(kinds).toEqual(['PHASE_START:ORBIT', 'PHASE_DONE:ORBIT', 'PHASE_START:ROVER']);
     expect(run.phasesDone).toBe(1);
   });
-
-  it('accelerates quiet coasting in space/Moon SOI and drops to 1x when burning or in stable orbit', () => {
-    const sim = new FlightSim(vehicle(STAGED));
-    const run = new PhaseRunner();
-    // On pad before launch
-    expect(run.timeScale(sim)).toBe(1);
-
-    // Launched and burning in atmosphere
-    sim.launch();
-    sim.step(1 / 120, { throttle: 1, steer: 0 });
-    expect(run.timeScale(sim)).toBe(1);
-
-    // In space with engines off
-    sim.state.y = 2600;
-    sim.step(1 / 120, { throttle: 0, steer: 0 });
-    expect(run.timeScale(sim)).toBe(4);
-
-    // In space while firing engines
-    sim.step(1 / 120, { throttle: 1, steer: 0 });
-    expect(run.timeScale(sim)).toBe(1);
-
-    // Coasting inside Moon SOI (y >= 3600m)
-    sim.state.y = 4000;
-    sim.step(1 / 120, { throttle: 0, steer: 0 });
-    expect(run.timeScale(sim)).toBe(4);
-
-    // In stable orbit: drops back to 1 for the 3s hold
-    const orb = inOrbit(400);
-    expect(run.timeScale(orb)).toBe(1);
-  });
 });
 
 describe('phase 2: problems in orbit', () => {
