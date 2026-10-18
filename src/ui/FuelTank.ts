@@ -36,30 +36,30 @@ export class FuelTank {
   constructor(scene: Phaser.Scene, private readonly x: number, private readonly y: number) {
     const bg = scene.add.graphics();
     bg.fillStyle(UI.backdrop, UI.backdropAlpha);
-    bg.fillRoundedRect(x - 14, y - 34, 308, this.h + 48, 16);
+    bg.fillRoundedRect(x - 14, y - 34, 318, this.h + 48, 16);
 
     // Column 1: Minimalist Fuel Tank
     const fuelLabel = scene.add
       .text(x + this.w / 2, y - 26, 'FUEL', TEXT_STYLE(11, UI.textMuted))
       .setOrigin(0.5, 0);
 
-    // Column 2: TWR Analog Dial
+    // Column 2: TWR Analog Dial (1.5x Scale)
     const col2CenterX = x + 118;
     const twrLabel = scene.add
       .text(col2CenterX, y - 26, 'TWR', TEXT_STYLE(11, UI.textMuted))
       .setOrigin(0.5, 0);
 
     this.gaugeSprite = scene.add
-      .image(col2CenterX, y + 42, GAME_ASSETS.UI_FUEL_GAUGE.key)
-      .setDisplaySize(54, 30);
+      .image(col2CenterX, y + 40, GAME_ASSETS.UI_FUEL_GAUGE.key)
+      .setDisplaySize(81, 45);
     this.needleSprite = scene.add
-      .image(col2CenterX, y + 56, GAME_ASSETS.UI_FUEL_NEEDLE.key)
-      .setDisplaySize(6, 17)
+      .image(col2CenterX, y + 62, GAME_ASSETS.UI_FUEL_NEEDLE.key)
+      .setDisplaySize(9, 26)
       .setOrigin(0.5, 0.82);
     this.needleSprite.setAngle(-70 + (this.needleAngle / 100) * 140);
 
     this.twrValueText = scene.add
-      .text(col2CenterX, y + 78, '0.0×', TEXT_STYLE(14, UI.textMuted))
+      .text(col2CenterX, y + 86, '0.0×', TEXT_STYLE(14, UI.textMuted))
       .setOrigin(0.5, 0);
 
     // Column 3: Vehicle Mass Segments
