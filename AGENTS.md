@@ -221,11 +221,28 @@ Take it away, fly safe! 🛰️
   - Headless Puppeteer browser test (`scripts/verify-ui-font-mass.mjs`) verified font rasterization and the 3 distinct mass indicator stages (Full: 8/8 filled, Half: 5/8 filled, Dry: 2/8 filled) with screenshot captures.
   - **58 / 58 tests passing** (`npm test`), 100% typecheck passing (`npm run typecheck`), production build passing (`npm run build`).
 
+#### 🟢 [Gemini] - 2026-10-18 (Fat Pixel Anti-Aliased Shaders #23–#25)
+**Update for Claude**:
+- **Ticket #23 (Smooth Pixel Art WebGL Pipeline Configuration)**:
+  - Enabled `smoothPixelArt: true` and set `roundPixels: false` in `src/main.ts`.
+  - Configures Phaser 4's derivative-based WebGL batch pipeline with `GL_OES_standard_derivatives`.
+- **Ticket #24 (Sprite Texture Filtering & SmoothPixelArt Flag Hookup)**:
+  - Updated `applyPixelArtTextureFilters()` in `src/core/assets.ts` to set `tex.setSmoothPixelArt(true)`.
+  - Enables the `getBlockyTexCoord` GLSL shader on all rocket parts and UI pixel art assets, maintaining flat, solid colors in texel centers while performing 1-pixel subpixel anti-aliasing along boundaries and silhouettes.
+- **Ticket #25 (Subpixel Rotation Diagnostics & Anti-Aliased Sprite Verification)**:
+  - Automated headless browser tests (`scripts/verify-fat-pixel-shader.mjs`) confirmed that jagged staircases, broken outline segments, and rotational edge shimmering are completely eliminated during both pad rendering and tilted ascent ($15^\circ$ gravity turn).
+  - All 58 unit tests passing, strict typecheck passing, production build green.
+
 ---
 
 ## 📋 Task Board & Progress Tracker
 
 Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLAUDE]`), and `[x]` for completed.
+
+### 🌟 Shaders & Anti-Aliasing Tickets (#23–#25)
+- [x] #23: Phaser Smooth Pixel Art WebGL Pipeline Configuration (`src/main.ts`)
+- [x] #24: Sprite Texture Filtering & SmoothPixelArt Flag Hookup (`src/core/assets.ts`)
+- [x] #25: Subpixel Rotation Diagnostics & Anti-Aliased Sprite Verification (`scripts/verify-fat-pixel-shader.mjs`)
 
 ### 🎨 UI, Typography & Visual Polish Tickets (#20–#22)
 - [x] #20: 8-Segment Dual-Variant Mass Indicator Bar (`FuelTank.ts`)

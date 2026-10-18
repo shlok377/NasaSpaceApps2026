@@ -11,7 +11,8 @@ const config: Phaser.Types.Core.GameConfig = {
   pixelArt: false,
   antialias: true,
   antialiasGL: true,
-  roundPixels: true,
+  smoothPixelArt: true,
+  roundPixels: false,
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH
