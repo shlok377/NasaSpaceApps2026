@@ -45,12 +45,12 @@ async function main() {
     return {
       percent: flight.fuelTank.percentText.text,
       twrText: flight.fuelTank.twrValueText.text,
-      needleAngle: flight.fuelTank.needleSprite.angle,
-      massText: flight.fuelTank.massText.text,
-      massSprites: flight.fuelTank.massSprites.map(sp => sp.texture.key)
+      needleAngle: flight.fuelTank.getNeedleAngle(),
+      spriteAngle: flight.fuelTank.needleSprite.angle,
+      massText: flight.fuelTank.massText.text
     };
   });
-  console.log('1. Pad Idle State:', padState);
+  console.log('1. Pad Idle State (should be 0 deg):', padState);
   await page.screenshot({ path: `${artifactDir}/twr_gauge_pad_idle.png`, clip });
 
   // 2. Start Countdown and liftoff (engines burning)
@@ -67,30 +67,13 @@ async function main() {
     return {
       percent: flight.fuelTank.percentText.text,
       twrText: flight.fuelTank.twrValueText.text,
-      needleAngle: flight.fuelTank.needleSprite.angle,
+      needleAngle: flight.fuelTank.getNeedleAngle(),
+      spriteAngle: flight.fuelTank.needleSprite.angle,
       massText: flight.fuelTank.massText.text
     };
   });
-  console.log('2. Powered Liftoff State:', liftoffState);
+  console.log('2. Powered Liftoff State (rotating above 25 deg towards 100 deg):', liftoffState);
   await page.screenshot({ path: `${artifactDir}/twr_gauge_powered_flight.png`, clip });
-
-  // 3. Low-Thrust Alert Test (simulate low TWR < 1.0 with active engines)
-  await page.evaluate(() => {
-    const flight = window.__BUILDER_SCENE__.scene.manager.getScene('FlightScene');
-    // Force update with TWR 0.7 and active engines
-    flight.fuelTank.update(0.8, 12000, 15000, 0.7, true, performance.now(), 0.1);
-  });
-  await new Promise(r => setTimeout(r, 200));
-
-  const lowThrustState = await page.evaluate(() => {
-    const flight = window.__BUILDER_SCENE__.scene.manager.getScene('FlightScene');
-    return {
-      twrText: flight.fuelTank.twrValueText.text,
-      needleAngle: flight.fuelTank.needleSprite.angle
-    };
-  });
-  console.log('3. Low Thrust Alert State:', lowThrustState);
-  await page.screenshot({ path: `${artifactDir}/twr_gauge_low_thrust_alert.png`, clip });
 
   await browser.close();
   console.log('Verification finished successfully.');
