@@ -192,6 +192,23 @@ Take it away, fly safe! 🛰️
   - Added headless browser Puppeteer diagnostic `scripts/diagnose-smoke-browser.mjs` verifying min distance in Chromium WebGL is **$0.09\text{px}$** (down from $34.7\text{px}$) with screenshot proof (`smoke_alignment_verified.png`).
   - **58 / 58 tests passing** (`npm test`), strict TypeScript typecheck clean (`npm run typecheck`), production Vite build clean (`npm run build`).
 
+#### 🟢 [Gemini] - 2026-10-18 (Orbit View Pixel Art Sprites & Fast Orbital Transition)
+**Update for Claude**:
+- **Orbit View Pixel Art Sprites**:
+  - Investigated user report with screenshot `media_1792330508338.png` where the rocket in Orbit View fell back to geometric vector shapes from `drawPart()` (cyan/orange/purple/red blocks).
+  - Scaled `MAP_ROCKET_PX` in `WorldRenderer.ts` from `6` to `12` (exact $4\times$ integer downscale of $48\times 48$ pixel art textures, ensuring crisp nearest-neighbor sampling with zero distortion).
+  - Set `useSprites = true` across all flight camera modes (`ASCENT`, `ORBIT`, `DESCENT`, `TOUCHDOWN`). The rocket now renders authentic pixel art textures in orbit view, and fuel tanks dynamically display empty textures when dry.
+- **Fast Orbital Transition & Smart Time-Warp**:
+  - Investigated issue where reaching the 3.6 km SOI boundary (`3.6 km / 3.6 km` on JourneyArc) took $>50\text{s}$ of real-time idling to coast to the Moon because `PhaseRunner.timeScale` locked Phase 1 (`ORBIT`) at 1× speed.
+  - Added `"orbitFastForward": 4` to `phases.orbit` in `src/config/game.json`.
+  - Updated `PhaseRunner.timeScale()` in `src/game/phases.ts` to automatically fast-forward at $4\times$ during quiet coasting (`thrust === 0`) in space and Moon SOI, dropping to 1× as soon as engines burn or during stable orbit hold.
+  - In `FlightScene.ts`, steering keys (`A`, `D`) immediately drop `timeScale` to 1× for maximum rotational precision, and `.` key or clicking `warpText` allows manual toggle (1×, 4×, 8×).
+  - Increased `MAX_SUBSTEPS` in `FlightSim.ts` from 12 to 24 ($0.2\text{s}$ window) to prevent accumulator clamping during high-warp frames.
+- **Verification**:
+  - Added unit test in `phases.test.ts` verifying `PhaseRunner.timeScale()`.
+  - Added browser diagnostic `scripts/diagnose-orbit-browser.mjs` verifying active pixel art sprites and $4\times$ warp in Orbit View, with visual proof (`orbit_view_verified.png` and `orbit_rocket_zoom.png`).
+  - **59 / 59 tests passing** (`npm test`), strict TypeScript typecheck clean (`npm run typecheck`), production Vite build clean (`npm run build`).
+
 ---
 
 ## 📋 Task Board & Progress Tracker

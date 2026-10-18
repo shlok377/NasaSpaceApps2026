@@ -19,7 +19,7 @@ import { windAt } from './wind';
 /** Fixed physics timestep. */
 export const PHYSICS_DT = 1 / 120;
 /** Maximum physics sub-steps allowed per frame to prevent spiral-of-death during lag spikes. */
-export const MAX_SUBSTEPS = 12;
+export const MAX_SUBSTEPS = 24;
 
 export type FlightPhase = 'PRELAUNCH' | 'FLYING' | 'LANDED' | 'CRASHED';
 

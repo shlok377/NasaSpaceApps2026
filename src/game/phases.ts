@@ -1,6 +1,6 @@
 import { CONFIG, deg } from '../config';
 import { gravityAt, insideMoonSoi, moonAltitude, moonAngleOf, surfaceDistance } from '../physics/bodies';
-import { MOON, MOON_CENTER } from '../physics/constants';
+import { MOON, MOON_CENTER, WORLD } from '../physics/constants';
 import { FlightSim, FlightSnapshot, FlightTelemetry } from '../physics/FlightSim';
 import { momentOfInertia } from '../physics/vehicle';
 
@@ -417,14 +417,30 @@ export class PhaseRunner {
 
   /** How fast the scene may run time right now (quiet stretches in orbit go by faster). */
   public timeScale(sim: FlightSim): number {
-    if (this.over || sim.phase !== 'FLYING' || this.phase !== 'ROVER' || this.problem) return 1;
-    if (this.rover && !this.rover.landed) return ROVER_CFG.orbitFastForward;
-    if (this.dropReady && !this.rover) {
-      if (sim.getTelemetry().thrust > 0) return 1;
-      const hit = predictRoverLanding(sim);
-      if (hit && surfaceDistance(hit.angle, ROVER_ZONE.angle) < ROVER_ZONE.halfWidth * 5) return 1;
-      return ROVER_CFG.orbitFastForward;
+    if (this.over || sim.phase !== 'FLYING' || this.problem) return 1;
+
+    if (this.phase === 'ORBIT') {
+      const t = sim.getTelemetry();
+      // Drop to 1x when burning engines or when orbit is already stable (for clear 3s hold countdown)
+      if (t.thrust > 0 || isStableOrbit(t)) return 1;
+      // Coasting in space outside atmosphere or inside Moon SOI
+      if (insideMoonSoi(sim.state.x, sim.state.y) || sim.state.y >= WORLD.atmosphereTop) {
+        return ORBIT_CFG.orbitFastForward;
+      }
+      return 1;
     }
+
+    if (this.phase === 'ROVER') {
+      if (this.rover && !this.rover.landed) return ROVER_CFG.orbitFastForward;
+      if (this.dropReady && !this.rover) {
+        if (sim.getTelemetry().thrust > 0) return 1;
+        const hit = predictRoverLanding(sim);
+        if (hit && surfaceDistance(hit.angle, ROVER_ZONE.angle) < ROVER_ZONE.halfWidth * 5) return 1;
+        return ROVER_CFG.orbitFastForward;
+      }
+      return 1;
+    }
+
     return 1;
   }
 

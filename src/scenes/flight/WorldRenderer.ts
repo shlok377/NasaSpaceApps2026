@@ -14,7 +14,7 @@ export const SCREEN_CY = 400;
 /** Pixels per metre on the pad (one grid cell = one metre). */
 export const CELL_PX = CONFIG.camera.ascentScale;
 /** In the orbit map the rocket is drawn this many pixels per part, so its heading stays readable. */
-const MAP_ROCKET_PX = 6;
+const MAP_ROCKET_PX = 12;
 
 export const WORLD_COLORS = {
   skyLow: 0x6fb1e6,
@@ -855,7 +855,7 @@ export class WorldRenderer {
     const cellPx = this.camera.rocketScale;
     const visual = cellPx / this.camera.scale; // metres-per-cell as drawn
     this.activeSpriteCount = 0;
-    const useSprites = this.camera.mode !== 'ORBIT' && cellPx > 8;
+    const useSprites = true;
 
     // Tumbling debris (not on the orbit map, where it would just be clutter).
     if (this.camera.mode !== 'ORBIT') {
