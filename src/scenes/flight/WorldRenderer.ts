@@ -8,6 +8,7 @@ import { gravityAt, insideMoonSoi, localUp, moonAltitude, moonSurfacePoint } fro
 import { MOON, MOON_CENTER, ROCK_BELT, WORLD } from '../../physics/constants';
 import { FlightSim, FlightTelemetry } from '../../physics/FlightSim';
 import { FlightPart } from '../../physics/vehicle';
+import { computeScreenRetrograde, ScreenRetrogradeVector } from '../../physics/guidance';
 import { GAME_ASSETS, getPartTextureKey } from '../../core/assets';
 import { UI } from '../../ui/theme';
 
@@ -55,6 +56,9 @@ export interface Camera {
   rocketScale: number;
   mode: CameraMode;
 }
+
+export type { ScreenRetrogradeVector };
+export { computeScreenRetrograde };
 
 /** What the mission wants drawn on the Moon and in orbit this frame. */
 export interface MissionOverlay {
@@ -132,6 +136,7 @@ export class WorldRenderer {
   private pathColor: number = WORLD_COLORS.zone;
   private pathAt = -Infinity;
   private smoothedRocketY = 470;
+  private readonly cachedRetrogradeVec: ScreenRetrogradeVector = { dirX: 0, dirY: 0, alpha: 0 };
 
   constructor(private readonly scene: Phaser.Scene) {
     const rng = new Phaser.Math.RandomDataGenerator(['moonshot']);
@@ -379,7 +384,7 @@ export class WorldRenderer {
     } else {
       this.hideSmokeSprites();
       this.drawMoonCloseUp(sim, overlay);
-      this.drawRetrogradeArrow(sim, t);
+      this.drawRetrogradeArrow(sim);
     }
     this.drawRocketAndDebris(sim, t, alive, shield);
     for (let i = this.labelIndex; i < this.labels.length; i++) this.labels[i].setVisible(false);
@@ -869,29 +874,17 @@ export class WorldRenderer {
 
   /**
    * Calculates the unit screen-space retrograde vector (opposite to velocity)
-   * and visibility alpha based on speed.
+   * and visibility alpha based on speed. Zero heap allocation via cached instance.
    */
-  public getRetrogradeScreenVector(sim: FlightSim): { dirX: number; dirY: number; alpha: number } | null {
-    const s = sim.state;
-    const speed = Math.hypot(s.vx, s.vy);
-    if (speed < 0.5) return null;
-
-    const r = this.toScreen(s.x, s.y);
-    const p2 = this.toScreen(s.x - s.vx / speed, s.y - s.vy / speed);
-    const rx = p2.x - r.x;
-    const ry = p2.y - r.y;
-    const len = Math.hypot(rx, ry);
-    if (len < 1e-4) return null;
-
-    const alpha = Phaser.Math.Clamp((speed - 0.5) / 1.5, 0, 1) * 0.9;
-    return { dirX: rx / len, dirY: ry / len, alpha };
+  public getRetrogradeScreenVector(sim: FlightSim): ScreenRetrogradeVector | null {
+    return computeScreenRetrograde(sim.state.vx, sim.state.vy, this.camera.upAngle, this.cachedRetrogradeVec);
   }
 
   /**
    * Passive lunar landing guidance: a dashed arrow extending outward from the
    * vehicle pointing opposite to velocity (retrograde). Fades out below 0.5 m/s.
    */
-  private drawRetrogradeArrow(sim: FlightSim, _t: FlightTelemetry): void {
+  private drawRetrogradeArrow(sim: FlightSim): void {
     if (this.camera.mode !== 'DESCENT' && this.camera.mode !== 'TOUCHDOWN') return;
     const vec = this.getRetrogradeScreenVector(sim);
     if (!vec || vec.alpha <= 0.01) return;
