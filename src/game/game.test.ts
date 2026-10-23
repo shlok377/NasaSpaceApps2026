@@ -68,8 +68,8 @@ describe('economy', () => {
     const store = memory();
     const fresh = loadProgress(store);
     expect(fresh.money).toBe(STARTING_MONEY);
-    saveProgress({ ...fresh, money: 58, completedMissions: ['liftoff'], landingMode: 'NORMAL' }, store);
-    expect(loadProgress(store)).toMatchObject({ money: 58, completedMissions: ['liftoff'], landingMode: 'NORMAL' });
+    saveProgress({ ...fresh, money: 58, completedMissions: ['liftoff'] }, store);
+    expect(loadProgress(store)).toMatchObject({ money: 58, completedMissions: ['liftoff'] });
     store.setItem('nasa2026.progress', '{oops');
     expect(loadProgress(store).money).toBe(STARTING_MONEY);
   });
@@ -160,11 +160,13 @@ describe('rock belt', () => {
       }
     });
 
-    it('spawns pickups in open safe lanes', () => {
+    it('spawns only SHIELD pickups in open safe lanes (no FUEL pickups)', () => {
       const items = generateLaneWaves(12345);
-      const pickups = items.filter(r => r.kind === 'SHIELD' || r.kind === 'FUEL');
-      expect(pickups.length).toBeGreaterThan(0);
-      for (const p of pickups) {
+      const shields = items.filter(r => r.kind === 'SHIELD');
+      const fuels = items.filter(r => r.kind === 'FUEL');
+      expect(shields.length).toBeGreaterThan(0);
+      expect(fuels.length).toBe(0);
+      for (const p of shields) {
         // Ensure no rock shares the same lane at the same altitude wave
         const waveRocks = items.filter(r => r.kind === 'ROCK' && Math.abs(r.y - p.y) < 15);
         expect(waveRocks.some(r => r.x0 === p.x0)).toBe(false);

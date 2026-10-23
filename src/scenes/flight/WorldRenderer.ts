@@ -3,7 +3,7 @@ import { CONFIG } from '../../config';
 import { PART_DEFINITIONS } from '../../core/partDefinitions';
 import { BOULDER_FIELD, ROVER_ZONE, RoverCapsule, SurfaceZone } from '../../game/phases';
 import { Rock, rockX } from '../../game/rocks';
-import { EvasiveRunnerState, RUNNER_LANES } from '../../game/evasiveRunner';
+import { EvasiveRunnerState, RUNNER_CONFIG, RUNNER_LANES } from '../../game/evasiveRunner';
 import { gravityAt, insideMoonSoi, localUp, moonAltitude, moonSurfacePoint } from '../../physics/bodies';
 import { MOON, MOON_CENTER, ROCK_BELT, WORLD } from '../../physics/constants';
 import { FlightSim, FlightTelemetry } from '../../physics/FlightSim';
@@ -214,11 +214,17 @@ export class WorldRenderer {
     }
 
     if (mode === 'ASCENT') {
-      c.scale = cam.ascentScale;
+      const targetScale = runnerActive ? (RUNNER_CONFIG?.cameraScale ?? 14) : cam.ascentScale;
+      if (snap) {
+        c.scale = targetScale;
+      } else {
+        c.scale += (targetScale - c.scale) * (1 - Math.exp(-dt * 3));
+      }
       c.rocketScale = c.scale;
       const targetUp = Math.PI / 2;
       const climbFactor = sim.onGround ? 1 : Phaser.Math.Clamp((t.verticalSpeed + 8) / 16, 0, 1);
-      const targetRocketY = 260 + (470 - 260) * climbFactor;
+      const normalRocketY = 260 + (470 - 260) * climbFactor;
+      const targetRocketY = runnerActive ? (RUNNER_CONFIG?.rocketY ?? 560) : normalRocketY;
 
       if (snap) {
         this.smoothedRocketY = targetRocketY;
@@ -373,6 +379,7 @@ export class WorldRenderer {
     } else {
       this.hideSmokeSprites();
       this.drawMoonCloseUp(sim, overlay);
+      this.drawRetrogradeArrow(sim, t);
     }
     this.drawRocketAndDebris(sim, t, alive, shield);
     for (let i = this.labelIndex; i < this.labels.length; i++) this.labels[i].setVisible(false);
@@ -858,6 +865,79 @@ export class WorldRenderer {
     }
 
     this.drawMissionMarks(g, overlay, false);
+  }
+
+  /**
+   * Calculates the unit screen-space retrograde vector (opposite to velocity)
+   * and visibility alpha based on speed.
+   */
+  public getRetrogradeScreenVector(sim: FlightSim): { dirX: number; dirY: number; alpha: number } | null {
+    const s = sim.state;
+    const speed = Math.hypot(s.vx, s.vy);
+    if (speed < 0.5) return null;
+
+    const r = this.toScreen(s.x, s.y);
+    const p2 = this.toScreen(s.x - s.vx / speed, s.y - s.vy / speed);
+    const rx = p2.x - r.x;
+    const ry = p2.y - r.y;
+    const len = Math.hypot(rx, ry);
+    if (len < 1e-4) return null;
+
+    const alpha = Phaser.Math.Clamp((speed - 0.5) / 1.5, 0, 1) * 0.9;
+    return { dirX: rx / len, dirY: ry / len, alpha };
+  }
+
+  /**
+   * Passive lunar landing guidance: a dashed arrow extending outward from the
+   * vehicle pointing opposite to velocity (retrograde). Fades out below 0.5 m/s.
+   */
+  private drawRetrogradeArrow(sim: FlightSim, _t: FlightTelemetry): void {
+    if (this.camera.mode !== 'DESCENT' && this.camera.mode !== 'TOUCHDOWN') return;
+    const vec = this.getRetrogradeScreenVector(sim);
+    if (!vec || vec.alpha <= 0.01) return;
+
+    const r = this.rocketScreen(sim);
+    const g = this.worldGfx;
+    const { dirX, dirY, alpha } = vec;
+
+    const startDist = Math.max(34, this.camera.rocketScale * 1.6);
+    const stemLength = 48;
+    const endDist = startDist + stemLength;
+
+    // Draw dashed stem
+    const dashLen = 6;
+    const gapLen = 4;
+    const step = dashLen + gapLen;
+    g.lineStyle(2.5, 0x38bdf8, alpha);
+
+    for (let d = startDist; d + dashLen <= endDist; d += step) {
+      const x1 = r.x + dirX * d;
+      const y1 = r.y + dirY * d;
+      const x2 = r.x + dirX * (d + dashLen);
+      const y2 = r.y + dirY * (d + dashLen);
+      g.lineBetween(x1, y1, x2, y2);
+    }
+
+    // Draw arrowhead at end
+    const tipDist = endDist + 10;
+    const tipX = r.x + dirX * tipDist;
+    const tipY = r.y + dirY * tipDist;
+
+    const baseX = r.x + dirX * endDist;
+    const baseY = r.y + dirY * endDist;
+    const perpX = -dirY;
+    const perpY = dirX;
+    const headWidth = 6.5;
+
+    g.fillStyle(0x38bdf8, alpha);
+    g.fillTriangle(
+      tipX,
+      tipY,
+      baseX + perpX * headWidth,
+      baseY + perpY * headWidth,
+      baseX - perpX * headWidth,
+      baseY - perpY * headWidth
+    );
   }
 
   // ---------------------------------------------------------------------------

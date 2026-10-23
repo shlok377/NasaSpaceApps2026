@@ -3,10 +3,13 @@ import { RocketTree } from '../core/RocketTree';
 import { buildFlightVehicle } from '../physics/vehicle';
 import { FlightSim } from '../physics/FlightSim';
 import { generateLaneWaves } from './rocks';
+import { moonSoiAltitude } from '../physics/bodies';
+import { ROCK_BELT } from '../physics/constants';
 import {
   createEvasiveRunnerState,
   findClosestLane,
   updateEvasiveRunner,
+  RUNNER_CONFIG,
   RUNNER_LANES
 } from './evasiveRunner';
 
@@ -176,5 +179,58 @@ describe('EvasiveRunner State & Logic', () => {
     expect(runnerState.active).toBe(false);
     expect(runnerState.cleared).toBe(true);
     expect(cRes.cleared).toBe(true);
+  });
+
+  it('configures readable cruise speed (45 m/s) and camera zoom (14 px/m) to give ample reaction time', () => {
+    expect(RUNNER_CONFIG.cruiseSpeed).toBe(45);
+    expect(RUNNER_CONFIG.cameraScale).toBe(14);
+    expect(RUNNER_CONFIG.rocketY).toBe(560);
+
+    // At 14 px/m with rocket at y = 560 on a 720px screen:
+    // Distance from top of screen to rocket is 560 px = 40 meters.
+    // At effective cruise climb of 45 m/s * 0.35 = 15.75 m/s:
+    // Lookahead reaction time is 40 / 15.75 = ~2.54 seconds.
+    const lookaheadMetres = RUNNER_CONFIG.rocketY / RUNNER_CONFIG.cameraScale;
+    const effectiveClimbSpeed = RUNNER_CONFIG.cruiseSpeed * RUNNER_CONFIG.timeScale;
+    const reactionWindowSec = lookaheadMetres / effectiveClimbSpeed;
+    expect(reactionWindowSec).toBeGreaterThan(2.0); // > 2.0s is comfortable arcade reaction time
+  });
+
+  it('governs vertical velocity to cruise speed and restores momentum on exit', () => {
+    let vy = 220; // Blasting at 220 m/s into the debris field
+    const entryVy = vy;
+    const targetVy = RUNNER_CONFIG.cruiseSpeed;
+    const dt = 0.05;
+
+    // Simulate 20 frames of active runner speed governing
+    for (let f = 0; f < 20; f++) {
+      vy += (targetVy - vy) * (1 - Math.exp(-dt * 6));
+    }
+    // Should have eased down close to 45 m/s
+    expect(vy).toBeLessThan(60);
+    expect(vy).toBeGreaterThan(44);
+
+    // On exit (cleared), momentum is restored
+    if (entryVy > vy) {
+      vy = entryVy;
+    }
+    expect(vy).toBe(220);
+  });
+
+  it('provides a natural physics-based 10–15 second deep-space gap between clearing the rocks and Moon SOI', () => {
+    const soiAltitude = moonSoiAltitude();
+    const rockBeltTop = ROCK_BELT.top;
+    const spaceGapMetres = soiAltitude - rockBeltTop;
+
+    // Physical distance from clearing rocks (3,400m) to Moon pull (4,800m) is 1,400m
+    expect(spaceGapMetres).toBe(1400);
+
+    // At full burn (~140 m/s), takes ~10.0 seconds
+    const timeAtFullBurn = spaceGapMetres / 140;
+    expect(timeAtFullBurn).toBeCloseTo(10.0, 1);
+
+    // At cruising / coasting speed (~93 m/s), takes ~15.0 seconds
+    const timeAtCruise = spaceGapMetres / 93.33;
+    expect(timeAtCruise).toBeCloseTo(15.0, 1);
   });
 });

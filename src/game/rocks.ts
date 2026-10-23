@@ -114,7 +114,7 @@ export function generateLaneWaves(seed = 2026): Rock[] {
       const laneX = lanes[laneIdx];
       if (safeLaneIndices.has(laneIdx)) {
         if (waveIndex % 2 === 1 && rand() < 0.75) {
-          const kind: RockKind = rand() < 0.5 ? 'SHIELD' : 'FUEL';
+          const kind: RockKind = 'SHIELD';
           items.push({
             id: items.length,
             kind,
@@ -145,8 +145,8 @@ export function generateLaneWaves(seed = 2026): Rock[] {
     waveIndex++;
   }
 
-  // Guarantee at least one SHIELD and one FUEL pickup across the run
-  const kinds: RockKind[] = ['SHIELD', 'FUEL'];
+  // Guarantee at least one SHIELD pickup across the run
+  const kinds: RockKind[] = ['SHIELD'];
   for (const kind of kinds) {
     if (!items.some(i => i.kind === kind)) {
       for (let y = ROCK_BELT.bottom + interval; y < ROCK_BELT.top; y += interval) {
