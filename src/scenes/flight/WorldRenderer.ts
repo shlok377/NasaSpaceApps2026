@@ -114,6 +114,9 @@ export class WorldRenderer {
   public camera: Camera = { x: 0, y: 0, upAngle: Math.PI / 2, scale: CELL_PX, rocketScale: CELL_PX, mode: 'ASCENT' };
   private readonly skyGfx: Phaser.GameObjects.Graphics;
   private readonly skyMoonSprite: Phaser.GameObjects.Image;
+  private readonly mapMoonSprite: Phaser.GameObjects.Image;
+  private readonly roverFlagSprite: Phaser.GameObjects.Image;
+  private readonly landingFlagSprite: Phaser.GameObjects.Image;
   private readonly smokeSpritesContainer: Phaser.GameObjects.Container;
   private readonly smokeSpritesPool: Phaser.GameObjects.Image[] = [];
   private lastSkyAltitude = -Infinity;
@@ -150,7 +153,21 @@ export class WorldRenderer {
     });
     this.dust = Array.from({ length: 34 }, () => ({ x: rng.realInRange(-30, 30), y: rng.realInRange(-20, 20) }));
     this.skyGfx = scene.add.graphics();
-    this.skyMoonSprite = scene.add.image(0, 0, GAME_ASSETS.UI_MOON.key).setVisible(false);
+    this.skyMoonSprite = scene.add.image(0, 0, GAME_ASSETS.UI_MOON_BIG.key);
+    this.skyMoonSprite?.setVisible?.(false);
+    this.skyMoonSprite?.setDepth?.(1);
+    this.mapMoonSprite = scene.add.image(0, 0, GAME_ASSETS.UI_MOON_BIG.key);
+    this.mapMoonSprite?.setOrigin?.(0.5, 0.5);
+    this.mapMoonSprite?.setVisible?.(false);
+    this.mapMoonSprite?.setDepth?.(0);
+    this.roverFlagSprite = scene.add.image(0, 0, GAME_ASSETS.FLAG_GREEN.key);
+    this.roverFlagSprite?.setOrigin?.(0.08, 0.97);
+    this.roverFlagSprite?.setVisible?.(false);
+    this.roverFlagSprite?.setDepth?.(5);
+    this.landingFlagSprite = scene.add.image(0, 0, GAME_ASSETS.FLAG_BLUE.key);
+    this.landingFlagSprite?.setOrigin?.(0.08, 0.97);
+    this.landingFlagSprite?.setVisible?.(false);
+    this.landingFlagSprite?.setDepth?.(5);
     this.ensureSmokeTexture();
     this.smokeSpritesContainer = scene.add.container(0, 0);
     this.worldGfx = scene.add.graphics();
@@ -380,8 +397,12 @@ export class WorldRenderer {
       this.hideSmokeSprites();
       this.drawOrbitMap(sim, t, overlay);
     } else if (this.camera.mode === 'ASCENT') {
+      this.mapMoonSprite?.setVisible?.(false);
+      this.roverFlagSprite?.setVisible?.(false);
+      this.landingFlagSprite?.setVisible?.(false);
       this.drawAscent(sim, t, rocks, runnerState);
     } else {
+      this.mapMoonSprite?.setVisible?.(false);
       this.hideSmokeSprites();
       this.drawMoonCloseUp(sim, overlay);
       this.drawRetrogradeArrow(sim);
@@ -428,12 +449,12 @@ export class WorldRenderer {
       const r = 26 + 210 * k * k;
       const cx = 900 - Phaser.Math.Clamp(sim.state.x * 0.08, -200, 200) - 200 * k;
       const cy = 230 - 120 * k;
-      this.skyMoonSprite.setPosition(cx, cy);
-      this.skyMoonSprite.setDisplaySize(r * 2, r * 2);
-      this.skyMoonSprite.setAlpha(0.25 + 0.75 * (1 - air * 0.5));
-      this.skyMoonSprite.setVisible(true);
+      this.skyMoonSprite?.setPosition?.(cx, cy);
+      this.skyMoonSprite?.setDisplaySize?.(r * 2, r * 2);
+      this.skyMoonSprite?.setAlpha?.(0.25 + 0.75 * (1 - air * 0.5));
+      this.skyMoonSprite?.setVisible?.(true);
     } else {
-      this.skyMoonSprite.setVisible(false);
+      this.skyMoonSprite?.setVisible?.(false);
     }
   }
 
@@ -716,12 +737,20 @@ export class WorldRenderer {
 
     // The Moon.
     const mr = MOON.radius * scale;
-    g.fillStyle(WORLD_COLORS.moon, 1);
-    g.fillCircle(mc.x, mc.y, mr);
-    g.fillStyle(WORLD_COLORS.moonDark, 1);
-    g.fillCircle(mc.x - mr * 0.35, mc.y - mr * 0.2, mr * 0.16);
-    g.fillCircle(mc.x + mr * 0.3, mc.y + mr * 0.3, mr * 0.11);
-    g.fillCircle(mc.x + mr * 0.15, mc.y - mr * 0.45, mr * 0.08);
+    const hasMoonTex = this.scene.textures ? this.scene.textures.exists(GAME_ASSETS.UI_MOON_BIG.key) : false;
+    if (hasMoonTex && this.mapMoonSprite) {
+      this.mapMoonSprite.setPosition?.(mc.x, mc.y);
+      this.mapMoonSprite.setDisplaySize?.(mr * 2, mr * 2);
+      this.mapMoonSprite.setVisible?.(true);
+    } else {
+      this.mapMoonSprite?.setVisible?.(false);
+      g.fillStyle(WORLD_COLORS.moon, 1);
+      g.fillCircle(mc.x, mc.y, mr);
+      g.fillStyle(WORLD_COLORS.moonDark, 1);
+      g.fillCircle(mc.x - mr * 0.35, mc.y - mr * 0.2, mr * 0.16);
+      g.fillCircle(mc.x + mr * 0.3, mc.y + mr * 0.3, mr * 0.11);
+      g.fillCircle(mc.x + mr * 0.15, mc.y - mr * 0.45, mr * 0.08);
+    }
 
     // Debris swarm.
     if (overlay.debrisRing !== null) {
@@ -790,13 +819,44 @@ export class WorldRenderer {
     }
   }
 
+  private renderFlag(
+    g: Phaser.GameObjects.Graphics,
+    sprite: Phaser.GameObjects.Image,
+    texKey: string,
+    angle: number,
+    color: number,
+    map: boolean
+  ): { x: number; y: number } {
+    const flagSize = map ? 20 : Math.max(22, Math.min(36, 6 * this.camera.scale));
+    const heightMetres = flagSize / this.camera.scale;
+    const base = moonSurfacePoint(angle);
+    const top = moonSurfacePoint(angle, heightMetres);
+    const b = this.toScreen(base.x, base.y);
+    const t = this.toScreen(top.x, top.y);
+
+    const hasTexture = this.scene.textures ? this.scene.textures.exists(texKey) : false;
+    if (hasTexture && sprite?.setVisible) {
+      sprite.setPosition?.(b.x, b.y);
+      sprite.setRotation?.(this.screenRotation(angle));
+      sprite.setDisplaySize?.(flagSize, flagSize);
+      sprite.setVisible?.(true);
+    } else {
+      sprite?.setVisible?.(false);
+      this.flag(g, angle, color, heightMetres);
+    }
+
+    return t;
+  }
+
   /** Zones, sites, rovers and markers on the Moon's surface (map or close-up). */
   private drawMissionMarks(g: Phaser.GameObjects.Graphics, overlay: MissionOverlay, map: boolean): void {
     const pulse = 0.65 + 0.35 * Math.sin(this.scene.time.now / 220);
     if (overlay.roverZone) {
       this.surfaceArc(g, ROVER_ZONE, WORLD_COLORS.zone, map ? 7 : 10, pulse);
-      const top = this.flag(g, ROVER_ZONE.angle, WORLD_COLORS.zone, map ? 260 : 6);
-      this.label(top.x, top.y - 14, 'ROVER ZONE', '#4ade80', 12);
+      const top = this.renderFlag(g, this.roverFlagSprite, GAME_ASSETS.FLAG_GREEN.key, ROVER_ZONE.angle, WORLD_COLORS.zone, map);
+      this.label(top.x, top.y - 12, 'ROVER ZONE', '#4ade80', 12);
+    } else {
+      this.roverFlagSprite?.setVisible?.(false);
     }
     for (const angle of overlay.landedRovers) {
       const p = moonSurfacePoint(angle, map ? 0 : 0.8);
@@ -818,8 +878,10 @@ export class WorldRenderer {
     }
     if (overlay.site) {
       this.surfaceArc(g, overlay.site, WORLD_COLORS.site, map ? 7 : 10, pulse);
-      const top = this.flag(g, overlay.site.angle, WORLD_COLORS.site, map ? 260 : 6);
-      this.label(top.x, top.y - 14, 'LANDING SITE', '#7dd3fc', 12);
+      const top = this.renderFlag(g, this.landingFlagSprite, GAME_ASSETS.FLAG_BLUE.key, overlay.site.angle, WORLD_COLORS.site, map);
+      this.label(top.x, top.y - 12, 'LANDING SITE', '#7dd3fc', 12);
+    } else {
+      this.landingFlagSprite?.setVisible?.(false);
     }
     if (overlay.dropMarker) {
       const p = this.toScreen(overlay.dropMarker.x, overlay.dropMarker.y);

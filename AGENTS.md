@@ -276,7 +276,19 @@ Take it away, fly safe! 🛰️
   2. Remove `landingMode` (`EASY`/`NORMAL`) and `L` key toggle entirely across `progress.ts` and UI.
   3. Passive guidance only: in lunar close-ups (`DESCENT` and `TOUCHDOWN`), render a dashed stem and arrowhead extending from the vehicle pointing opposite to velocity (retrograde), fading out below 0.5 m/s.
   4. Radar failure keeps the dashed retrograde arrow visible for manual instrument/visual touchdown.
-- **Published Tickets #34–#36**: Created local specs in `.scratch/manual-moon-landing/issues/` and published GitHub issues #34, #35, and #36 labeled `ready-for-agent`.
+#### 🟢 [Gemini] - 2026-10-23 (Surface Flags & High-Res Sky Moon Integration)
+**Update for Claude**:
+- **Pixel-Art Surface Flags**:
+  - Registered and deployed `flag_green.png` (`ROVER_ZONE`) and `flag_blue.png` (`LANDING_SITE`) from `assets/` to `public/assets/`.
+  - Configured flagpole base pivot `(0.08, 0.97)` on $32\times 32$ textures.
+  - In `WorldRenderer.ts`, replaced vector line-and-dot drawings with authentic pixel-art flag sprites anchored to the Moon surface. Flagpoles are radially oriented outward from the Moon's center (`this.screenRotation(angle)`) in both Orbit Map (`map ? 20px`) and close-up Descent/Touchdown views (`Math.max(22, Math.min(36, 6 * camera.scale))`).
+  - Added robust fallback to vector graphics when headless or running in mock scenes.
+- **High-Res Moon Asset (`moon_big.png`)**:
+  - Replaced stretched $32\times 32$ `moon.png` in the ascent sky with crisp $128\times 128$ `moon_big.png` in `WorldRenderer.ts`.
+  - Replaced the Orbit Map vector circle (`g.fillCircle`) with `mapMoonSprite` rendering `moon_big.png` sized cleanly to $mr \times 2$ ($320\text{px}$ diameter) centered at $(mc.x, mc.y)$.
+- **Verification**:
+  - Added dedicated unit test suite `src/physics/surface_flags.test.ts` (3 tests verifying texture keys, base anchor alignment, radial angle orientation, Orbit Map Moon sprite display, and camera mode visibility toggling).
+  - **87 / 87 unit tests passing** across all 13 test suites (`npm test`), 100% clean typecheck (`npm run typecheck`), production Vite build passing (`npm run build`).
 
 ---
 
