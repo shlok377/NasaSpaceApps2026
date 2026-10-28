@@ -4,7 +4,7 @@ import { ROCK_BELT } from '../physics/constants';
 import { VehicleReport } from '../physics/vehicle';
 import { currentMission, MISSIONS, newlyCompleted, rocketCost } from './missions';
 import { flightEarnings, GRANT_FLOOR, loadProgress, saveProgress, STARTING_MONEY, withGrant } from './progress';
-import { BELT, checkBelt, Combo, generateBelt, rockX } from './rocks';
+import { BELT, checkBelt, Combo, generateBelt, generateLaneWaves, rockX, RUNNER_LANES } from './rocks';
 
 const stats: FlightStats = {
   maxAltitude: 0,
@@ -68,8 +68,8 @@ describe('economy', () => {
     const store = memory();
     const fresh = loadProgress(store);
     expect(fresh.money).toBe(STARTING_MONEY);
-    saveProgress({ ...fresh, money: 58, completedMissions: ['liftoff'], landingMode: 'NORMAL' }, store);
-    expect(loadProgress(store)).toMatchObject({ money: 58, completedMissions: ['liftoff'], landingMode: 'NORMAL' });
+    saveProgress({ ...fresh, money: 58, completedMissions: ['liftoff'] }, store);
+    expect(loadProgress(store)).toMatchObject({ money: 58, completedMissions: ['liftoff'] });
     store.setItem('nasa2026.progress', '{oops');
     expect(loadProgress(store).money).toBe(STARTING_MONEY);
   });
@@ -119,5 +119,58 @@ describe('rock belt', () => {
     expect(combo.nearMiss(0)).toBe(1);
     expect(combo.nearMiss(2)).toBe(2);
     expect(combo.nearMiss(2 + BELT.comboWindow + 1)).toBe(1);
+  });
+
+  describe('evasive runner lane waves', () => {
+    it('defines 5 discrete lanes from config', () => {
+      expect(RUNNER_LANES).toEqual([-20, -10, 0, 10, 20]);
+    });
+
+    it('generates waves within the rock belt altitude range', () => {
+      const items = generateLaneWaves(12345);
+      const rocks = items.filter(r => r.kind === 'ROCK');
+      expect(rocks.length).toBeGreaterThan(0);
+      expect(rocks.every(r => r.y >= ROCK_BELT.bottom && r.y <= ROCK_BELT.top)).toBe(true);
+    });
+
+    it('aligns all obstacles to discrete lanes with zero horizontal drift', () => {
+      const items = generateLaneWaves(12345);
+      for (const item of items) {
+        expect(RUNNER_LANES).toContain(item.x0);
+        expect(item.vx).toBe(0);
+      }
+    });
+
+    it('guarantees 1 to 2 safe open lanes in every wave', () => {
+      const items = generateLaneWaves(12345);
+      // Group items by wave altitude (within 10m tolerance)
+      const waveMap = new Map<number, typeof items>();
+      for (const item of items) {
+        const waveKey = Math.round(item.y / 70) * 70;
+        const list = waveMap.get(waveKey) ?? [];
+        list.push(item);
+        waveMap.set(waveKey, list);
+      }
+
+      for (const [, waveItems] of waveMap) {
+        const rockLanes = new Set(waveItems.filter(r => r.kind === 'ROCK').map(r => r.x0));
+        const safeLanes = RUNNER_LANES.filter(lane => !rockLanes.has(lane));
+        expect(safeLanes.length).toBeGreaterThanOrEqual(1);
+        expect(safeLanes.length).toBeLessThanOrEqual(2);
+      }
+    });
+
+    it('spawns only SHIELD pickups in open safe lanes (no FUEL pickups)', () => {
+      const items = generateLaneWaves(12345);
+      const shields = items.filter(r => r.kind === 'SHIELD');
+      const fuels = items.filter(r => r.kind === 'FUEL');
+      expect(shields.length).toBeGreaterThan(0);
+      expect(fuels.length).toBe(0);
+      for (const p of shields) {
+        // Ensure no rock shares the same lane at the same altitude wave
+        const waveRocks = items.filter(r => r.kind === 'ROCK' && Math.abs(r.y - p.y) < 15);
+        expect(waveRocks.some(r => r.x0 === p.x0)).toBe(false);
+      }
+    });
   });
 });

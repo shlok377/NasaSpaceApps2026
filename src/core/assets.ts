@@ -19,8 +19,13 @@ export const GAME_ASSETS = {
   UI_COIN: { key: 'ui_coin', path: 'assets/coin_img.png' },
   UI_EARTH: { key: 'ui_earth', path: 'assets/earth.png' },
   UI_MOON: { key: 'ui_moon', path: 'assets/moon.png' },
+  UI_MOON_BIG: { key: 'ui_moon_big', path: 'assets/moon_big.png' },
   UI_MASS: { key: 'ui_mass', path: 'assets/mass.png' },
-  UI_MASS_EMPTY: { key: 'ui_mass_empty', path: 'assets/mass_empty.png' }
+  UI_MASS_EMPTY: { key: 'ui_mass_empty', path: 'assets/mass_empty.png' },
+
+  // Mission Markers
+  FLAG_GREEN: { key: 'flag_green', path: 'assets/flag_green.png' },
+  FLAG_BLUE: { key: 'flag_blue', path: 'assets/flag_blue.png' }
 } as const;
 
 /**

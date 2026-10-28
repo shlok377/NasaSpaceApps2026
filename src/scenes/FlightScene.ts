@@ -14,9 +14,10 @@ import {
   PROBLEM_INFO
 } from '../game/phases';
 import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, PlayerProgress, saveProgress } from '../game/progress';
-import { checkBelt, Combo, generateBelt, Rock } from '../game/rocks';
+import { checkBelt, Combo, generateBelt, generateLaneWaves, Rock } from '../game/rocks';
+import { createEvasiveRunnerState, EvasiveRunnerState, updateEvasiveRunner, RUNNER_CONFIG } from '../game/evasiveRunner';
 import { Award, StuntTracker } from '../game/stunts';
-import { gravityAt, localUp, moonSoiAltitude } from '../physics/bodies';
+import { moonSoiAltitude } from '../physics/bodies';
 import { ENGINE, FINS, G0, LIMITS, ROCK_BELT, WORLD } from '../physics/constants';
 import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physics/FlightSim';
 import { evaluateMission, MAX_STARS, MissionResult } from '../physics/mission';
@@ -43,7 +44,7 @@ const THROTTLE_RATE = 0.9; // per second while a throttle key is held
 const APEX_INTERVAL_MS = 200;
 
 type Keys = Record<
-  'W' | 'S' | 'SHIFT' | 'CTRL' | 'Z' | 'X' | 'A' | 'D' | 'E' | 'F' | 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'SPACE' | 'ENTER' | 'ESC' | 'R' | 'B' | 'L',
+  'W' | 'S' | 'SHIFT' | 'CTRL' | 'Z' | 'X' | 'A' | 'D' | 'E' | 'F' | 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'SPACE' | 'ENTER' | 'ESC' | 'R' | 'B',
   Phaser.Input.Keyboard.Key
 >;
 
@@ -70,10 +71,6 @@ interface SceneCheckpoint extends Checkpoint {
   sparesLeft: number;
   solved: number;
   failedProblems: number;
-}
-
-function wrapAngle(a: number): number {
-  return Math.atan2(Math.sin(a), Math.cos(a));
 }
 
 function flattenTypes(node: HierarchicalRocketNode): PartType[] {
@@ -130,7 +127,6 @@ export class FlightScene extends Phaser.Scene {
   private coins!: CoinCounter;
   private launchButton!: LaunchButton;
   private missionText!: Phaser.GameObjects.Text;
-  private modeText!: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
   private bannerText!: Phaser.GameObjects.Text;
   private phaseTitle!: Phaser.GameObjects.Text;
@@ -177,6 +173,10 @@ export class FlightScene extends Phaser.Scene {
   private dropMarker: { x: number; y: number } | null = null;
   private impactMarker: { x: number; y: number } | null = null;
   private markerAt = -Infinity;
+  public runnerState: EvasiveRunnerState = createEvasiveRunnerState();
+  private spacePressedThisFrame = false;
+  private laneSteerInput = 0;
+  private runnerEntryVy = 0;
 
   constructor() {
     super('FlightScene');
@@ -202,6 +202,10 @@ export class FlightScene extends Phaser.Scene {
     this.repairPressed = false;
     this.timeScale = 1;
     this.titleTimer = 0;
+    this.runnerState = createEvasiveRunnerState();
+    this.spacePressedThisFrame = false;
+    this.laneSteerInput = 0;
+    this.runnerEntryVy = 0;
     this.progress = loadProgress();
     this.progressBeforeFinish = null;
     this.checkpoint = null;
@@ -279,9 +283,6 @@ export class FlightScene extends Phaser.Scene {
     this.missionText = this.add
       .text(640, 168, this.mission ? `MISSION: ${this.mission.title}: ${this.mission.goal}  (+$${this.mission.reward})` : 'All missions done: fly for the high score!', TEXT_STYLE(15, UI.goldText))
       .setOrigin(0.5);
-    this.modeText = this.add.text(640, 196, '', TEXT_STYLE(13, UI.textMuted)).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    this.modeText.on('pointerdown', () => this.toggleMode());
-
     this.hintText = this.add.text(640, 694, '', TEXT_STYLE(14)).setOrigin(0.5).setDepth(20);
     this.bannerText = this.add.text(640, 236, '', TEXT_STYLE(20, '#ffffff')).setOrigin(0.5, 0).setAlpha(0).setDepth(20);
     this.phaseTitle = this.add.text(640, 300, '', TEXT_STYLE(44, '#ffffff')).setOrigin(0.5).setAlpha(0).setDepth(30);
@@ -313,26 +314,26 @@ export class FlightScene extends Phaser.Scene {
     return [`Reaches ~${formatDistance(run.maxAltitude)}${warn}`, '#fbbf24'];
   }
 
-  private toggleMode(): void {
-    if (this.launched) return;
-    this.progress = { ...this.progress, landingMode: this.progress.landingMode === 'EASY' ? 'NORMAL' : 'EASY' };
-    saveProgress(this.progress);
-  }
-
   // ---------------------------------------------------------------------------
   // Input
   // ---------------------------------------------------------------------------
 
   private setupInput(): void {
-    this.keys = this.input.keyboard!.addKeys('W,S,SHIFT,CTRL,Z,X,A,D,E,F,LEFT,RIGHT,UP,DOWN,SPACE,ENTER,ESC,R,B,L') as Keys;
+    this.keys = this.input.keyboard!.addKeys('W,S,SHIFT,CTRL,Z,X,A,D,E,F,LEFT,RIGHT,UP,DOWN,SPACE,ENTER,ESC,R,B') as Keys;
     this.keys.SPACE.on('down', () => {
       if (this.sim.phase === 'PRELAUNCH') this.startCountdown();
+      else if (this.runnerState.promptActive) this.spacePressedThisFrame = true;
       else if (this.runner.dropRover(this.sim)) this.fx.ring(this.world.rocketScreen(this.sim).x, this.world.rocketScreen(this.sim).y, WORLD_COLORS.rover, 50, 0.5);
     });
+    const onLeftDown = () => { if (this.runnerState.active) this.laneSteerInput = -1; };
+    const onRightDown = () => { if (this.runnerState.active) this.laneSteerInput = 1; };
+    this.keys.A.on('down', onLeftDown);
+    this.keys.LEFT.on('down', onLeftDown);
+    this.keys.D.on('down', onRightDown);
+    this.keys.RIGHT.on('down', onRightDown);
     this.keys.F.on('down', () => (this.repairPressed = true));
     this.keys.Z.on('down', () => (this.throttle = 1));
     this.keys.X.on('down', () => (this.throttle = 0));
-    this.keys.L.on('down', () => this.toggleMode());
     this.keys.ENTER.on('down', () => {
       if (!this.result && this.launched) this.finishMission();
     });
@@ -365,50 +366,9 @@ export class FlightScene extends Phaser.Scene {
     return (k.A.isDown || k.LEFT.isDown ? 1 : 0) - (k.D.isDown || k.RIGHT.isDown ? 1 : 0);
   }
 
-  /** Easy mode, phase 3 only: once you're coming down, holding W lets the computer fly the braking burn. */
-  private get landingAssist(): boolean {
-    if (this.progress.landingMode !== 'EASY' || this.sim.phase !== 'FLYING' || this.sim.onGround) return false;
-    return this.runner.phase === 'LANDING' && !this.runner.over && onImpactCourse(this.sim.getTelemetry());
-  }
-
-  private currentInput(t: FlightTelemetry): ControlInput {
-    const steer = this.steerKey();
-    if (this.landingAssist) {
-      const k = this.keys;
-      const braking = k.W.isDown || k.UP.isDown || k.SHIFT.isDown || k.Z.isDown;
-      const plan = this.brakePlan(t);
-      this.throttle = braking ? plan.throttle : 0;
-      if (steer === 0) {
-        const err = wrapAngle(plan.pitch - t.pitchFromVertical);
-        return { throttle: this.throttle, steer: Phaser.Math.Clamp(err * 3 - this.sim.state.omega * 1.5, -1, 1) };
-      }
-    }
+  private currentInput(_t: FlightTelemetry): ControlInput {
+    const steer = this.runnerState.active ? 0 : this.steerKey();
     return { throttle: this.throttle, steer };
-  }
-
-  /**
-   * Brake assist (easy mode): coast until stopping needs a good share of the
-   * engines' push, then burn just hard enough to stop above the ground, then
-   * settle down gently. Retrograde while fast, upright when slow.
-   */
-  private brakePlan(t: FlightTelemetry): { throttle: number; pitch: number } {
-    const s = this.sim.state;
-    const up = localUp(t.body, s.x, s.y);
-    const g = gravityAt(s.x, s.y);
-    const localG = Math.max(0.1, -(g.x * up.x + g.y * up.y));
-    const maxThrust = this.sim.vehicle.thrust;
-    const decel = maxThrust / t.mass - localG;
-    const alt = Math.max(0, t.altitude);
-    const hover = (localG * t.mass) / Math.max(1, maxThrust);
-    if (t.speed < 8) {
-      const wanted = Phaser.Math.Clamp(alt / 8, 1.2, 6);
-      return { pitch: 0, throttle: Phaser.Math.Clamp(hover * (1 + (-t.verticalSpeed - wanted) * 0.5), 0, 1) };
-    }
-    const retro = wrapAngle(t.progradeFromVertical + Math.PI);
-    if (Math.abs(wrapAngle(retro - t.pitchFromVertical)) > 0.4) return { pitch: retro, throttle: 0 };
-    const needed = (t.speed * t.speed) / (2 * Math.max(alt - 4, 1));
-    if (needed < 0.6 * decel) return { pitch: retro, throttle: 0 };
-    return { pitch: retro, throttle: Phaser.Math.Clamp(((needed + localG) * t.mass) / Math.max(1, maxThrust), 0, 1) };
   }
 
   // ---------------------------------------------------------------------------
@@ -420,11 +380,50 @@ export class FlightScene extends Phaser.Scene {
     let t = this.sim.getTelemetry();
 
     if (!this.result) {
+      const ev = updateEvasiveRunner(
+        this.runnerState,
+        t.earthAltitude,
+        dt,
+        this.spacePressedThisFrame,
+        this.laneSteerInput,
+        this.sim.state.x
+      );
+      this.spacePressedThisFrame = false;
+      this.laneSteerInput = 0;
+
+      if (ev.promptTriggered) {
+        this.showBanner(`DEBRIS FIELD AHEAD: PRESS [SPACE] TO ENGAGE EVASIVE RUNNER (${Math.ceil(this.runnerState.promptTimer)}s)`, '#38bdf8');
+      }
+      if (ev.engaged) {
+        this.runnerEntryVy = Math.max(this.sim.state.vy, RUNNER_CONFIG.cruiseSpeed ?? 45);
+        this.rocks = generateLaneWaves(Math.floor(Math.random() * 1e9));
+        const p = this.world.rocketScreen(this.sim);
+        this.fx.ring(p.x, p.y, WORLD_COLORS.shield, 180, 0.6);
+        this.showBanner('EVASIVE RUNNER ENGAGED // TIME DILATION 35%', '#22d3ee');
+      }
+      if (ev.cleared) {
+        this.showBanner('DEBRIS CLEARED // FULL THRUST RESTORED', '#34d399');
+        if (this.runnerEntryVy > this.sim.state.vy) {
+          this.sim.state.vy = this.runnerEntryVy;
+        }
+      }
+
       this.readThrottle(dt);
       this.tickCountdown(dt);
-      this.timeScale = this.runner.timeScale(this.sim);
+      this.timeScale = this.runnerState.active ? RUNNER_CONFIG.timeScale : this.runner.timeScale(this.sim);
       const gameDt = dt * GAME_SPEED * this.timeScale;
       this.sim.advance(gameDt, this.currentInput(t));
+
+      if (this.runnerState.active) {
+        this.sim.state.x = this.runnerState.currentX;
+        this.sim.state.vx = 0;
+        this.sim.state.omega = 0;
+        this.sim.state.theta = Math.PI / 2 + this.runnerState.tilt;
+        // Govern vertical velocity to cruise speed so obstacle descent is humanly readable
+        const targetVy = RUNNER_CONFIG.cruiseSpeed ?? 45;
+        this.sim.state.vy += (targetVy - this.sim.state.vy) * (1 - Math.exp(-dt * 6));
+      }
+
       if (this.launched) this.runner.update(this.sim, gameDt, { repairPressed: this.repairPressed, relightHeld: this.keys.E.isDown });
       this.repairPressed = false;
       const events = this.sim.drainEvents();
@@ -457,9 +456,9 @@ export class FlightScene extends Phaser.Scene {
       this.cameras.main.shake(180, 0.006);
     }
 
-    this.world.updateCamera(this.sim, t, dt, this.chooseCameraMode(t));
-    this.world.updateSmoke(dt * GAME_SPEED * this.timeScale, this.sim, t, !this.exploded);
-    this.world.render(this.sim, t, this.rocks, !this.exploded, this.shield, this.overlay());
+    this.world.updateCamera(this.sim, t, dt, this.chooseCameraMode(t), this.runnerState.active);
+    this.world.updateSmoke(dt * GAME_SPEED * this.timeScale, this.sim, t, !this.exploded, this.runnerState);
+    this.world.render(this.sim, t, this.rocks, !this.exploded, this.shield, this.overlay(), this.runnerState);
     this.fx.update(dt, t, false);
     this.fx.draw(t, this.world.rocketScreen(this.sim), !this.exploded, false);
     this.updateHud(t, dt);
@@ -511,7 +510,6 @@ export class FlightScene extends Phaser.Scene {
   }
 
   private readThrottle(dt: number): void {
-    if (this.landingAssist) return;
     const k = this.keys;
     if (k.W.isDown || k.SHIFT.isDown || k.UP.isDown) this.throttle = Math.min(1, this.throttle + THROTTLE_RATE * dt);
     if (k.S.isDown || k.CTRL.isDown || k.DOWN.isDown) this.throttle = Math.max(0, this.throttle - THROTTLE_RATE * dt);
@@ -657,6 +655,10 @@ export class FlightScene extends Phaser.Scene {
     this.bannerQueue = [];
     this.dropMarker = null;
     this.impactMarker = null;
+    this.runnerState = createEvasiveRunnerState();
+    this.spacePressedThisFrame = false;
+    this.laneSteerInput = 0;
+    this.runnerEntryVy = 0;
   }
 
   private showBanner(message: string, color = '#ffffff'): void {
@@ -764,7 +766,6 @@ export class FlightScene extends Phaser.Scene {
     this.launchButton.setVisible(onPad);
     this.launchButton.update(now);
     this.missionText.setVisible(onPad);
-    this.modeText.setVisible(onPad).setText(`Landing: ${this.progress.landingMode === 'EASY' ? 'EASY (hold W in phase 3 and the computer brakes)' : 'NORMAL (all you)'}   ·   L to switch`);
     this.endButton.setVisible(flying && this.launched);
     this.warpText.setText(this.timeScale > 1 && flying ? `▶▶ ×${this.timeScale}` : '');
 
@@ -841,8 +842,7 @@ export class FlightScene extends Phaser.Scene {
       if (r.rover && !r.rover.landed) return 'Rover falling… watch where it lands';
       return 'Stay in orbit: problems can happen any moment';
     }
-    if (this.landingAssist) return 'Hold W: the computer brakes  ·  A / D to steer towards the site';
-    if (onImpactCourse(t)) return 'Point backwards (against the arrow) and burn to slow down  ·  land upright';
+    if (onImpactCourse(t)) return 'Point along dashed arrow and burn W to slow down  ·  land upright (< 10 m/s)';
     return 'Turn to face backwards (against the arrow), then burn W to drop out of orbit';
   }
 

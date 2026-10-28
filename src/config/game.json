@@ -40,7 +40,7 @@
   },
   "engine": {
     "isp": 70,
-    "gimbalDegrees": 3
+    "gimbalDegrees": 5
   },
   "world": {
     "surfaceGravity": 9.81,
@@ -55,7 +55,7 @@
   "moon": {
     "radius": 2000,
     "surfaceGravity": 2.5,
-    "altitude": 5000,
+    "altitude": 6200,
     "sphereOfInfluence": 3400
   },
   "rockBelt": {
@@ -72,7 +72,19 @@
     "fuelCanRefill": 0.12,
     "rockRadiusMin": 1.5,
     "rockRadiusMax": 5,
-    "warningDistance": 320
+    "warningDistance": 320,
+    "evasiveRunner": {
+      "promptAltitude": 2400,
+      "timeScale": 0.35,
+      "cruiseSpeed": 45,
+      "cameraScale": 14,
+      "rocketY": 560,
+      "lanes": [-20, -10, 0, 10, 20],
+      "laneShiftDuration": 0.12,
+      "waveInterval": 75,
+      "minSafeLanes": 1,
+      "maxSafeLanes": 2
+    }
   },
   "airframe": {
     "columnReferenceArea": 0.12,
@@ -85,7 +97,7 @@
     "normalForceFin": 4.0,
     "finPressureOffset": 0.5,
     "reactionWheelTorque": 120,
-    "spinDamping": 0.2
+    "spinDamping": 0.15
   },
   "fins": {
     "minimumForStability": 2,
@@ -95,8 +107,8 @@
   },
   "wind": {
     "ceiling": 2400,
-    "surface": 3,
-    "jetStream": 10,
+    "surface": 3.8,
+    "jetStream": 12,
     "jetStreamAltitude": 1200,
     "jetStreamWidth": 500
   },
@@ -116,18 +128,18 @@
     "_note": "No zooming during the climb: the launch view's scale is kept the whole way up.",
     "ascentScale": 24,
     "descentScale": 1.6,
-    "touchdownScale": 14,
+    "touchdownScale": 30,
     "descentViewBelow": 300,
     "touchdownViewBelow": 40,
-    "orbitViewRadiusPx": 295
+    "orbitViewRadiusPx": 355
   },
   "economy": {
     "startingMoney": 100000000,
     "grantFloor": 50,
     "phaseRewards": {
-      "ORBIT": 120,
-      "ROVER": 150,
-      "LANDING": 300
+      "ORBIT": 220,
+      "ROVER": 250,
+      "LANDING": 400
     },
     "partialRewards": {
       "SKY": 10,

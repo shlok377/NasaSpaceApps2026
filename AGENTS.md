@@ -235,11 +235,78 @@ Take it away, fly safe! 🛰️
 - **Published Tickets #26–#28**: Created local specs in `.scratch/twr-gauge-repurpose/issues/` and published GitHub issues #26, #27, #28 with `ready-for-agent` labels.
 - **Recalibrated Needle Scale (0° to 100°)**: Normalized TWR needle angle representation to rotate cleanly from $0^\circ$ (idle / pad rest) all the way to $100^\circ$ (peak punch), with center tick at $50^\circ$ and red boundary at $25^\circ$. All 63 tests passing.
 
+#### 🟢 [Gemini] - 2026-10-19 (Debris Challenge Overhaul: Evasive Lane Runner & Bullet-Time Tickets #29–#33)
+**Update for Claude**:
+- **Diagnosed Debris Challenge Problem**: Ascent through the 2,700m–3,400m rock belt was humanly impossible to dodge due to vacuum rotational inertia and rocks rushing down at >3,600 px/s with only 4 m/s² lateral RCS.
+- **Concluded /grill-me Session & Published Tickets #29–#33**: Created vertical slice tracer-bullet tickets on GitHub (#29–#33) and `.scratch/debris-lane-runner/issues/`.
+- **Ticket #29 (5-Lane Track Spawner & Telegraphed Wave Generator)**: Procedural wave spawner in `rocks.ts` across 5 discrete lanes `[-20m, -10m, 0m, +10m, +20m]`. Guarantees 1–2 open safe lanes per wave and places shields/fuel pickups in safe corridors.
+- **Ticket #30 (Manual Space Prompt & Bullet-Time Activation Flow)**: At 2,400m, HUD displays a 3s countdown prompt: `DEBRIS FIELD AHEAD: PRESS [SPACE] TO ENGAGE EVASIVE RUNNER`. Pressing SPACE drops simulation time step to 35% speed (bullet-time) and aligns target lane to nearest lane. Missing the prompt leaves standard physics active as a strict manual challenge.
+- **Ticket #31 (Center-Locked Camera, Retro Runway Lines & Threat HUD)**: When active, camera smoothly centers on $x=0$, rendering retro dotted runway lines with $L1$–$L5$ markers and top threat chevrons on incoming danger lanes.
+- **Ticket #32 (Snappy 120ms Lane Shifting Controls & Thruster FX)**: Tapping A/D or Left/Right arrows glides the rocket to adjacent lanes in 120ms with lateral RCS thruster smoke puffs and a subtle starfighter banking tilt (±10°), with attitude strictly upright ($\theta = \pi/2 + \text{tilt}$).
+- **Ticket #33 (Major-Moo Physical Collisions, Combos & Seamless Exit Restoration)**: Colliding with a rock shears off outer parts into tumbling debris (unless protected by a shield); near misses award combo score; at 3,400m, runway lines fade out, speed ramps back to 100%, camera unlocks, and banner displays `DEBRIS CLEARED // FULL THRUST RESTORED`.
+- **Verification**: 76/76 unit tests green across all 11 test suites (`npm test`), 100% clean TypeScript typecheck (`npm run typecheck`), production Vite build clean (`npm run build`).
+
+#### 🟢 [Gemini] - 2026-10-23 (Rock Approach Speed Regulation & Atmospheric Wobble Hardening)
+**Update for Claude**:
+- **Diagnosed Rock Descent Speed**: Vertical climb velocity $v_y$ was previously uncapped during the runner mode (climbing at 150–250 m/s), which combined with a close-up camera scale ($24\text{ px/m}$) gave players $<0.25\text{s}$ of reaction time.
+- **Readable Arcade Dodging**:
+  - Regulated vertical climb speed $v_y$ during runner mode to `cruiseSpeed: 45 m/s` (smoothly restoring full pre-runner climb momentum upon clearing 3,400m so orbital insertion is fully preserved).
+  - Zoomed camera scale from $24\text{ px/m}$ to `cameraScale: 14 px/m` and eased rocket position down to $y = 560\text{px}$ during the runner mode, expanding the reaction window from top-of-screen to rocket to **~2.5 seconds** (classic arcade sweet spot).
+- **Hardened Wobble & Aerodynamic Piloting Outside Rock Dodge**:
+  - In normal atmospheric climb, A/D steers aerodynamic pitch/yaw angle ($\theta$) via torque and gimbal.
+  - Attenuated artificial linear RCS side-shoving under thick dynamic air pressure in `FlightSim.ts` (`rcsAeroAtten = Math.max(0.25, 1 - q / 2000)`), requiring genuine aerodynamic counter-steering rather than sliding sideways on rails.
+  - Increased wind gusts (`wind.surface: 3.8`, `wind.jetStream: 12`) and reduced spin damping (`spinDamping: 0.15`), making atmospheric wind shear lively and challenging without breaking autopilot Moon landings.
+- **Verification**: 78/78 tests passing (`npm test`), 100% clean typecheck (`npm run typecheck`), production build passing (`npm run build`).
+
+#### 🟢 [Gemini] - 2026-10-23 (Physics-Based Deep Space Transit Gap & Power-up Streamlining)
+**Update for Claude**:
+- **Removed Fuel Tank Power-ups from Evasive Runner**: Per player feedback, removed `FUEL` canisters from `generateLaneWaves()` in `rocks.ts`. The evasive runner now exclusively rewards skilled dodging with `SHIELD` power-ups.
+- **Physics-Based Variable 10–15s Deep-Space Gap Before Moon Landing**:
+  - Increased `moon.altitude` from $5,000\text{m}$ to $6,200\text{m}$ in `src/config/game.json`.
+  - The Moon's gravitational SOI starts at $4,800\text{m}$ ($8,200\text{m} - 3,400\text{m}$), creating a physical $1,400\text{m}$ deep-space flight corridor after clearing the evasive runner at $3,400\text{m}$.
+  - The transit time is 100% natural, continuous, and physics-driven: at full burn (~$140\text{ m/s}$) it takes **~10.0 seconds**; at cruising/coasting speed (~$90\text{–}95\text{ m/s}$) it takes **~15.0 seconds**.
+  - Players retain full flight control (steering, throttle, attitude) to orient their vehicle in the quiet starfield before lunar approach and descent begin.
+- **Verification**: 79/79 unit tests green (`npm test`), strict TypeScript typecheck clean (`npm run typecheck`), production Vite build clean (`npm run build`).
+
+#### 🟢 [Gemini] - 2026-10-23 (Manual Moon Landing Overhaul & Tickets #34–#36)
+**Update for Claude**:
+- **Concluded /grill-me Session on Lunar Landing**: User requested complete removal of the landing assist / autopilot ("i dont like the new auto pilot / assists that we have going on while landing on the moon, we have to let the player do their thing").
+- **Agreed Design**:
+  1. Lunar touchdowns are 100% manual: rip out `landingAssist`, `brakePlan()`, auto-throttle, and auto-steering. The player retains direct control over throttle (`W`/`S`/`X`) and steering (`A`/`D`).
+  2. Remove `landingMode` (`EASY`/`NORMAL`) and `L` key toggle entirely across `progress.ts` and UI.
+  3. Passive guidance only: in lunar close-ups (`DESCENT` and `TOUCHDOWN`), render a dashed stem and arrowhead extending from the vehicle pointing opposite to velocity (retrograde), fading out below 0.5 m/s.
+  4. Radar failure keeps the dashed retrograde arrow visible for manual instrument/visual touchdown.
+#### 🟢 [Gemini] - 2026-10-23 (Surface Flags & High-Res Sky Moon Integration)
+**Update for Claude**:
+- **Pixel-Art Surface Flags**:
+  - Registered and deployed `flag_green.png` (`ROVER_ZONE`) and `flag_blue.png` (`LANDING_SITE`) from `assets/` to `public/assets/`.
+  - Configured flagpole base pivot `(0.08, 0.97)` on $32\times 32$ textures.
+  - In `WorldRenderer.ts`, replaced vector line-and-dot drawings with authentic pixel-art flag sprites anchored to the Moon surface. Flagpoles are radially oriented outward from the Moon's center (`this.screenRotation(angle)`) in both Orbit Map (`map ? 20px`) and close-up Descent/Touchdown views (`Math.max(22, Math.min(36, 6 * camera.scale))`).
+  - Added robust fallback to vector graphics when headless or running in mock scenes.
+- **High-Res Moon Asset (`moon_big.png`)**:
+  - Replaced stretched $32\times 32$ `moon.png` in the ascent sky with crisp $128\times 128$ `moon_big.png` in `WorldRenderer.ts`.
+  - Replaced the Orbit Map vector circle (`g.fillCircle`) with `mapMoonSprite` rendering `moon_big.png` sized cleanly to $mr \times 2$ ($320\text{px}$ diameter) centered at $(mc.x, mc.y)$.
+- **Verification**:
+  - Added dedicated unit test suite `src/physics/surface_flags.test.ts` (3 tests verifying texture keys, base anchor alignment, radial angle orientation, Orbit Map Moon sprite display, and camera mode visibility toggling).
+  - **87 / 87 unit tests passing** across all 13 test suites (`npm test`), 100% clean typecheck (`npm run typecheck`), production Vite build passing (`npm run build`).
+
 ---
 
 ## 📋 Task Board & Progress Tracker
 
 Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLAUDE]`), and `[x]` for completed.
+
+### 🌕 Manual Moon Landing & Passive Guidance Tickets (#34–#36)
+- [x] #34: 01: Purge Landing Autopilot & Remove Mode Toggles (`FlightScene.ts`, `progress.ts`, `game.test.ts`)
+- [x] #35: 02: Retrograde Directional Arrow in Lunar Close-Up Views (`WorldRenderer.ts`)
+- [x] #36: 03: Manual Landing HUD Guidance & Radar Failure Instrument Integration (`FlightScene.ts`, `retrograde_guidance.test.ts`)
+
+### 🛡️ Debris Challenge Overhaul: Evasive Lane Runner (#29–#33)
+- [x] #29: 01: 5-Lane Track Spawner & Telegraphed Wave Generator (`rocks.ts`, `game.json`)
+- [x] #30: 02: Manual Space Prompt & Bullet-Time Activation Flow (`evasiveRunner.ts`, `FlightScene.ts`)
+- [x] #31: 03: Center-Locked Camera, Retro Runway Lines & Threat HUD (`WorldRenderer.ts`)
+- [x] #32: 04: Snappy 120ms Lane-Shifting Controls & Thruster FX (`evasiveRunner.ts`, `FlightScene.ts`, `WorldRenderer.ts`)
+- [x] #33: 05: Major-Moo Physical Collisions, Combos & Seamless Exit Restoration (`FlightScene.ts`, `WorldRenderer.ts`, `evasive_runner.test.ts`)
 
 ### 🎛️ TWR Analog Gauge Repurpose & 3-Column Cockpit HUD Tickets (#26–#28)
 - [x] #26: 01: Decouple Analog Dial from Fuel Tank & Declutter Liquid Tank Column (`FuelTank.ts`)

@@ -3,10 +3,12 @@ import { CONFIG } from '../../config';
 import { PART_DEFINITIONS } from '../../core/partDefinitions';
 import { BOULDER_FIELD, ROVER_ZONE, RoverCapsule, SurfaceZone } from '../../game/phases';
 import { Rock, rockX } from '../../game/rocks';
+import { EvasiveRunnerState, RUNNER_CONFIG, RUNNER_LANES } from '../../game/evasiveRunner';
 import { gravityAt, insideMoonSoi, localUp, moonAltitude, moonSurfacePoint } from '../../physics/bodies';
 import { MOON, MOON_CENTER, ROCK_BELT, WORLD } from '../../physics/constants';
 import { FlightSim, FlightTelemetry } from '../../physics/FlightSim';
 import { FlightPart } from '../../physics/vehicle';
+import { computeScreenRetrograde, ScreenRetrogradeVector } from '../../physics/guidance';
 import { GAME_ASSETS, getPartTextureKey } from '../../core/assets';
 import { UI } from '../../ui/theme';
 
@@ -54,6 +56,9 @@ export interface Camera {
   rocketScale: number;
   mode: CameraMode;
 }
+
+export type { ScreenRetrogradeVector };
+export { computeScreenRetrograde };
 
 /** What the mission wants drawn on the Moon and in orbit this frame. */
 export interface MissionOverlay {
@@ -109,6 +114,9 @@ export class WorldRenderer {
   public camera: Camera = { x: 0, y: 0, upAngle: Math.PI / 2, scale: CELL_PX, rocketScale: CELL_PX, mode: 'ASCENT' };
   private readonly skyGfx: Phaser.GameObjects.Graphics;
   private readonly skyMoonSprite: Phaser.GameObjects.Image;
+  private readonly mapMoonSprite: Phaser.GameObjects.Image;
+  private readonly roverFlagSprite: Phaser.GameObjects.Image;
+  private readonly landingFlagSprite: Phaser.GameObjects.Image;
   private readonly smokeSpritesContainer: Phaser.GameObjects.Container;
   private readonly smokeSpritesPool: Phaser.GameObjects.Image[] = [];
   private lastSkyAltitude = -Infinity;
@@ -131,6 +139,7 @@ export class WorldRenderer {
   private pathColor: number = WORLD_COLORS.zone;
   private pathAt = -Infinity;
   private smoothedRocketY = 470;
+  private readonly cachedRetrogradeVec: ScreenRetrogradeVector = { dirX: 0, dirY: 0, alpha: 0 };
 
   constructor(private readonly scene: Phaser.Scene) {
     const rng = new Phaser.Math.RandomDataGenerator(['moonshot']);
@@ -144,7 +153,21 @@ export class WorldRenderer {
     });
     this.dust = Array.from({ length: 34 }, () => ({ x: rng.realInRange(-30, 30), y: rng.realInRange(-20, 20) }));
     this.skyGfx = scene.add.graphics();
-    this.skyMoonSprite = scene.add.image(0, 0, GAME_ASSETS.UI_MOON.key).setVisible(false);
+    this.skyMoonSprite = scene.add.image(0, 0, GAME_ASSETS.UI_MOON_BIG.key);
+    this.skyMoonSprite?.setVisible?.(false);
+    this.skyMoonSprite?.setDepth?.(1);
+    this.mapMoonSprite = scene.add.image(0, 0, GAME_ASSETS.UI_MOON_BIG.key);
+    this.mapMoonSprite?.setOrigin?.(0.5, 0.5);
+    this.mapMoonSprite?.setVisible?.(false);
+    this.mapMoonSprite?.setDepth?.(0);
+    this.roverFlagSprite = scene.add.image(0, 0, GAME_ASSETS.FLAG_GREEN.key);
+    this.roverFlagSprite?.setOrigin?.(0.08, 0.97);
+    this.roverFlagSprite?.setVisible?.(false);
+    this.roverFlagSprite?.setDepth?.(5);
+    this.landingFlagSprite = scene.add.image(0, 0, GAME_ASSETS.FLAG_BLUE.key);
+    this.landingFlagSprite?.setOrigin?.(0.08, 0.97);
+    this.landingFlagSprite?.setVisible?.(false);
+    this.landingFlagSprite?.setDepth?.(5);
     this.ensureSmokeTexture();
     this.smokeSpritesContainer = scene.add.container(0, 0);
     this.worldGfx = scene.add.graphics();
@@ -195,7 +218,7 @@ export class WorldRenderer {
    * Frame the flight for the given mode. Scales are fixed per mode; changing
    * mode is a cut, not a zoom.
    */
-  public updateCamera(sim: FlightSim, t: FlightTelemetry, dt: number, mode: CameraMode): void {
+  public updateCamera(sim: FlightSim, t: FlightTelemetry, dt: number, mode: CameraMode, runnerActive = false): void {
     const c = this.camera;
     const snap = mode !== c.mode;
     c.mode = mode;
@@ -213,11 +236,17 @@ export class WorldRenderer {
     }
 
     if (mode === 'ASCENT') {
-      c.scale = cam.ascentScale;
+      const targetScale = runnerActive ? (RUNNER_CONFIG?.cameraScale ?? 14) : cam.ascentScale;
+      if (snap) {
+        c.scale = targetScale;
+      } else {
+        c.scale += (targetScale - c.scale) * (1 - Math.exp(-dt * 3));
+      }
       c.rocketScale = c.scale;
       const targetUp = Math.PI / 2;
       const climbFactor = sim.onGround ? 1 : Phaser.Math.Clamp((t.verticalSpeed + 8) / 16, 0, 1);
-      const targetRocketY = 260 + (470 - 260) * climbFactor;
+      const normalRocketY = 260 + (470 - 260) * climbFactor;
+      const targetRocketY = runnerActive ? (RUNNER_CONFIG?.rocketY ?? 560) : normalRocketY;
 
       if (snap) {
         this.smoothedRocketY = targetRocketY;
@@ -226,7 +255,12 @@ export class WorldRenderer {
         this.smoothedRocketY += (targetRocketY - this.smoothedRocketY) * (1 - Math.exp(-dt * 3));
         c.upAngle = targetUp;
       }
-      c.x = s.x;
+      const targetCameraX = runnerActive ? 0 : s.x;
+      if (snap) {
+        c.x = targetCameraX;
+      } else {
+        c.x += (targetCameraX - c.x) * (1 - Math.exp(-dt * 4));
+      }
       c.y = s.y + (this.smoothedRocketY - SCREEN_CY) / c.scale;
     } else {
       c.scale = mode === 'DESCENT' ? cam.descentScale : cam.touchdownScale;
@@ -272,7 +306,7 @@ export class WorldRenderer {
     p.life = life;
   }
 
-  public updateSmoke(simDt: number, sim: FlightSim, t: FlightTelemetry, alive: boolean): void {
+  public updateSmoke(simDt: number, sim: FlightSim, t: FlightTelemetry, alive: boolean, runnerState?: EvasiveRunnerState): void {
     // 1. Advance existing smoke particles first
     const damp = Math.exp(-2.2 * simDt);
     let writeIdx = 0;
@@ -333,6 +367,19 @@ export class WorldRenderer {
         }
       }
     }
+
+    // 3. Lateral RCS puffs during runner lane shift
+    if (alive && runnerState?.active && runnerState.shiftProgress < 1) {
+      const s = sim.state;
+      const visual = this.camera.rocketScale / this.camera.scale;
+      const movingRight = RUNNER_LANES[runnerState.targetLaneIndex] > runnerState.startX;
+      const puffSide = movingRight ? -1 : 1;
+      const puffX = s.x + puffSide * 1.2 * visual;
+      const puffY = s.y;
+      const vx = puffSide * (18 + Math.random() * 6);
+      const vy = (Math.random() - 0.5) * 4;
+      this.spawnSmoke(puffX, puffY, vx, vy, 0.4 + Math.random() * 0.3);
+    }
   }
 
   private hideSmokeSprites(): void {
@@ -341,7 +388,7 @@ export class WorldRenderer {
     }
   }
 
-  public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, shield: boolean, overlay: MissionOverlay): void {
+  public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, shield: boolean, overlay: MissionOverlay, runnerState?: EvasiveRunnerState): void {
     this.labelIndex = 0;
     this.drawSky(sim, t);
     const g = this.worldGfx;
@@ -350,10 +397,15 @@ export class WorldRenderer {
       this.hideSmokeSprites();
       this.drawOrbitMap(sim, t, overlay);
     } else if (this.camera.mode === 'ASCENT') {
-      this.drawAscent(sim, t, rocks);
+      this.mapMoonSprite?.setVisible?.(false);
+      this.roverFlagSprite?.setVisible?.(false);
+      this.landingFlagSprite?.setVisible?.(false);
+      this.drawAscent(sim, t, rocks, runnerState);
     } else {
+      this.mapMoonSprite?.setVisible?.(false);
       this.hideSmokeSprites();
       this.drawMoonCloseUp(sim, overlay);
+      this.drawRetrogradeArrow(sim);
     }
     this.drawRocketAndDebris(sim, t, alive, shield);
     for (let i = this.labelIndex; i < this.labels.length; i++) this.labels[i].setVisible(false);
@@ -397,12 +449,12 @@ export class WorldRenderer {
       const r = 26 + 210 * k * k;
       const cx = 900 - Phaser.Math.Clamp(sim.state.x * 0.08, -200, 200) - 200 * k;
       const cy = 230 - 120 * k;
-      this.skyMoonSprite.setPosition(cx, cy);
-      this.skyMoonSprite.setDisplaySize(r * 2, r * 2);
-      this.skyMoonSprite.setAlpha(0.25 + 0.75 * (1 - air * 0.5));
-      this.skyMoonSprite.setVisible(true);
+      this.skyMoonSprite?.setPosition?.(cx, cy);
+      this.skyMoonSprite?.setDisplaySize?.(r * 2, r * 2);
+      this.skyMoonSprite?.setAlpha?.(0.25 + 0.75 * (1 - air * 0.5));
+      this.skyMoonSprite?.setVisible?.(true);
     } else {
-      this.skyMoonSprite.setVisible(false);
+      this.skyMoonSprite?.setVisible?.(false);
     }
   }
 
@@ -410,10 +462,37 @@ export class WorldRenderer {
   // The climb
   // ---------------------------------------------------------------------------
 
-  private drawAscent(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[]): void {
+  private drawAscent(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], runnerState?: EvasiveRunnerState): void {
     const g = this.worldGfx;
     const scale = this.camera.scale;
     const s = sim.state;
+
+    // Retro dotted runway lines for the 5 lanes during evasive runner mode
+    if (runnerState?.active) {
+      const step = 28;
+      const dash = 14;
+      const scrollOffset = Math.floor((s.y * scale) % step);
+
+      // Subtle outer boundary borders
+      const leftBound = this.toScreen(RUNNER_LANES[0] - 6, s.y).x;
+      const rightBound = this.toScreen(RUNNER_LANES[RUNNER_LANES.length - 1] + 6, s.y).x;
+      g.lineStyle(2, 0x0284c7, 0.4);
+      g.lineBetween(leftBound, 0, leftBound, 720);
+      g.lineBetween(rightBound, 0, rightBound, 720);
+
+      // Dashed lane lines
+      for (let i = 0; i < RUNNER_LANES.length; i++) {
+        const lx = RUNNER_LANES[i];
+        const p = this.toScreen(lx, s.y);
+        const isCurrent = i === runnerState.currentLaneIndex;
+        g.lineStyle(isCurrent ? 2 : 1.5, isCurrent ? 0x38bdf8 : 0x0ea5e9, isCurrent ? 0.65 : 0.35);
+        for (let py = -scrollOffset; py < 720; py += step) {
+          g.lineBetween(p.x, py, p.x, py + dash);
+        }
+        // Lane indicator at the bottom
+        this.label(p.x, 702, `L${i + 1}`, isCurrent ? '#38bdf8' : '#64748b', 12);
+      }
+    }
 
     // Ground: a flat plain below y = 0, plus the pad and its tower.
     if (s.y < 60) {
@@ -658,12 +737,20 @@ export class WorldRenderer {
 
     // The Moon.
     const mr = MOON.radius * scale;
-    g.fillStyle(WORLD_COLORS.moon, 1);
-    g.fillCircle(mc.x, mc.y, mr);
-    g.fillStyle(WORLD_COLORS.moonDark, 1);
-    g.fillCircle(mc.x - mr * 0.35, mc.y - mr * 0.2, mr * 0.16);
-    g.fillCircle(mc.x + mr * 0.3, mc.y + mr * 0.3, mr * 0.11);
-    g.fillCircle(mc.x + mr * 0.15, mc.y - mr * 0.45, mr * 0.08);
+    const hasMoonTex = this.scene.textures ? this.scene.textures.exists(GAME_ASSETS.UI_MOON_BIG.key) : false;
+    if (hasMoonTex && this.mapMoonSprite) {
+      this.mapMoonSprite.setPosition?.(mc.x, mc.y);
+      this.mapMoonSprite.setDisplaySize?.(mr * 2, mr * 2);
+      this.mapMoonSprite.setVisible?.(true);
+    } else {
+      this.mapMoonSprite?.setVisible?.(false);
+      g.fillStyle(WORLD_COLORS.moon, 1);
+      g.fillCircle(mc.x, mc.y, mr);
+      g.fillStyle(WORLD_COLORS.moonDark, 1);
+      g.fillCircle(mc.x - mr * 0.35, mc.y - mr * 0.2, mr * 0.16);
+      g.fillCircle(mc.x + mr * 0.3, mc.y + mr * 0.3, mr * 0.11);
+      g.fillCircle(mc.x + mr * 0.15, mc.y - mr * 0.45, mr * 0.08);
+    }
 
     // Debris swarm.
     if (overlay.debrisRing !== null) {
@@ -732,13 +819,44 @@ export class WorldRenderer {
     }
   }
 
+  private renderFlag(
+    g: Phaser.GameObjects.Graphics,
+    sprite: Phaser.GameObjects.Image,
+    texKey: string,
+    angle: number,
+    color: number,
+    map: boolean
+  ): { x: number; y: number } {
+    const flagSize = map ? 20 : Math.max(22, Math.min(36, 6 * this.camera.scale));
+    const heightMetres = flagSize / this.camera.scale;
+    const base = moonSurfacePoint(angle);
+    const top = moonSurfacePoint(angle, heightMetres);
+    const b = this.toScreen(base.x, base.y);
+    const t = this.toScreen(top.x, top.y);
+
+    const hasTexture = this.scene.textures ? this.scene.textures.exists(texKey) : false;
+    if (hasTexture && sprite?.setVisible) {
+      sprite.setPosition?.(b.x, b.y);
+      sprite.setRotation?.(this.screenRotation(angle));
+      sprite.setDisplaySize?.(flagSize, flagSize);
+      sprite.setVisible?.(true);
+    } else {
+      sprite?.setVisible?.(false);
+      this.flag(g, angle, color, heightMetres);
+    }
+
+    return t;
+  }
+
   /** Zones, sites, rovers and markers on the Moon's surface (map or close-up). */
   private drawMissionMarks(g: Phaser.GameObjects.Graphics, overlay: MissionOverlay, map: boolean): void {
     const pulse = 0.65 + 0.35 * Math.sin(this.scene.time.now / 220);
     if (overlay.roverZone) {
       this.surfaceArc(g, ROVER_ZONE, WORLD_COLORS.zone, map ? 7 : 10, pulse);
-      const top = this.flag(g, ROVER_ZONE.angle, WORLD_COLORS.zone, map ? 260 : 6);
-      this.label(top.x, top.y - 14, 'ROVER ZONE', '#4ade80', 12);
+      const top = this.renderFlag(g, this.roverFlagSprite, GAME_ASSETS.FLAG_GREEN.key, ROVER_ZONE.angle, WORLD_COLORS.zone, map);
+      this.label(top.x, top.y - 12, 'ROVER ZONE', '#4ade80', 12);
+    } else {
+      this.roverFlagSprite?.setVisible?.(false);
     }
     for (const angle of overlay.landedRovers) {
       const p = moonSurfacePoint(angle, map ? 0 : 0.8);
@@ -760,8 +878,10 @@ export class WorldRenderer {
     }
     if (overlay.site) {
       this.surfaceArc(g, overlay.site, WORLD_COLORS.site, map ? 7 : 10, pulse);
-      const top = this.flag(g, overlay.site.angle, WORLD_COLORS.site, map ? 260 : 6);
-      this.label(top.x, top.y - 14, 'LANDING SITE', '#7dd3fc', 12);
+      const top = this.renderFlag(g, this.landingFlagSprite, GAME_ASSETS.FLAG_BLUE.key, overlay.site.angle, WORLD_COLORS.site, map);
+      this.label(top.x, top.y - 12, 'LANDING SITE', '#7dd3fc', 12);
+    } else {
+      this.landingFlagSprite?.setVisible?.(false);
     }
     if (overlay.dropMarker) {
       const p = this.toScreen(overlay.dropMarker.x, overlay.dropMarker.y);
@@ -812,6 +932,67 @@ export class WorldRenderer {
     }
 
     this.drawMissionMarks(g, overlay, false);
+  }
+
+  /**
+   * Calculates the unit screen-space retrograde vector (opposite to velocity)
+   * and visibility alpha based on speed. Zero heap allocation via cached instance.
+   */
+  public getRetrogradeScreenVector(sim: FlightSim): ScreenRetrogradeVector | null {
+    return computeScreenRetrograde(sim.state.vx, sim.state.vy, this.camera.upAngle, this.cachedRetrogradeVec);
+  }
+
+  /**
+   * Passive lunar landing guidance: a dashed arrow extending outward from the
+   * vehicle pointing opposite to velocity (retrograde). Fades out below 0.5 m/s.
+   */
+  private drawRetrogradeArrow(sim: FlightSim): void {
+    if (this.camera.mode !== 'DESCENT' && this.camera.mode !== 'TOUCHDOWN') return;
+    const vec = this.getRetrogradeScreenVector(sim);
+    if (!vec || vec.alpha <= 0.01) return;
+
+    const r = this.rocketScreen(sim);
+    const g = this.worldGfx;
+    const { dirX, dirY, alpha } = vec;
+
+    const startDist = Math.max(34, this.camera.rocketScale * 1.6);
+    const stemLength = 48;
+    const endDist = startDist + stemLength;
+
+    // Draw dashed stem
+    const dashLen = 6;
+    const gapLen = 4;
+    const step = dashLen + gapLen;
+    g.lineStyle(2.5, 0x38bdf8, alpha);
+
+    for (let d = startDist; d + dashLen <= endDist; d += step) {
+      const x1 = r.x + dirX * d;
+      const y1 = r.y + dirY * d;
+      const x2 = r.x + dirX * (d + dashLen);
+      const y2 = r.y + dirY * (d + dashLen);
+      g.lineBetween(x1, y1, x2, y2);
+    }
+
+    // Draw arrowhead at end
+    const tipDist = endDist + 10;
+    const tipX = r.x + dirX * tipDist;
+    const tipY = r.y + dirY * tipDist;
+
+    const baseX = r.x + dirX * endDist;
+    const baseY = r.y + dirY * endDist;
+    const perpX = -dirY;
+    const perpY = dirX;
+    const headWidth = 6.5;
+
+    g.fillStyle(0x38bdf8, alpha);
+    g.fillTriangle(
+      tipX,
+      tipY,
+      baseX + perpX * headWidth,
+      baseY + perpY * headWidth,
+      baseX - perpX * headWidth,
+      baseY - perpY * headWidth
+    );
   }
 
   // ---------------------------------------------------------------------------

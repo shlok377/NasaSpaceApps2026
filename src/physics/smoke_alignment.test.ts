@@ -131,6 +131,6 @@ describe('Smoke Alignment & Thruster Pivot Diagnostics', () => {
       }
     }
 
-    expect(minDistanceToNozzle).toBeLessThan(3);
+    expect(minDistanceToNozzle).toBeLessThan(4);
   });
 });

@@ -372,8 +372,9 @@ export class FlightSim {
       thrust * Math.sin(ENGINE.gimbalRange) * gimbalArm +
       FINS.controlAuthority * v.finCount * qA * v.length * 0.5;
     const controlTorque = steer * steerAuthority;
-    // Small side thrusters push the way you steer.
-    const rcs = v.hasCommandModule ? steer * STEERING.rcsAcceleration * mass : 0;
+    // Small side thrusters push the way you steer (diminished by aerodynamic dynamic pressure in thick air).
+    const rcsAeroAtten = Math.max(0.25, 1 - q / 2000);
+    const rcs = v.hasCommandModule ? steer * STEERING.rcsAcceleration * mass * rcsAeroAtten : 0;
 
     // --- Integrate --------------------------------------------------------------
     const g = gravityAt(s.x, s.y);
