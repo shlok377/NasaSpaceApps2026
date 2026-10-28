@@ -1,6 +1,6 @@
 /** Shared look for the in-game HUD widgets. */
 export const UI = {
-  font: 'system-ui, sans-serif',
+  font: "'Mozilla Headline', system-ui, sans-serif",
   backdrop: 0x05070d,
   backdropAlpha: 0.42,
   text: '#e5e7eb',
@@ -10,7 +10,9 @@ export const UI = {
   gold: 0xfacc15,
   goldText: '#facc15',
   amber: 0xf59e0b,
+  amberText: '#f59e0b',
   red: 0xef4444,
+  redText: '#ef4444',
   green: 0x22c55e,
   greenText: '#4ade80',
   moon: 0xb4b4b4,

@@ -204,11 +204,57 @@ Take it away, fly safe! 🛰️
   - Browser diagnostic `scripts/diagnose-orbit-browser.mjs` verifies active pixel art sprites in Orbit View with normal time scale (`timeScale: 1`).
   - **58 / 58 tests passing** (`npm test`), strict TypeScript typecheck clean (`npm run typecheck`), production Vite build clean (`npm run build`).
 
+#### 🟢 [Gemini] - 2026-10-18 (8-Segment Mass Bar, Anti-Aliasing & Mozilla Headline Font)
+**Update for Claude**:
+- **Ticket #20 (8-Segment Dual-Variant Mass Indicator Bar)**:
+  - Replaced the solid red vector progress bar and top single weight icon in `FuelTank.ts` with an 8-segment pixel art progress meter.
+  - Dynamically alternates between `GAME_ASSETS.UI_MASS` (`mass.png`, filled orange weight) and `GAME_ASSETS.UI_MASS_EMPTY` (`mass_empty.png`, hollow weight) sized at 10×15 px spanning 94 px beneath the mass readout.
+  - Depletion proceeds from right to left based on `Math.round((mass / wetMass) * 8)`. When fuel is exhausted, the filled weights accurately reflect the dry structural metal mass remaining on the vehicle.
+- **Ticket #21 (Crisp Canvas & Anti-Aliased UI Rendering)**:
+  - Fixed global canvas pixelation on high-res displays by switching `src/main.ts` from `pixelArt: true` to `pixelArt: false`, `antialias: true`, and `roundPixels: true`.
+  - Enforced `FilterMode.NEAREST` on all 2D pixel art textures via `applyPixelArtTextureFilters()` in `src/core/assets.ts`. Vector curves, trajectory arcs, borders, and fonts now render silky-smooth with WebGL anti-aliasing while 2D pixel art sprites remain crisp, sharp, and pixel-exact.
+- **Ticket #22 (Google Font Mozilla Headline Integration)**:
+  - Imported Google Font "Mozilla Headline" (`wght@200..700`) via `<link>` in `index.html`.
+  - Added pre-boot font awaiting in `src/main.ts` (`document.fonts.load('16px "Mozilla Headline"')`) to eliminate Flash of Unstyled Text (FOUT).
+  - Unified all typography across `src/ui/theme.ts` (`UI.font`), `BuilderScene.ts`, and `WorldRenderer.ts`.
+- **Verification**:
+  - Headless Puppeteer browser test (`scripts/verify-ui-font-mass.mjs`) verified font rasterization and the 3 distinct mass indicator stages (Full: 8/8 filled, Half: 5/8 filled, Dry: 2/8 filled) with screenshot captures.
+  - **58 / 58 tests passing** (`npm test`), 100% typecheck passing (`npm run typecheck`), production build passing (`npm run build`).
+
+#### 🟢 [Gemini] - 2026-10-18 (Embracing Raw Pixel Art & Clean 2x Integer Scaling)
+**Update for Claude**:
+- **Reverted Smooth Pixel Shader**: Per user preference ("embrace the pixel art not to make it smooth, now everything looks blurry"), disabled `smoothPixelArt` in `src/main.ts` and restored `tex.setFilter(Phaser.Textures.FilterMode.NEAREST)` with `tex.setSmoothPixelArt(false)` in `src/core/assets.ts`.
+- **Pure Unblurred Chunky Pixels**: Every sprite renders with 100% sharp nearest-neighbor sampling with zero blur.
+- **Clean 2× Integer Downscaling**: Updated `ascentScale` in `src/config/game.json` from `22` to `24`. Because all part textures are $48 \times 48\text{px}$, $48 / 24 = 2.0$ provides an exact integer ratio: every on-screen pixel maps cleanly to $2 \times 2$ texels, eliminating broken outlines, uneven pixel widths, and skipping artifacts while keeping the raw pixel-art aesthetic completely sharp.
+- **Verification**: 58/58 unit tests green (`npm test`), strict typecheck clean (`npm run typecheck`), production build green. Captured close-up screenshot `fat_pixel_launchpad_closeup.png` verifying uniform 1-pixel borders and razor-sharp texels.
+
+#### 🟢 [Gemini] - 2026-10-18 (TWR Analog Gauge Repurpose & 3-Column Cockpit Cluster Tickets #26–#28)
+**Update for Claude**:
+- **Repurposed Redundant Fuel Gauge**: Concluded `/grill-me` session with user to decouple the vintage dial gauge from fuel level and repurpose it as a **Thrust-to-Weight Ratio (TWR)** instrument.
+- **3-Column Cockpit Panel**: Expanded the bottom-left instrument panel into three side-by-side columns: (1) Minimalist glass fuel tank with unobstructed liquid sloshing, (2) TWR analog dial with smooth needle inertia and low-thrust red warning, and (3) Vehicle mass in kg with 8-segment weight sprites.
+- **Published Tickets #26–#28**: Created local specs in `.scratch/twr-gauge-repurpose/issues/` and published GitHub issues #26, #27, #28 with `ready-for-agent` labels.
+- **Recalibrated Needle Scale (0° to 100°)**: Normalized TWR needle angle representation to rotate cleanly from $0^\circ$ (idle / pad rest) all the way to $100^\circ$ (peak punch), with center tick at $50^\circ$ and red boundary at $25^\circ$. All 63 tests passing.
+
 ---
 
 ## 📋 Task Board & Progress Tracker
 
 Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLAUDE]`), and `[x]` for completed.
+
+### 🎛️ TWR Analog Gauge Repurpose & 3-Column Cockpit HUD Tickets (#26–#28)
+- [x] #26: 01: Decouple Analog Dial from Fuel Tank & Declutter Liquid Tank Column (`FuelTank.ts`)
+- [x] #27: 02: TWR Telemetry Pipeline & Scale Mapping Unit Tests (`FlightSim.ts`, `FlightScene.ts`, `twr.test.ts`)
+- [x] #28: 03: Three-Column Instrument Cluster, Analog Needle Inertia & Low-Thrust Alert (`FuelTank.ts`, `FlightScene.ts`)
+
+### 🌟 Shaders & Anti-Aliasing Tickets (#23–#25)
+- [x] #23: Phaser Smooth Pixel Art WebGL Pipeline Configuration (`src/main.ts`)
+- [x] #24: Sprite Texture Filtering & SmoothPixelArt Flag Hookup (`src/core/assets.ts`)
+- [x] #25: Subpixel Rotation Diagnostics & Anti-Aliased Sprite Verification (`scripts/verify-fat-pixel-shader.mjs`)
+
+### 🎨 UI, Typography & Visual Polish Tickets (#20–#22)
+- [x] #20: 8-Segment Dual-Variant Mass Indicator Bar (`FuelTank.ts`)
+- [x] #21: Crisp Canvas & Anti-Aliased UI Rendering (`main.ts`, `assets.ts`)
+- [x] #22: Google Font Mozilla Headline Integration (`index.html`, `theme.ts`, `BuilderScene.ts`)
 
 ### ⚡ Performance & Polish Tickets (#10–#19)
 - [x] #10: Rigid Rocket-Centric Camera & Continuous Framing Smoothing (Fixed in `WorldRenderer`)

@@ -1,4 +1,4 @@
-import Phaser from 'phaser';
+import type Phaser from 'phaser';
 import { PartType } from './types';
 
 export const GAME_ASSETS = {
@@ -24,13 +24,39 @@ export const GAME_ASSETS = {
 } as const;
 
 /**
+ * Enforce crisp nearest-neighbor filtering on all 2D pixel art textures
+ * so pixels stay completely sharp, blocky, and authentic with zero blur.
+ * FilterMode 1 = NEAREST, 0 = LINEAR.
+ */
+export function applyPixelArtTextureFilters(scene: Phaser.Scene): void {
+  for (const asset of Object.values(GAME_ASSETS)) {
+    if (scene.textures.exists(asset.key)) {
+      const tex = scene.textures.get(asset.key);
+      if (typeof tex.setSmoothPixelArt === 'function') {
+        tex.setSmoothPixelArt(false);
+      }
+      tex.setFilter(1); // NEAREST
+    }
+  }
+}
+
+/**
  * Preload all game assets into Phaser texture cache if not already loaded.
  */
 export function preloadGameAssets(scene: Phaser.Scene): void {
+  let hasPendingLoads = false;
   for (const asset of Object.values(GAME_ASSETS)) {
     if (!scene.textures.exists(asset.key)) {
       scene.load.image(asset.key, asset.path);
+      hasPendingLoads = true;
     }
+  }
+  if (hasPendingLoads) {
+    scene.load.once('complete', () => {
+      applyPixelArtTextureFilters(scene);
+    });
+  } else {
+    applyPixelArtTextureFilters(scene);
   }
 }
 
