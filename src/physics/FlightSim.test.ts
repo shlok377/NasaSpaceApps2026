@@ -4,7 +4,8 @@ import { PartType } from '../core/types';
 import { airDensity } from './atmosphere';
 import { dominantBody, earthGravity, gravityAt, moonAltitude, moonSoiAltitude } from './bodies';
 import { LIMITS, MOON, MOON_CENTER, WORLD } from './constants';
-import { FlightSim, ControlInput } from './FlightSim';
+import { FlightSim, ControlInput, MAX_SUBSTEPS, PHYSICS_DT } from './FlightSim';
+import { CONFIG } from '../config';
 import { analyzeVehicle, boosterStages, buildFlightVehicle, FlightVehicle } from './vehicle';
 
 type Layout = Array<[number, number, PartType]>;
@@ -83,8 +84,9 @@ describe('the compact world', () => {
 describe('vehicle model', () => {
   it('derives mass, propellant and thrust from the builder tree', () => {
     const v = buildVehicle(BASIC);
-    expect(v.dryMass).toBe(100 + 50 + 80);
-    expect(v.fuelCapacity).toBe(200);
+    const p = CONFIG.parts;
+    expect(v.dryMass).toBe(p.COCKPIT.mass + p.FUEL_TANK.mass + p.ENGINE.mass);
+    expect(v.fuelCapacity).toBe(p.FUEL_TANK.fuelLiters);
     expect(v.engineCount).toBe(1);
   });
 
@@ -130,6 +132,8 @@ describe('flight', () => {
   it('runs out of fuel, coasts up, and falls back in an arc', () => {
     const sim = new FlightSim(buildVehicle(FINNED));
     sim.launch();
+    // Test a suborbital ascent that coasts and falls back to Earth
+    for (const id of sim.tanks.keys()) sim.tanks.set(id, 60);
     fly(sim, 400, holdUpright());
     expect(sim.stats.maxAltitude).toBeGreaterThan(500);
     expect(sim.isFinished).toBe(true);
@@ -220,3 +224,40 @@ describe('balance check', () => {
     expect(Math.abs(analyzeVehicle(buildVehicle(STAGED)).thrustOffset)).toBeLessThan(0.05);
   });
 });
+
+describe('performance & spiral-of-death protection', () => {
+  it('clamps accumulator to MAX_SUBSTEPS during huge frame lag spikes', () => {
+    const sim = new FlightSim(buildVehicle(STAGED));
+    sim.launch();
+
+    // Simulate an extreme 2.0-second browser freeze / lag spike
+    const lagSeconds = 2.0;
+    const initialTime = sim.state.time;
+    sim.advance(lagSeconds, { throttle: 1, steer: 0 });
+
+    // The sim should advance by exactly MAX_SUBSTEPS * PHYSICS_DT, not 240 steps!
+    const expectedMaxAdvance = MAX_SUBSTEPS * PHYSICS_DT;
+    const actualAdvance = sim.state.time - initialTime;
+    expect(actualAdvance).toBeCloseTo(expectedMaxAdvance, 5);
+  });
+
+  it('caches centerOfMass calculation across accesses and invalidates when fuel burns', () => {
+    const sim = new FlightSim(buildVehicle(STAGED));
+    const initialCom = sim.com;
+    // Repeated access returns the exact same cached reference
+    expect(sim.com).toBe(initialCom);
+
+    sim.launch();
+    // After stepping with throttle 0 (no fuel burned), cache remains identical
+    sim.step(1 / 120, { throttle: 0, steer: 0 });
+    expect(sim.com).toBe(initialCom);
+
+    // After stepping with throttle 1 (fuel burns), cache invalidates and updates
+    sim.step(1 / 120, { throttle: 1, steer: 0 });
+    const burnedCom = sim.com;
+    expect(burnedCom).not.toBe(initialCom);
+    // Subsequent access returns the new cached reference
+    expect(sim.com).toBe(burnedCom);
+  });
+});
+

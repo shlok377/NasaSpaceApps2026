@@ -18,6 +18,8 @@ import { windAt } from './wind';
 
 /** Fixed physics timestep. */
 export const PHYSICS_DT = 1 / 120;
+/** Maximum physics sub-steps allowed per frame to prevent spiral-of-death during lag spikes. */
+export const MAX_SUBSTEPS = 24;
 
 export type FlightPhase = 'PRELAUNCH' | 'FLYING' | 'LANDED' | 'CRASHED';
 
@@ -214,9 +216,18 @@ export class FlightSim {
     return totalFuel(this.tanks);
   }
 
+  private _cachedCom: CenterOfMass | null = null;
+
+  public invalidateCom(): void {
+    this._cachedCom = null;
+  }
+
   /** Body-frame centre of mass right now (fuel shifts it). */
   public get com(): CenterOfMass {
-    return centerOfMass(this.vehicle, this.tanks);
+    if (!this._cachedCom) {
+      this._cachedCom = centerOfMass(this.vehicle, this.tanks);
+    }
+    return this._cachedCom;
   }
 
   public launch(): void {
@@ -231,6 +242,10 @@ export class FlightSim {
 
   public advance(seconds: number, input: ControlInput): void {
     this.accumulator += seconds;
+    const maxAccum = MAX_SUBSTEPS * PHYSICS_DT;
+    if (this.accumulator > maxAccum) {
+      this.accumulator = maxAccum;
+    }
     while (this.accumulator >= PHYSICS_DT - 1e-9) {
       this.step(PHYSICS_DT, input);
       this.accumulator -= PHYSICS_DT;
@@ -424,7 +439,9 @@ export class FlightSim {
       remaining -= taken;
       if (taken <= 1e-12) break;
     }
-    return want - remaining;
+    const drawn = want - remaining;
+    if (drawn > 1e-12) this.invalidateCom();
+    return drawn;
   }
 
   /** Empty booster stages drop off — but only when what's left can still fly. */
@@ -521,12 +538,14 @@ export class FlightSim {
 
     if (everything) {
       this.vehicle = buildVehicle([], this.vehicle.rootGridX, this.vehicle.rootGridY);
+      this.invalidateCom();
       this.version++;
       return;
     }
     const rest = this.vehicle.parts.filter(p => !ids.has(p.id));
     for (const id of ids) this.tanks.delete(id);
     this.vehicle = buildVehicle(rest, this.vehicle.rootGridX, this.vehicle.rootGridY);
+    this.invalidateCom();
     // Keep the remaining parts where they were: move the state to their centre of mass.
     const newCom = this.com;
     const shift = this.bodyToWorld(newCom.u, newCom.a, com);
@@ -666,6 +685,7 @@ export class FlightSim {
     }
     this.stats.fuelCollected += added;
     this.mecoAnnounced = false;
+    this.invalidateCom();
     return added;
   }
 

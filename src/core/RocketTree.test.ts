@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { RocketTree } from './RocketTree';
+import { CONFIG } from '../config';
 
 describe('RocketTree', () => {
   it('initializes with immovable Cockpit as root node at Col 7, Row 5', () => {
@@ -125,11 +126,14 @@ describe('RocketTree Full Lifecycle & Telemetry', () => {
 
     // Telemetry: 1 Cockpit + 1 Tank + 1 Engine + 1 Cone + 2 Fins = 6 parts
     const telemetry = tree.getTelemetry();
+    const p = CONFIG.parts;
+    const expectedMass = p.COCKPIT.mass + p.FUEL_TANK.mass + p.ENGINE.mass + p.NOSE_CONE.mass + p.FIN.mass * 2;
+    const expectedTwr = Number((p.ENGINE.thrust / expectedMass).toFixed(2));
     expect(telemetry.partCount).toBe(6);
-    expect(telemetry.totalFuel).toBe(200);
-    expect(telemetry.totalThrust).toBe(500);
-    expect(telemetry.totalMass).toBe(100 + 50 + 80 + 30 + 20 + 20); // 300
-    expect(telemetry.twr).toBe(1.67);
+    expect(telemetry.totalFuel).toBe(p.FUEL_TANK.fuelLiters);
+    expect(telemetry.totalThrust).toBe(p.ENGINE.thrust);
+    expect(telemetry.totalMass).toBe(expectedMass);
+    expect(telemetry.twr).toBe(expectedTwr);
     expect(telemetry.valid).toBe(true);
   });
 

@@ -14,7 +14,7 @@ export const SCREEN_CY = 400;
 /** Pixels per metre on the pad (one grid cell = one metre). */
 export const CELL_PX = CONFIG.camera.ascentScale;
 /** In the orbit map the rocket is drawn this many pixels per part, so its heading stays readable. */
-const MAP_ROCKET_PX = 6;
+const MAP_ROCKET_PX = 12;
 
 export const WORLD_COLORS = {
   skyLow: 0x6fb1e6,
@@ -108,6 +108,11 @@ export class WorldRenderer {
   public camera: Camera = { x: 0, y: 0, upAngle: Math.PI / 2, scale: CELL_PX, rocketScale: CELL_PX, mode: 'ASCENT' };
   private readonly skyGfx: Phaser.GameObjects.Graphics;
   private readonly skyMoonSprite: Phaser.GameObjects.Image;
+  private readonly smokeSpritesContainer: Phaser.GameObjects.Container;
+  private readonly smokeSpritesPool: Phaser.GameObjects.Image[] = [];
+  private lastSkyAltitude = -Infinity;
+  private lastSkyMode: CameraMode | null = null;
+  public skyRedrawCount = 0;
   private readonly worldGfx: Phaser.GameObjects.Graphics;
   private readonly rocketGfx: Phaser.GameObjects.Graphics;
   private readonly partSpritesContainer: Phaser.GameObjects.Container;
@@ -117,10 +122,14 @@ export class WorldRenderer {
   private labelIndex = 0;
   private clouds: Array<{ x: number; y: number; puffs: Array<{ dx: number; dy: number; r: number }> }> = [];
   private dust: Array<{ x: number; y: number }> = [];
-  private smoke: SmokePuff[] = [];
-  private path: Array<{ x: number; y: number }> = [];
+  private static readonly MAX_SMOKE = 400;
+  private readonly smokePool: SmokePuff[] = Array.from({ length: 400 }, () => ({ x: 0, y: 0, vx: 0, vy: 0, age: 0, life: 0 }));
+  private smokeCount = 0;
+  private readonly pathPoints = new Float32Array(1200);
+  private pathCount = 0;
   private pathColor: number = WORLD_COLORS.zone;
   private pathAt = -Infinity;
+  private smoothedRocketY = 470;
 
   constructor(private readonly scene: Phaser.Scene) {
     const rng = new Phaser.Math.RandomDataGenerator(['moonshot']);
@@ -135,9 +144,23 @@ export class WorldRenderer {
     this.dust = Array.from({ length: 34 }, () => ({ x: rng.realInRange(-30, 30), y: rng.realInRange(-20, 20) }));
     this.skyGfx = scene.add.graphics();
     this.skyMoonSprite = scene.add.image(0, 0, GAME_ASSETS.UI_MOON.key).setVisible(false);
+    this.ensureSmokeTexture();
+    this.smokeSpritesContainer = scene.add.container(0, 0);
     this.worldGfx = scene.add.graphics();
     this.rocketGfx = scene.add.graphics();
     this.partSpritesContainer = scene.add.container(0, 0);
+  }
+
+  private ensureSmokeTexture(): void {
+    if (this.scene.textures && !this.scene.textures.exists('smoke_puff')) {
+      const g = typeof this.scene.make?.graphics === 'function'
+        ? this.scene.make.graphics({ x: 0, y: 0 })
+        : this.scene.add.graphics();
+      g.fillStyle(0xffffff, 1);
+      g.fillCircle(16, 16, 16);
+      g.generateTexture('smoke_puff', 32, 32);
+      g.destroy();
+    }
   }
 
   /** World → screen, using the current camera. */
@@ -188,65 +211,133 @@ export class WorldRenderer {
       return;
     }
 
-    let targetX: number;
-    let targetY: number;
-    let targetUp: number;
     if (mode === 'ASCENT') {
       c.scale = cam.ascentScale;
       c.rocketScale = c.scale;
-      targetUp = Math.PI / 2;
-      // Climbing: rocket low on screen, sky ahead. Falling: rocket high, ground ahead.
-      const rocketY = t.verticalSpeed < -2 && !sim.onGround ? 260 : 470;
-      targetX = s.x;
-      targetY = s.y + (rocketY - SCREEN_CY) / c.scale;
+      const targetUp = Math.PI / 2;
+      const climbFactor = sim.onGround ? 1 : Phaser.Math.Clamp((t.verticalSpeed + 8) / 16, 0, 1);
+      const targetRocketY = 260 + (470 - 260) * climbFactor;
+
+      if (snap) {
+        this.smoothedRocketY = targetRocketY;
+        c.upAngle = targetUp;
+      } else {
+        this.smoothedRocketY += (targetRocketY - this.smoothedRocketY) * (1 - Math.exp(-dt * 3));
+        c.upAngle = targetUp;
+      }
+      c.x = s.x;
+      c.y = s.y + (this.smoothedRocketY - SCREEN_CY) / c.scale;
     } else {
       c.scale = mode === 'DESCENT' ? cam.descentScale : cam.touchdownScale;
       c.rocketScale = Math.max(c.scale, CELL_PX * 0.45);
       const up = localUp('MOON', s.x, s.y);
-      targetUp = Math.atan2(up.y, up.x);
-      // Keep both the rocket and the ground in view.
+      const targetUp = Math.atan2(up.y, up.x);
       const alt = Math.max(0, t.moonAltitude);
-      const rocketY = Phaser.Math.Clamp(640 - alt * c.scale, 160, 480);
-      const offset = (rocketY - SCREEN_CY) / c.scale;
-      targetX = s.x + up.x * offset;
-      targetY = s.y + up.y * offset;
-    }
+      const targetRocketY = Phaser.Math.Clamp(640 - alt * c.scale, 160, 480);
 
-    const k = snap ? 1 : 1 - Math.exp(-dt * 6);
-    if (snap) {
-      c.x = targetX;
-      c.y = targetY;
-      c.upAngle = targetUp;
-    } else {
-      // Follow tightly along the direction of travel so the rocket never runs off screen.
-      c.x += (targetX - c.x) * Math.max(k, 0.5);
-      c.y += (targetY - c.y) * Math.max(k, 0.5);
-      c.upAngle += Math.atan2(Math.sin(targetUp - c.upAngle), Math.cos(targetUp - c.upAngle)) * (1 - Math.exp(-dt * 2));
+      if (snap) {
+        this.smoothedRocketY = targetRocketY;
+        c.upAngle = targetUp;
+      } else {
+        this.smoothedRocketY += (targetRocketY - this.smoothedRocketY) * (1 - Math.exp(-dt * 4));
+        c.upAngle += Math.atan2(Math.sin(targetUp - c.upAngle), Math.cos(targetUp - c.upAngle)) * (1 - Math.exp(-dt * 3));
+      }
+      const offset = (this.smoothedRocketY - SCREEN_CY) / c.scale;
+      c.x = s.x + up.x * offset;
+      c.y = s.y + up.y * offset;
     }
   }
 
+  private spawnSmoke(x: number, y: number, vx: number, vy: number, life: number): void {
+    let p: SmokePuff;
+    if (this.smokeCount < WorldRenderer.MAX_SMOKE) {
+      p = this.smokePool[this.smokeCount++];
+    } else {
+      let oldestIdx = 0;
+      let maxAge = 0;
+      for (let i = 0; i < this.smokeCount; i++) {
+        if (this.smokePool[i].age > maxAge) {
+          maxAge = this.smokePool[i].age;
+          oldestIdx = i;
+        }
+      }
+      p = this.smokePool[oldestIdx];
+    }
+    p.x = x;
+    p.y = y;
+    p.vx = vx;
+    p.vy = vy;
+    p.age = 0;
+    p.life = life;
+  }
+
   public updateSmoke(simDt: number, sim: FlightSim, t: FlightTelemetry, alive: boolean): void {
+    // 1. Advance existing smoke particles first
+    const damp = Math.exp(-2.2 * simDt);
+    let writeIdx = 0;
+    for (let i = 0; i < this.smokeCount; i++) {
+      const p = this.smokePool[i];
+      p.age += simDt;
+      if (p.age < p.life) {
+        p.vx *= damp;
+        p.vy *= damp;
+        p.x += p.vx * simDt;
+        p.y += p.vy * simDt;
+        if (writeIdx !== i) {
+          const target = this.smokePool[writeIdx];
+          this.smokePool[writeIdx] = p;
+          this.smokePool[i] = target;
+        }
+        writeIdx++;
+      }
+    }
+    this.smokeCount = writeIdx;
+
+    // 2. Spawn new smoke strictly pivoted to active thrusters
     if (alive && t.thrust > 0 && t.airDensity > 0.05) {
       const s = sim.state;
       const bx = Math.cos(s.theta);
       const by = Math.sin(s.theta);
-      for (const { part, x, y } of sim.partPositions()) {
+      const visual = this.camera.rocketScale / this.camera.scale;
+      const com = sim.com;
+
+      for (const part of sim.vehicle.parts) {
         if (part.thrust <= 0) continue;
-        for (let i = 0; i < Math.min(3, Math.ceil(simDt * 30)); i++) {
-          const spread = (Math.random() - 0.5) * 10;
-          this.smoke.push({ x: x - bx * 0.7, y: y - by * 0.7, vx: s.vx - bx * 30 - by * spread, vy: s.vy - by * 30 + bx * spread, age: 0, life: 2 + Math.random() * 2 });
+        const du = (part.u - com.u) * visual;
+        const da = (part.a - com.a) * visual;
+        const engX = s.x + da * bx + du * by;
+        const engY = s.y + da * by - du * bx;
+
+        const nozzleDist = 0.5 * visual;
+        const count = Math.min(4, Math.max(1, Math.round(simDt * 60)));
+
+        for (let i = 0; i < count; i++) {
+          const spread = (Math.random() - 0.5) * 4;
+          const spawnDist = nozzleDist + Math.random() * 0.15;
+          const spawnX = engX - bx * spawnDist;
+          const spawnY = engY - by * spawnDist;
+
+          // Exhaust shoots strictly backwards along the thruster axis (-bx, -by)
+          const exhaustSpeed = 16 + Math.random() * 6;
+          const vx = -bx * exhaustSpeed - by * spread;
+          const vy = -by * exhaustSpeed + bx * spread;
+
+          this.spawnSmoke(
+            spawnX,
+            spawnY,
+            vx,
+            vy,
+            1.8 + Math.random() * 1.5
+          );
         }
       }
     }
-    const damp = Math.exp(-2.2 * simDt);
-    for (const p of this.smoke) {
-      p.vx *= damp;
-      p.vy *= damp;
-      p.x += p.vx * simDt;
-      p.y += p.vy * simDt;
-      p.age += simDt;
+  }
+
+  private hideSmokeSprites(): void {
+    for (let i = 0; i < this.smokeSpritesPool.length; i++) {
+      this.smokeSpritesPool[i].setVisible(false);
     }
-    this.smoke = this.smoke.filter(p => p.age < p.life).slice(-400);
   }
 
   public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, shield: boolean, overlay: MissionOverlay): void {
@@ -254,9 +345,15 @@ export class WorldRenderer {
     this.drawSky(sim, t);
     const g = this.worldGfx;
     g.clear();
-    if (this.camera.mode === 'ORBIT') this.drawOrbitMap(sim, t, overlay);
-    else if (this.camera.mode === 'ASCENT') this.drawAscent(sim, t, rocks);
-    else this.drawMoonCloseUp(sim, overlay);
+    if (this.camera.mode === 'ORBIT') {
+      this.hideSmokeSprites();
+      this.drawOrbitMap(sim, t, overlay);
+    } else if (this.camera.mode === 'ASCENT') {
+      this.drawAscent(sim, t, rocks);
+    } else {
+      this.hideSmokeSprites();
+      this.drawMoonCloseUp(sim, overlay);
+    }
     this.drawRocketAndDebris(sim, t, alive, shield);
     for (let i = this.labelIndex; i < this.labels.length; i++) this.labels[i].setVisible(false);
   }
@@ -273,17 +370,28 @@ export class WorldRenderer {
   }
 
   private drawSky(sim: FlightSim, t: FlightTelemetry): void {
-    const g = this.skyGfx;
-    g.clear();
     const y = Math.max(0, t.earthAltitude);
-    const air = this.camera.mode === 'ASCENT' ? Phaser.Math.Clamp(1 - y / WORLD.atmosphereTop, 0, 1) : 0;
-    const top = air > 0.5 ? lerpColor(WORLD_COLORS.skyHigh, WORLD_COLORS.skyLow, (air - 0.5) * 2) : lerpColor(WORLD_COLORS.space, WORLD_COLORS.skyHigh, air * 2);
-    const bottom = lerpColor(WORLD_COLORS.space, 0xb9dcf5, Math.pow(air, 0.7));
-    g.fillGradientStyle(top, top, bottom, bottom, 1);
-    g.fillRect(0, 0, 1280, 720);
+    const altDiff = Math.abs(y - this.lastSkyAltitude);
+    const modeChanged = this.camera.mode !== this.lastSkyMode;
+
+    // Cache sky gradient: re-evaluate only when altitude shifts noticeably (>25m) or camera mode changes
+    if (modeChanged || altDiff >= 25 || this.lastSkyAltitude === -Infinity) {
+      const g = this.skyGfx;
+      g.clear();
+      const air = this.camera.mode === 'ASCENT' ? Phaser.Math.Clamp(1 - y / WORLD.atmosphereTop, 0, 1) : 0;
+      const top = air > 0.5 ? lerpColor(WORLD_COLORS.skyHigh, WORLD_COLORS.skyLow, (air - 0.5) * 2) : lerpColor(WORLD_COLORS.space, WORLD_COLORS.skyHigh, air * 2);
+      const bottom = lerpColor(WORLD_COLORS.space, 0xb9dcf5, Math.pow(air, 0.7));
+      g.fillGradientStyle(top, top, bottom, bottom, 1);
+      g.fillRect(0, 0, 1280, 720);
+
+      this.lastSkyAltitude = y;
+      this.lastSkyMode = this.camera.mode;
+      this.skyRedrawCount++;
+    }
 
     // During the climb the Moon hangs in the sky ahead and grows as you near it.
     if (this.camera.mode === 'ASCENT') {
+      const air = Phaser.Math.Clamp(1 - y / WORLD.atmosphereTop, 0, 1);
       const k = Phaser.Math.Clamp(y / (MOON_CENTER.y - MOON.sphereOfInfluence), 0, 1);
       const r = 26 + 210 * k * k;
       const cx = 900 - Phaser.Math.Clamp(sim.state.x * 0.08, -200, 200) - 200 * k;
@@ -365,13 +473,29 @@ export class WorldRenderer {
       }
     }
 
-    // Exhaust smoke.
-    for (const p of this.smoke) {
+    // Exhaust smoke: rendered as GPU-batched quad sprites
+    let visibleSmoke = 0;
+    for (let i = 0; i < this.smokeCount; i++) {
+      const p = this.smokePool[i];
       const sp = this.toScreen(p.x, p.y);
       const r = Math.max(1.5, (0.5 + p.age * 1.4) * scale);
       if (sp.x < -r || sp.x > 1280 + r || sp.y < -r || sp.y > 720 + r) continue;
-      g.fillStyle(0xe5e7eb, 0.4 * (1 - p.age / p.life));
-      g.fillCircle(sp.x, sp.y, r);
+      let sprite = this.smokeSpritesPool[visibleSmoke];
+      if (!sprite) {
+        sprite = this.scene.add.image(0, 0, 'smoke_puff');
+        this.smokeSpritesContainer.add(sprite);
+        this.smokeSpritesPool.push(sprite);
+      }
+      const alpha = 0.4 * (1 - p.age / p.life);
+      sprite.setVisible(true);
+      sprite.setPosition(sp.x, sp.y);
+      sprite.setDisplaySize(r * 2, r * 2);
+      sprite.setAlpha(alpha);
+      sprite.setTint(0xe5e7eb);
+      visibleSmoke++;
+    }
+    for (let i = visibleSmoke; i < this.smokeSpritesPool.length; i++) {
+      this.smokeSpritesPool[i].setVisible(false);
     }
 
     // Rocks, shields and fuel in the belt, with warning chevrons for what's coming.
@@ -432,7 +556,10 @@ export class WorldRenderer {
     if (now - this.pathAt < 120) return;
     this.pathAt = now;
     let { x, y, vx, vy } = sim.state;
-    const pts = [{ x, y }];
+    this.pathCount = 0;
+    this.pathPoints[0] = x;
+    this.pathPoints[1] = y;
+    this.pathCount = 1;
     const o = t.moonOrbit;
     const span = o && !o.escaping ? Math.min(o.period * 1.02, 1200) : 600;
     const dt = Math.max(0.25, span / 500);
@@ -444,7 +571,11 @@ export class WorldRenderer {
       vy += g.y * dt;
       x += vx * dt;
       y += vy * dt;
-      pts.push({ x, y });
+      if (this.pathCount < 600) {
+        this.pathPoints[this.pathCount * 2] = x;
+        this.pathPoints[this.pathCount * 2 + 1] = y;
+        this.pathCount++;
+      }
       if (moonAltitude(x, y) <= 0) {
         hit = true;
         break;
@@ -454,7 +585,6 @@ export class WorldRenderer {
         break;
       }
     }
-    this.path = pts;
     this.pathColor = hit ? WORLD_COLORS.danger : left ? 0xfbbf24 : WORLD_COLORS.zone;
   }
 
@@ -554,10 +684,10 @@ export class WorldRenderer {
     // Predicted path.
     this.predictPath(sim, t);
     g.lineStyle(2, this.pathColor, 0.9);
-    for (let i = 1; i < this.path.length; i++) {
+    for (let i = 1; i < this.pathCount; i++) {
       if (i % 2 === 0) continue;
-      const a = this.toScreen(this.path[i - 1].x, this.path[i - 1].y);
-      const b = this.toScreen(this.path[i].x, this.path[i].y);
+      const a = this.toScreen(this.pathPoints[(i - 1) * 2], this.pathPoints[(i - 1) * 2 + 1]);
+      const b = this.toScreen(this.pathPoints[i * 2], this.pathPoints[i * 2 + 1]);
       g.lineBetween(a.x, a.y, b.x, b.y);
     }
 
@@ -725,7 +855,7 @@ export class WorldRenderer {
     const cellPx = this.camera.rocketScale;
     const visual = cellPx / this.camera.scale; // metres-per-cell as drawn
     this.activeSpriteCount = 0;
-    const useSprites = this.camera.mode !== 'ORBIT' && cellPx > 8;
+    const useSprites = true;
 
     // Tumbling debris (not on the orbit map, where it would just be clutter).
     if (this.camera.mode !== 'ORBIT') {
@@ -777,8 +907,18 @@ export class WorldRenderer {
         if (p.thrust <= 0) return;
         const o = positions[i];
         const base = cellPx / 2;
-        const outer = [-w, base, w, base, w * 0.3, base + len * 0.75, 0, base + len, -w * 0.3, base + len * 0.75].reduce<number[]>((acc, v, j, arr) => (j % 2 === 0 ? acc.concat(tf(v, arr[j + 1], o.x, o.y)) : acc), []);
-        const inner = [-w * 0.5, base, w * 0.5, base, 0, base + len * 0.55].reduce<number[]>((acc, v, j, arr) => (j % 2 === 0 ? acc.concat(tf(v, arr[j + 1], o.x, o.y)) : acc), []);
+        const outerRaw = [-w, base, w, base, w * 0.3, base + len * 0.75, 0, base + len, -w * 0.3, base + len * 0.75];
+        const outer: number[] = [];
+        for (let j = 0; j < outerRaw.length; j += 2) {
+          const pt = tf(outerRaw[j], outerRaw[j + 1], o.x, o.y);
+          outer.push(pt[0], pt[1]);
+        }
+        const innerRaw = [-w * 0.5, base, w * 0.5, base, 0, base + len * 0.55];
+        const inner: number[] = [];
+        for (let j = 0; j < innerRaw.length; j += 2) {
+          const pt = tf(innerRaw[j], innerRaw[j + 1], o.x, o.y);
+          inner.push(pt[0], pt[1]);
+        }
         g.fillStyle(0xff7b1c, 0.85);
         polygon(g, outer, true);
         g.fillStyle(0xffe066, 0.95);

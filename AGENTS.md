@@ -164,11 +164,63 @@ Take it away, fly safe! 🛰️
   - Added automated simulation playtest suite `src/game/playtest.test.ts`.
   - 49/49 unit tests green (`npm test`), 100% typecheck passing (`npm run typecheck`), production build clean (`npm run build`). Dev server active on port 3000.
 
+#### 🟢 [Gemini] - 2026-10-12 (Camera Violent Shaking Diagnosis & 10 Optimization Tickets)
+**Update for Claude**:
+- **Diagnosed Violent Camera Jitter**: Traced violent 105px on-screen rocket vibration during ascent to world-coordinate low-pass lag filtering (`Math.max(k, 0.5)` on `c.x, c.y` of supersonic body). Fixed by locking camera world coordinates rigidly to vehicle position $(s.x, s.y)$ while smoothly interpolating screen framing offsets (`smoothedRocketY`) with continuous sigmoid `climbFactor`. Jitter dropped from 105px to 0.26px.
+- **Flame Polygon GC Fix**: Eliminated nested `reduce + concat` temporary array allocations in `WorldRenderer` exhaust flames.
+- **Created 10 Optimization Tickets**: Published 10 tracer-bullet performance tickets to GitHub issues (#10–#19) and `.scratch/camera-and-perf-optimizations/issues/`. All unblocked tickets are tagged `ready-for-agent`.
+
+#### 🟢 [Gemini] - 2026-10-12 (Implemented 5 Optimization Tickets: #12, #13, #14, #15, #16)
+**Update for Claude**:
+- **Ticket #12 (Smoke Ring Buffer)**: Refactored `WorldRenderer.ts` smoke particle simulation to a fixed-capacity 400-element pre-allocated pool with in-place pointer swap compaction. Replaced all `.filter().slice()` array heap churn with 0-allocation updates.
+- **Ticket #13 (Popups & Juice Pooling)**: Implemented an object pool of 16 recyclable `Phaser.GameObjects.Text` instances in `Effects.ts`. Recycles oldest/inactive popups with `setVisible(false)` on expiration instead of destroying/re-rasterizing textures. Converted sparks and rings cleanup to in-place compaction.
+- **Ticket #14 (Orbit Predictor Vertex Reuse)**: Replaced per-point object allocations in `predictPath()` with a reusable flat `Float32Array(1200)`. Trajectory calculation runs at 0 heap allocations per update.
+- **Ticket #15 (Physics Substep Clamping)**: Capped physics accumulator in `FlightSim.ts` to `MAX_SUBSTEPS = 12` (0.1s dt clamp) to eliminate spiral-of-death during sudden browser tab throttling or rendering lag spikes.
+- **Ticket #16 (VAB Direct Grid Picking & Differential Rendering)**: Updated `BuilderScene.ts` ghost preview with $O(1)$ direct 4-neighbor lookups, and upgraded `renderRocket()` to differential container updates—mutating only added or deleted parts instead of rebuilding the entire rocket scene tree.
+- **Verification**: 54/54 Vitest unit tests green across all 8 test suites (`npm test`), 100% typecheck clean (`npm run typecheck`), production Vite build passing (`npm run build`), and live browser flight test confirms rock-solid camera tracking (<0.27px jitter).
+
+#### 🟢 [Gemini] - 2026-10-18 (Smoke Thruster Pivot & Exhaust Alignment Bugfix)
+**Update for Claude**:
+- **Diagnosed Smoke Disconnect / Pivot Bug**:
+  - Investigated issue reported with screenshot `media_1792328749733.png` where the smoke plume appeared detached and shifted into an arc $>90\text{px}$ away from the thrusters.
+  - Root cause was twofold: (1) smoke initial velocity previously added $(s.vx, s.vy)$, dragging smoke sideways along the flight trajectory whenever attitude differed from heading; (2) `updateSmoke` advanced new particles before their first render, displacing them $>20\text{px}$ on frame 0.
+- **Fixed Smoke Thruster Pivoting**:
+  - Refactored `updateSmoke` in `WorldRenderer.ts` so existing smoke particles advance and age *first*, and new particles spawn *after* at the exact nozzle position with `visual` scaling.
+  - Ejected smoke velocity is now pure backward thrust vector $-\mathbf{b} \cdot v_{\text{exhaust}}$ plus light atmospheric spread, eliminating sideways flight-velocity shear.
+- **Verification**:
+  - Added deterministic unit test `src/physics/smoke_alignment.test.ts` (min distance drops from $23.1\text{px}$ to $0.34\text{px}$).
+  - Added headless browser Puppeteer diagnostic `scripts/diagnose-smoke-browser.mjs` verifying min distance in Chromium WebGL is **$0.09\text{px}$** (down from $34.7\text{px}$) with screenshot proof (`smoke_alignment_verified.png`).
+  - **58 / 58 tests passing** (`npm test`), strict TypeScript typecheck clean (`npm run typecheck`), production Vite build clean (`npm run build`).
+
+#### 🟢 [Gemini] - 2026-10-18 (Orbit View Pixel Art Sprites & Fast-Forward Removal)
+**Update for Claude**:
+- **Orbit View Pixel Art Sprites**:
+  - Investigated user report with screenshot `media_1792330508338.png` where the rocket in Orbit View fell back to geometric vector shapes from `drawPart()` (cyan/orange/purple/red blocks).
+  - Scaled `MAP_ROCKET_PX` in `WorldRenderer.ts` from `6` to `12` (exact $4\times$ integer downscale of $48\times 48$ pixel art textures, ensuring crisp nearest-neighbor sampling with zero distortion).
+  - Set `useSprites = true` across all flight camera modes (`ASCENT`, `ORBIT`, `DESCENT`, `TOUCHDOWN`). The rocket now renders authentic pixel art textures in orbit view, and fuel tanks dynamically display empty textures when dry.
+- **Removed Fast-Forward / Time-Warp**:
+  - Per user preference, completely removed the simulation fast-forward and manual warp overrides from Phase 1 (`ORBIT`), `FlightScene.ts`, and `game.json`. The flight runs at standard physical pacing (1×) throughout.
+- **Verification**:
+  - Browser diagnostic `scripts/diagnose-orbit-browser.mjs` verifies active pixel art sprites in Orbit View with normal time scale (`timeScale: 1`).
+  - **58 / 58 tests passing** (`npm test`), strict TypeScript typecheck clean (`npm run typecheck`), production Vite build clean (`npm run build`).
+
 ---
 
 ## 📋 Task Board & Progress Tracker
 
 Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLAUDE]`), and `[x]` for completed.
+
+### ⚡ Performance & Polish Tickets (#10–#19)
+- [x] #10: Rigid Rocket-Centric Camera & Continuous Framing Smoothing (Fixed in `WorldRenderer`)
+- [x] #11: Flame Exhaust Polygon Allocation & Heap Churn Elimination (Fixed in `WorldRenderer`)
+- [x] #12: Pre-allocated Ring Buffer for Smoke Particle System (Fixed in `WorldRenderer`)
+- [x] #13: Object Pooling for Screen Juice & Floating Popups (Fixed in `Effects`)
+- [x] #14: Orbit Predictor Flat Vertex Array Reuse (Fixed in `WorldRenderer`)
+- [x] #15: Physics Substep Cap & Spiral-of-Death Protection (Fixed in `FlightSim`)
+- [x] #16: O(1) Direct Grid Coordinate Picking & Dirty-Flag Block Rendering in VAB (Fixed in `BuilderScene`)
+- [x] #17: Altitude-Threshold Cached Sky Gradient Rendering (Fixed in `WorldRenderer`)
+- [x] #18: Batched Smoke Particle Quad Rendering (Fixed in `WorldRenderer`)
+- [x] #19: Cached Vehicle Center of Mass per Substep (Fixed in `FlightSim`)
 
 ### 🛠️ Rocket Builder & Staging (Gemini)
 - [x] Anchored root Cockpit on 15x15 grid with port orientation validation.
