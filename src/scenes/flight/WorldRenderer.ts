@@ -11,6 +11,7 @@ import { FlightPart } from '../../physics/vehicle';
 import { computeScreenRetrograde, ScreenRetrogradeVector } from '../../physics/guidance';
 import { GAME_ASSETS, getPartTextureKey } from '../../core/assets';
 import { UI } from '../../ui/theme';
+import { DAY_SKY_KEY, PIXEL, SITE_GROUND_ROW, SITE_KEY, SITE_SIZE, createDaySkyTexture, createLaunchSiteTexture } from './LaunchSite';
 
 export const SCREEN_CX = 640;
 export const SCREEN_CY = 400;
@@ -122,6 +123,9 @@ export class WorldRenderer {
   private lastSkyAltitude = -Infinity;
   private lastSkyMode: CameraMode | null = null;
   public skyRedrawCount = 0;
+  private readonly daySky: Phaser.GameObjects.Image;
+  private readonly launchSite: Phaser.GameObjects.Image;
+  private readonly siteGroundGfx: Phaser.GameObjects.Graphics;
   private readonly worldGfx: Phaser.GameObjects.Graphics;
   private readonly rocketGfx: Phaser.GameObjects.Graphics;
   private readonly partSpritesContainer: Phaser.GameObjects.Container;
@@ -153,6 +157,11 @@ export class WorldRenderer {
     });
     this.dust = Array.from({ length: 34 }, () => ({ x: rng.realInRange(-30, 30), y: rng.realInRange(-20, 20) }));
     this.skyGfx = scene.add.graphics();
+    createDaySkyTexture(scene);
+    createLaunchSiteTexture(scene);
+    this.daySky = scene.add.image(0, 0, DAY_SKY_KEY);
+    this.daySky?.setOrigin?.(0);
+    this.daySky?.setScale?.(PIXEL);
     this.skyMoonSprite = scene.add.image(0, 0, GAME_ASSETS.UI_MOON_BIG.key);
     this.skyMoonSprite?.setVisible?.(false);
     this.skyMoonSprite?.setDepth?.(1);
@@ -170,6 +179,10 @@ export class WorldRenderer {
     this.landingFlagSprite?.setDepth?.(5);
     this.ensureSmokeTexture();
     this.smokeSpritesContainer = scene.add.container(0, 0);
+    this.siteGroundGfx = scene.add.graphics();
+    this.launchSite = scene.add.image(0, 0, SITE_KEY);
+    this.launchSite?.setOrigin?.(0.5, SITE_GROUND_ROW / (SITE_SIZE.height / PIXEL));
+    this.launchSite?.setScale?.(PIXEL);
     this.worldGfx = scene.add.graphics();
     this.rocketGfx = scene.add.graphics();
     this.partSpritesContainer = scene.add.container(0, 0);
@@ -442,9 +455,28 @@ export class WorldRenderer {
       this.skyRedrawCount++;
     }
 
+    // Daylight pixel sky near the ground, fading out as the air thins.
+    const air = this.camera.mode === 'ASCENT' ? Phaser.Math.Clamp(1 - y / WORLD.atmosphereTop, 0, 1) : 0;
+    this.daySky?.setVisible?.(air > 0);
+    this.daySky?.setAlpha?.(Phaser.Math.Clamp((air - 0.55) / 0.4, 0, 1));
+
+    // Launch-site panorama pinned to the ground line, with plain dirt past its edges.
+    const ground = this.toScreen(0, 0);
+    const siteTop = ground.y - SITE_GROUND_ROW * PIXEL;
+    const siteVisible = this.camera.mode === 'ASCENT' && siteTop < 720;
+    this.launchSite?.setVisible?.(siteVisible);
+    this.launchSite?.setPosition?.(Math.round(ground.x), Math.round(ground.y));
+    const g = this.siteGroundGfx;
+    g?.clear?.();
+    if (siteVisible && ground.y < 720) {
+      g?.fillStyle?.(0x8a5d36, 1);
+      g?.fillRect?.(0, ground.y, 1280, 720 - ground.y);
+      g?.fillStyle?.(0x86c058, 1);
+      g?.fillRect?.(0, ground.y, 1280, PIXEL);
+    }
+
     // During the climb the Moon hangs in the sky ahead and grows as you near it.
     if (this.camera.mode === 'ASCENT') {
-      const air = Phaser.Math.Clamp(1 - y / WORLD.atmosphereTop, 0, 1);
       const k = Phaser.Math.Clamp(y / (MOON_CENTER.y - MOON.sphereOfInfluence), 0, 1);
       const r = 26 + 210 * k * k;
       const cx = 900 - Phaser.Math.Clamp(sim.state.x * 0.08, -200, 200) - 200 * k;
@@ -494,17 +526,14 @@ export class WorldRenderer {
       }
     }
 
-    // Ground: a flat plain below y = 0, plus the pad and its tower.
+    // The ground itself is the launch-site panorama (see drawSky); here just the pad and its tower.
     if (s.y < 60) {
-      const gl = this.toScreen(s.x - 200, 0);
-      const gr = this.toScreen(s.x + 200, 0);
-      g.fillStyle(WORLD_COLORS.ground, 1);
-      g.fillRect(gl.x, gl.y, gr.x - gl.x, 720 - gl.y + 10);
-      g.lineStyle(2, WORLD_COLORS.groundDark, 1);
-      g.lineBetween(gl.x, gl.y, gr.x, gr.y);
       const pad = [this.toScreen(-5, 0), this.toScreen(5, 0), this.toScreen(5, -1), this.toScreen(-5, -1)];
-      g.fillStyle(0x64748b, 1);
+      g.fillStyle(0xb7b2a8, 1);
       polygon(g, pad.flatMap(p => [p.x, p.y]), true);
+      const padTop = this.toScreen(-5, 0);
+      g.fillStyle(0xe2ddd3, 1);
+      g.fillRect(padTop.x, padTop.y, 10 * scale, PIXEL);
       const towerBase = this.toScreen(-3.2, 0);
       const towerTop = this.toScreen(-2.4, 9);
       g.lineStyle(Math.max(1, scale * 0.12), 0xf97316, 1);

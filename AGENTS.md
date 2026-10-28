@@ -289,6 +289,17 @@ Take it away, fly safe! 🛰️
 - **Verification**:
   - Added dedicated unit test suite `src/physics/surface_flags.test.ts` (3 tests verifying texture keys, base anchor alignment, radial angle orientation, Orbit Map Moon sprite display, and camera mode visibility toggling).
   - **87 / 87 unit tests passing** across all 13 test suites (`npm test`), 100% clean typecheck (`npm run typecheck`), production Vite build passing (`npm run build`).
+#### 🟣 [Claude] - 2026-10-28 (Builder UI: retro pixel-art reskin)
+**Update for Gemini** — the user asked for a fun arcade look for the builder (pixel "GAME OVER" title-screen reference), so I reskinned **your `BuilderScene`** (logic untouched: placement, removal, validation, launch, economy, ParticleManager effects all the same):
+- **Theme** in `src/ui/pixel.ts`: palette `PX`, fonts *Press Start 2P* (titles) + *VT323* (body) loaded in `index.html` and awaited in `main.ts` (alongside Mozilla Headline) before Phaser starts; stepped-corner `drawPixelPanel`; plus-shaped sparkles.
+- **Merged onto main @ a738bf2** (2026-10-29): kept the global `antialias` config from main; the painted canvases (`builder_backdrop`, `day_sky`, `launch_site`) set NEAREST filtering themselves. Builder keeps main's neighbour-based red ghost check and incremental `renderRocket`.
+- **Uses the team's art** from `public/assets` via `core/assets.ts`: part sprites on the grid, ghost and inventory; Moon (×6) and Earth (×2) in the background; coin in the bank card; fuel gauge + needle repurposed as the **lift (TWR) dial** (needle straight up = TWR 1).
+- **Layout**: `CELL_SIZE` 54 → **48** (sprites are 48 px, drawn 1:1); grid 720×624 at (280, 52). Left column: telemetry + lift dial, pulsing LAUNCH! button, controls key caps. Right column: mission card, bank/cost, **vertical parts inventory** (replaces the bottom tray; `trayY`/`trayHeight` removed). Gridless see-through build bay over a dusk launch site painted in `src/ui/backdrop.ts` (320×180 canvas at 4×: dithered sky, side mountain ranges with snow caps, grassy/dirt ground). Palette is warm charcoal + amber (`PX.accent`), not blue.
+- **Verification**: typecheck + tests green; built cone/CMD/tank/engine/2-fin rocket in the browser and launched it. Flight scene untouched.
+
+#### 🟣 [Claude] - 2026-10-28 (Flight: daylight pixel launch site)
+- `src/scenes/flight/LaunchSite.ts` paints two canvases once (shown at 4×): a light dithered **day sky** with pixel clouds (screen-fixed, faded out with altitude in `drawSky`) and a **launch-site panorama** (world-fixed at y = 0: hazy far range, snowy mountain ranges either side of the pad, green hills, grass + layered dirt). Plain dirt fills past its edges. The old flat green ground rect is gone; pad recoloured to concrete.
+- Draw order in `WorldRenderer`: gradient → day sky → Moon → launch site → world graphics.
 
 ---
 

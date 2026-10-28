@@ -6,7 +6,8 @@ import { PART_DEFINITIONS } from '../core/partDefinitions';
 import { PartType, PortDirection, RocketNode } from '../core/types';
 import { ParticleManager } from '../particles';
 import { preloadGameAssets, getPartTextureKey, GAME_ASSETS } from '../core/assets';
-import { UI } from '../ui/theme';
+import { PX, drawPixelPanel, drawSparkle, pixelBody, pixelTitle } from '../ui/pixel';
+import { BACKDROP_SCALE, createBackdropTexture } from '../ui/backdrop';
 
 interface PaletteBay {
   type: PartType;
@@ -16,15 +17,23 @@ interface PaletteBay {
   hotkeyNum: string;
 }
 
+const SIDE_X = 20;
+const SIDE_W = 240;
+const RIGHT_X = 1280 - SIDE_X - SIDE_W;
+const PANEL_TOP = 60;
+const PANEL_BOTTOM = 676;
+const SLOT_W = 216;
+const SLOT_H = 56;
+/** TWR at the gauge's far right; TWR 1 (liftoff) points straight up. */
+const TWR_GAUGE_MAX = 2;
+
 export class BuilderScene extends Phaser.Scene {
   public static readonly GRID_COLS = 15;
   public static readonly GRID_ROWS = 13;
-  public static readonly CELL_SIZE = 54;
+  public static readonly CELL_SIZE = 48;
 
-  public readonly hudHeight = 96;
-  public readonly hudY = 14;
-  public readonly trayHeight = 128;
-  public readonly trayY = 592;
+  public readonly hudHeight = 300;
+  public readonly hudY = PANEL_TOP;
 
   private rocketTree!: RocketTree;
   private sceneryGraphics!: Phaser.GameObjects.Graphics;
@@ -45,16 +54,25 @@ export class BuilderScene extends Phaser.Scene {
   private selectedPartType: PartType | null = null;
   public paletteBays: PaletteBay[] = [];
   public particleManager!: ParticleManager;
+  private hoveredBay: PartType | null = null;
 
-  // HUD text objects
+  // HUD objects
+  private statusChipBg!: Phaser.GameObjects.Graphics;
   private hudStatusText!: Phaser.GameObjects.Text;
-  private hudStatsText!: Phaser.GameObjects.Text;
+  private statValues: Record<'mass' | 'thrust' | 'fuel' | 'twr', Phaser.GameObjects.Text> = {} as never;
+  private gaugeNeedle!: Phaser.GameObjects.Image;
+  private warningText!: Phaser.GameObjects.Text;
+  private launchButton!: Phaser.GameObjects.Container;
   private launchButtonBg!: Phaser.GameObjects.Graphics;
   private launchButtonText!: Phaser.GameObjects.Text;
+  private launchSubText!: Phaser.GameObjects.Text;
+  private launchPulse?: Phaser.Tweens.Tween;
   private launchReady = false;
   private launchBlockedReason = '';
-  private economyText!: Phaser.GameObjects.Text;
+  private bankText!: Phaser.GameObjects.Text;
+  private costText!: Phaser.GameObjects.Text;
   private missionText!: Phaser.GameObjects.Text;
+  private rewardText!: Phaser.GameObjects.Text;
   private money = 0;
 
   constructor() {
@@ -66,21 +84,18 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   create(): void {
-    // 1. Layout coordinates (1280 x 720 widescreen)
+    // 1. Layout (1280 x 720): side columns for HUD and parts, build bay in the middle.
     const totalGridWidth = BuilderScene.GRID_COLS * BuilderScene.CELL_SIZE;
-    const totalGridHeight = BuilderScene.GRID_ROWS * BuilderScene.CELL_SIZE;
-
-    // Centered horizontally: (1280 - 810) / 2 = 235
     this.gridOriginX = Math.round((this.scale.width - totalGridWidth) / 2);
-    // Centered vertically: (720 - 702) / 2 = 9 (fills screen with UI floating on top)
-    this.gridOriginY = Math.round((this.scale.height - totalGridHeight) / 2);
+    this.gridOriginY = 52;
 
-    // 2. Initialize core RocketTree model & ParticleManager
+    // 2. Core RocketTree model (immovable Cockpit at column 7, row 8) & ParticleManager
     this.rocketTree = new RocketTree(7, 8);
     this.particleManager = new ParticleManager(this);
 
     // 3. Rendering layers in order
     this.sceneryGraphics = this.add.graphics();
+    this.drawScenery();
     this.gridGraphics = this.add.graphics();
     this.blocksContainer = this.add.container(0, 0);
     this.socketsContainer = this.add.container(0, 0);
@@ -88,10 +103,10 @@ export class BuilderScene extends Phaser.Scene {
     this.hudContainer = this.add.container(0, 0);
 
     this.createGhostPreview();
-    this.drawScenery();
     this.drawGrid();
-    this.createBottomPartsTray();
+    this.createTitle();
     this.createHud();
+    this.createPartsPanel();
     this.refreshEconomy();
     this.renderRocket();
     this.setupInputHandlers();
@@ -113,250 +128,320 @@ export class BuilderScene extends Phaser.Scene {
     });
   }
 
-  private drawScenery(): void {
-    this.sceneryGraphics.clear();
-    const w = this.scale.width;
-    const h = this.scale.height;
+  // ---------------------------------------------------------------------------
+  // Scenery: dusk sky, twinkling stars, the Moon, mountains and the launch-site ground
+  // ---------------------------------------------------------------------------
 
-    // Plain solid dark background
-    this.sceneryGraphics.fillStyle(0x0f172a, 1);
-    this.sceneryGraphics.fillRect(0, 0, w, h);
+  private drawScenery(): void {
+    const g = this.sceneryGraphics;
+    const w = this.scale.width;
+    const rnd = new Phaser.Math.RandomDataGenerator(['rocket-lab']);
+
+    g.clear();
+    createBackdropTexture(this, 'builder_backdrop');
+    this.add.image(0, 0, 'builder_backdrop').setOrigin(0).setScale(BACKDROP_SCALE).setDepth(-1);
+
+    // Stars fade out toward the warm horizon.
+    const dotColors = [0xffffff, 0xfff1d0, 0xffd6c2, 0xd8d0ff];
+    for (let i = 0; i < 140; i++) {
+      const y = Math.round(Math.pow(rnd.frac(), 1.8) * 420 / 2) * 2;
+      g.fillStyle(rnd.pick(dotColors), rnd.realInRange(0.3, 1) * (1 - y / 520));
+      g.fillRect(Math.round(rnd.between(0, w) / 2) * 2, y, rnd.frac() < 0.85 ? 2 : 3, 2);
+    }
+
+    // The destination looms over the launch site.
+    this.add.image(905, 175, GAME_ASSETS.UI_MOON.key).setScale(6);
+
+    // Twinkling plus-shaped sparkles.
+    const sparkleColors = [0xfff1d0, 0xffd23f, 0xff8a5c, 0xffffff];
+    for (let i = 0; i < 18; i++) {
+      const s = this.add.graphics();
+      drawSparkle(s, rnd.pick(sparkleColors), 3, rnd.frac() < 0.4);
+      s.setPosition(rnd.between(20, w - 20), rnd.between(20, 380));
+      this.tweens.add({
+        targets: s,
+        alpha: { from: 1, to: 0.15 },
+        duration: rnd.between(700, 1800),
+        delay: rnd.between(0, 1500),
+        yoyo: true,
+        repeat: -1,
+        ease: 'Stepped',
+        easeParams: [4]
+      });
+    }
+
   }
 
   private drawGrid(): void {
-    this.gridGraphics.clear();
+    const g = this.gridGraphics;
+    const size = BuilderScene.CELL_SIZE;
+    const width = BuilderScene.GRID_COLS * size;
+    const height = BuilderScene.GRID_ROWS * size;
+    const x0 = this.gridOriginX;
+    const y0 = this.gridOriginY;
 
-    const width = BuilderScene.GRID_COLS * BuilderScene.CELL_SIZE;
-    const height = BuilderScene.GRID_ROWS * BuilderScene.CELL_SIZE;
+    g.clear();
+    // See-through bay so the planet shows behind the build area, with a hard pixel frame.
+    g.fillStyle(0x0b0910, 0.35);
+    g.fillRect(x0, y0, width, height);
+    g.fillStyle(0x01020a, 1);
+    g.fillRect(x0 - 9, y0 - 6, 3, height + 12);
+    g.fillRect(x0 + width + 6, y0 - 6, 3, height + 12);
+    g.fillRect(x0 - 6, y0 - 9, width + 12, 3);
+    g.fillRect(x0 - 6, y0 + height + 6, width + 12, 3);
+    g.fillStyle(PX.borderDim, 1);
+    g.fillRect(x0 - 6, y0 - 3, 6, height + 6);
+    g.fillRect(x0 + width, y0 - 3, 6, height + 6);
+    g.fillRect(x0 - 3, y0 - 6, width + 6, 6);
+    g.fillRect(x0 - 3, y0 + height, width + 6, 6);
+    g.fillStyle(PX.glow, 0.35);
+    g.fillRect(x0, y0 - 6, width, 3);
 
-    // Grid workspace backing
-    this.gridGraphics.fillStyle(0x111c30, 1);
-    this.gridGraphics.fillRect(this.gridOriginX, this.gridOriginY, width, height);
-
-    // Grid outer border - crisp high-contrast border
-    this.gridGraphics.lineStyle(2.5, 0x47638f, 1);
-    this.gridGraphics.strokeRect(this.gridOriginX, this.gridOriginY, width, height);
-
-    // Grid lines - high-contrast visible lines
-    for (let c = 1; c < BuilderScene.GRID_COLS; c++) {
-      const x = this.gridOriginX + c * BuilderScene.CELL_SIZE;
-      // Center column line highlight (Col 7 / 8 boundary is the rocket centerline)
-      if (c === 7 || c === 8) {
-        this.gridGraphics.lineStyle(1.5, 0x3d5a80, 1);
-      } else {
-        this.gridGraphics.lineStyle(1, 0x273b56, 0.95);
-      }
-      this.gridGraphics.lineBetween(x, this.gridOriginY, x, this.gridOriginY + height);
-    }
-    for (let r = 1; r < BuilderScene.GRID_ROWS; r++) {
-      const y = this.gridOriginY + r * BuilderScene.CELL_SIZE;
-      if (r === 8) {
-        this.gridGraphics.lineStyle(1.5, 0x3d5a80, 1);
-      } else {
-        this.gridGraphics.lineStyle(1, 0x273b56, 0.95);
-      }
-      this.gridGraphics.lineBetween(this.gridOriginX, y, this.gridOriginX + width, y);
-    }
   }
 
-  private createBottomPartsTray(): void {
-    const w = this.scale.width;
-    const h = this.trayHeight;
-    const trayY = this.trayY;
-
-    // 1. Plain dark tray backing (semi-opaque so UI clearly sits on top of overlapping grid)
-    const trayBg = this.add.graphics();
-    trayBg.fillStyle(0x0a101d, 0.96);
-    trayBg.fillRect(0, trayY, w, h);
-    trayBg.lineStyle(2, 0x334d6e, 1);
-    trayBg.lineBetween(0, trayY, w, trayY);
-
-    // 2. Vertical "PARTS" label on the left
-    const partsLabelContainer = this.add.container(48, trayY + h / 2);
-    const chars = ['P', 'A', 'R', 'T', 'S'];
-    chars.forEach((char, idx) => {
-      const t = this.add.text(0, (idx - 2) * 20, char, {
-        fontSize: '15px',
-        color: '#94a3b8',
-        fontStyle: 'bold',
-        fontFamily: UI.font
-      }).setOrigin(0.5);
-      partsLabelContainer.add(t);
-    });
-
-    // 3. The 5 Bays: BLOCK | CONE | THRUST | FUEL | FINS
-    const bayConfigs: Array<{ type: PartType; label: string; hotkey: string }> = [
-      { type: 'STRUCTURAL', label: 'BLOCK', hotkey: '1' },
-      { type: 'NOSE_CONE', label: 'CONE', hotkey: '2' },
-      { type: 'ENGINE', label: 'THRUST', hotkey: '3' },
-      { type: 'FUEL_TANK', label: 'FUEL', hotkey: '4' },
-      { type: 'FIN', label: 'FINS', hotkey: '5' }
-    ];
-
-    const bayWidth = 108;
-    const bayHeight = 98;
-    const baySpacing = 16;
-    const totalBaysWidth = bayConfigs.length * bayWidth + (bayConfigs.length - 1) * baySpacing;
-    const startX = Math.round((w - totalBaysWidth) / 2) + Math.round(bayWidth / 2);
-    const bayY = trayY + Math.round(h / 2);
-
-    this.paletteBays = [];
-
-    bayConfigs.forEach((cfg, idx) => {
-      const bx = startX + idx * (bayWidth + baySpacing);
-      const bayContainer = this.add.container(bx, bayY);
-
-      // Bay background graphics
-      const bgGfx = this.add.graphics();
-      this.drawBayBg(bgGfx, false, bayWidth, bayHeight);
-
-      // Pixel art icon preview (42x42)
-      const texKey = getPartTextureKey(cfg.type, 'LEFT');
-      const iconSprite = this.add.image(0, -10, texKey).setDisplaySize(42, 42);
-
-      // Label below (clearly readable 13px bold)
-      const labelText = this.add.text(0, 24, cfg.label, {
-        fontSize: '13px',
-        color: '#ffffff',
-        fontStyle: 'bold',
-        fontFamily: UI.font
-      }).setOrigin(0.5);
-
-      // Hotkey badge in corner
-      const hotkeyText = this.add.text(-40, -36, cfg.hotkey, {
-        fontSize: '13px',
-        color: '#94a3b8',
-        fontStyle: 'bold',
-        fontFamily: UI.font
-      }).setOrigin(0.5);
-
-      bayContainer.add([bgGfx, iconSprite, labelText, hotkeyText]);
-      bayContainer.setSize(bayWidth, bayHeight);
-      bayContainer.setInteractive(
-        new Phaser.Geom.Rectangle(0, 0, bayWidth, bayHeight),
-        Phaser.Geom.Rectangle.Contains
-      );
-
-      // Hover and click animations
-      bayContainer.on('pointerover', () => {
-        if (this.game.canvas) this.game.canvas.style.cursor = 'pointer';
-        if (this.selectedPartType !== cfg.type) {
-          this.tweens.add({
-            targets: bayContainer,
-            y: bayY - 4,
-            duration: 120,
-            ease: 'Power2'
-          });
-        }
-      });
-
-      bayContainer.on('pointerout', (pointer: Phaser.Input.Pointer) => {
-        this.updateCursorStyle(pointer);
-        if (this.selectedPartType !== cfg.type) {
-          this.tweens.add({
-            targets: bayContainer,
-            y: bayY,
-            duration: 120,
-            ease: 'Power2'
-          });
-        }
-      });
-
-      bayContainer.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-        if (pointer.button === 0) {
-          this.selectPaletteItem(cfg.type);
-        }
-      });
-
-      this.paletteBays.push({
-        type: cfg.type,
-        label: cfg.label,
-        container: bayContainer,
-        bgGfx,
-        hotkeyNum: cfg.hotkey
-      });
-    });
+  private createTitle(): void {
+    const title = pixelTitle(this, this.scale.width / 2, 12, 'ROCKET LAB', 26, PX.text.cream).setOrigin(0.5, 0);
+    const left = pixelBody(this, title.x - title.width / 2 - 16, 15, '★ BUILD', 24, PX.text.red).setOrigin(1, 0);
+    const right = pixelBody(this, title.x + title.width / 2 + 16, 15, 'FLY ★', 24, PX.text.red).setOrigin(0, 0);
+    this.tweens.add({ targets: [left, right], alpha: { from: 1, to: 0.4 }, duration: 600, yoyo: true, repeat: -1, ease: 'Stepped', easeParams: [2] });
+    this.hudContainer.add([title, left, right]);
   }
 
-  private drawBayBg(gfx: Phaser.GameObjects.Graphics, isSelected: boolean, w: number, h: number): void {
-    gfx.clear();
-    if (isSelected) {
-      gfx.fillStyle(0x1e293b, 1);
-      gfx.fillRoundedRect(-w / 2, -h / 2, w, h, 8);
-      gfx.lineStyle(2.5, 0x38bdf8, 1); // Glowing cyan border
-      gfx.strokeRoundedRect(-w / 2, -h / 2, w, h, 8);
-    } else {
-      gfx.fillStyle(0x141f33, 0.9);
-      gfx.fillRoundedRect(-w / 2, -h / 2, w, h, 8);
-      gfx.lineStyle(2, 0x334d6e, 1);
-      gfx.strokeRoundedRect(-w / 2, -h / 2, w, h, 8);
-    }
-  }
+  // ---------------------------------------------------------------------------
+  // Left column: telemetry, launch button, controls
+  // ---------------------------------------------------------------------------
 
   private createHud(): void {
-    const padX = 24;
-    const padY = this.hudY;
+    const x = SIDE_X;
+    const y = PANEL_TOP;
+    const w = SIDE_W;
 
-    // Terminal Panel in Top Left (enlarged with crystal clear typography)
-    const panelBg = this.add.graphics();
-    panelBg.fillStyle(0x111c30, 0.95);
-    panelBg.fillRoundedRect(padX, padY, 360, this.hudHeight, 8);
-    panelBg.lineStyle(2, 0x334d6e, 1);
-    panelBg.strokeRoundedRect(padX, padY, 360, this.hudHeight, 8);
+    const panel = this.add.graphics();
+    drawPixelPanel(panel, x, y, w, this.hudHeight);
+    const title = pixelTitle(this, x + 16, y + 16, 'TELEMETRY', 12);
 
-    const titleText = this.add.text(padX + 16, padY + 10, 'MISSION TELEMETRY', {
-      fontSize: '13px',
-      color: '#38bdf8',
-      fontStyle: 'bold',
-      fontFamily: UI.font
+    this.statusChipBg = this.add.graphics();
+    this.hudStatusText = pixelTitle(this, x + 36, y + 46, '', 10, PX.text.red);
+    this.hudContainer.add([panel, title, this.statusChipBg, this.hudStatusText]);
+
+    const rows: Array<[keyof BuilderScene['statValues'], string]> = [
+      ['mass', 'MASS'],
+      ['thrust', 'THRUST'],
+      ['fuel', 'FUEL']
+    ];
+    rows.forEach(([key, label], i) => {
+      const ry = y + 76 + i * 28;
+      const l = pixelBody(this, x + 16, ry, label, 24, PX.text.muted);
+      const v = pixelBody(this, x + w - 16, ry, '', 24, PX.text.white).setOrigin(1, 0);
+      this.statValues[key] = v;
+      this.hudContainer.add([l, v]);
     });
 
-    this.hudStatusText = this.add.text(padX + 16, padY + 31, 'STATUS: [ INCOMPLETE ]', {
-      fontSize: '15px',
-      color: '#f59e0b',
-      fontStyle: 'bold',
-      fontFamily: UI.font
+    // Lift gauge: red = too heavy to leave the pad, green = plenty of push.
+    const gaugeX = x + 84;
+    const gaugeBottom = y + 238;
+    const gauge = this.add.image(gaugeX, gaugeBottom, GAME_ASSETS.UI_FUEL_GAUGE.key).setScale(3).setOrigin(0.5, 1);
+    this.gaugeNeedle = this.add.image(gaugeX, gaugeBottom - 9, GAME_ASSETS.UI_FUEL_NEEDLE.key).setScale(3).setOrigin(0.5, 0.85);
+    const liftLabel = pixelBody(this, x + w - 16, y + 172, 'LIFT', 22, PX.text.muted).setOrigin(1, 0);
+    const twrValue = pixelBody(this, x + w - 16, y + 194, '', 34, PX.text.white).setOrigin(1, 0);
+    this.statValues.twr = twrValue;
+    this.warningText = pixelBody(this, x + w / 2, y + 252, '', 20, PX.text.red).setOrigin(0.5, 0);
+    this.hudContainer.add([gauge, this.gaugeNeedle, liftLabel, twrValue, this.warningText]);
+
+    this.createLaunchButton(x, y + this.hudHeight + 14, w, 84);
+    this.createControlsPanel(x, y + this.hudHeight + 112, w, PANEL_BOTTOM - (y + this.hudHeight + 112));
+  }
+
+  private drawStatusChip(ready: boolean): void {
+    const g = this.statusChipBg;
+    const x = SIDE_X + 14;
+    const y = PANEL_TOP + 38;
+    g.clear();
+    drawPixelPanel(g, x, y, SIDE_W - 28, 26, {
+      fill: ready ? 0x0b3320 : 0x330b14,
+      border: ready ? PX.green : PX.red,
+      highlight: ready ? PX.green : PX.red,
+      u: 2
+    });
+    g.fillStyle(ready ? PX.green : PX.red, 1);
+    g.fillRect(x + 10, y + 9, 8, 8);
+  }
+
+  private setGauge(twr: number): void {
+    const angle = -90 + Math.min(twr / TWR_GAUGE_MAX, 1) * 180;
+    this.tweens.add({ targets: this.gaugeNeedle, angle, duration: 350, ease: 'Back.easeOut' });
+  }
+
+  private createLaunchButton(x: number, y: number, w: number, h: number): void {
+    this.launchButton = this.add.container(x + w / 2, y + h / 2);
+    this.launchButtonBg = this.add.graphics();
+    this.launchButtonText = pixelTitle(this, 0, -12, '', 18).setOrigin(0.5);
+    this.launchSubText = pixelBody(this, 0, 18, '', 20, PX.text.muted).setOrigin(0.5);
+    this.launchButton.add([this.launchButtonBg, this.launchButtonText, this.launchSubText]);
+    this.launchButton.setSize(w, h);
+    this.launchButton.setInteractive(new Phaser.Geom.Rectangle(0, 0, w, h), Phaser.Geom.Rectangle.Contains);
+
+    this.launchButton.on('pointerover', () => {
+      if (this.game.canvas) this.game.canvas.style.cursor = this.launchReady ? 'pointer' : 'not-allowed';
+    });
+    this.launchButton.on('pointerout', (pointer: Phaser.Input.Pointer) => this.updateCursorStyle(pointer));
+    this.launchButton.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.button === 0) this.launchFlight();
     });
 
-    this.hudStatsText = this.add.text(padX + 16, padY + 54, 'MASS: 100 kg    THRUST: 0 kN\nFUEL: 0 L      TWR: 0.00', {
-      fontSize: '13px',
-      color: '#ffffff',
-      fontStyle: 'bold',
-      fontFamily: UI.font,
-      lineSpacing: 4
+    this.hudContainer.add(this.launchButton);
+    this.drawLaunchButton();
+  }
+
+  private drawLaunchButton(): void {
+    const g = this.launchButtonBg;
+    const w = SIDE_W;
+    const h = 84;
+    g.clear();
+    if (this.launchReady) {
+      drawPixelPanel(g, -w / 2, -h / 2, w, h, { fill: 0xd8322f, fillAlpha: 1, border: 0xff8a5c, highlight: 0xffd0b0, u: 4 });
+      g.fillStyle(0x8a1414, 1);
+      g.fillRect(-w / 2 + 8, h / 2 - 12, w - 16, 4);
+      this.launchButtonText.setText('LAUNCH!').setColor(PX.text.white);
+      this.launchSubText.setText('▶ PRESS ENTER ◀').setColor('#ffe0c8');
+      if (!this.launchPulse) {
+        this.launchPulse = this.tweens.add({ targets: this.launchButton, scale: { from: 1, to: 1.04 }, duration: 450, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      }
+    } else {
+      drawPixelPanel(g, -w / 2, -h / 2, w, h, { fill: PX.panelDeep, border: PX.borderDim, highlight: PX.muted, u: 4 });
+      this.launchButtonText.setText('LAUNCH').setColor('#4b4458');
+      this.launchSubText.setText(this.launchBlockedReason).setColor(PX.text.muted);
+      this.launchPulse?.stop();
+      this.launchPulse = undefined;
+      this.launchButton.setScale(1);
+    }
+  }
+
+  private createControlsPanel(x: number, y: number, w: number, h: number): void {
+    const panel = this.add.graphics();
+    drawPixelPanel(panel, x, y, w, h);
+    const title = pixelTitle(this, x + 16, y + 16, 'CONTROLS', 12);
+    this.hudContainer.add([panel, title]);
+
+    const rows: Array<[string, string]> = [
+      ['1-5', 'PICK PART'],
+      ['CLICK', 'PLACE'],
+      ['R-CLICK', 'REMOVE'],
+      ['ESC', 'CANCEL'],
+      ['ENTER', 'LAUNCH']
+    ];
+    const keys = this.add.graphics();
+    this.hudContainer.add(keys);
+    const rowGap = Math.min(30, (h - 52) / rows.length);
+    rows.forEach(([key, action], i) => {
+      const ry = y + 44 + i * rowGap;
+      const keyText = pixelBody(this, x + 24, ry + 1, key, 20, PX.text.accent);
+      const kw = keyText.width + 14;
+      keys.fillStyle(0x01020a, 1);
+      keys.fillRect(x + 16, ry + 1, kw + 2, 24);
+      keys.fillStyle(0x2a2534, 1);
+      keys.fillRect(x + 16, ry - 1, kw, 22);
+      keys.fillStyle(PX.glow, 0.5);
+      keys.fillRect(x + 16, ry - 1, kw, 2);
+      const actionText = pixelBody(this, x + w - 16, ry + 1, action, 20, PX.text.white).setOrigin(1, 0);
+      this.hudContainer.add([keyText, actionText]);
     });
+  }
 
-    this.hudContainer.add([panelBg, titleText, this.hudStatusText, this.hudStatsText]);
-    this.createLaunchButton(padX, padY + this.hudHeight + 10);
+  // ---------------------------------------------------------------------------
+  // Right column: mission, bank, parts inventory
+  // ---------------------------------------------------------------------------
 
-    // Top Right Controls Helper Badge
-    const helperBg = this.add.graphics();
-    const helperW = 540;
-    const helperH = 42;
-    const helperX = this.scale.width - helperW - 24;
-    helperBg.fillStyle(0x111c30, 0.95);
-    helperBg.fillRoundedRect(helperX, padY, helperW, helperH, 8);
-    helperBg.lineStyle(2, 0x334d6e, 1);
-    helperBg.strokeRoundedRect(helperX, padY, helperW, helperH, 8);
+  private createPartsPanel(): void {
+    const x = RIGHT_X;
+    const w = SIDE_W;
 
-    const helperText = this.add.text(helperX + 16, padY + 12, '1-5: Select  •  L-Click: Place  •  R-Click: Remove  •  Esc: Cancel', {
-      fontSize: '13px',
-      color: '#ffffff',
-      fontStyle: 'bold',
-      fontFamily: UI.font
+    // Mission card
+    const missionY = PANEL_TOP;
+    const missionH = 150;
+    const missionPanel = this.add.graphics();
+    drawPixelPanel(missionPanel, x, missionY, w, missionH, { border: 0xc98a00, highlight: PX.gold });
+    const missionTitle = pixelTitle(this, x + 16, missionY + 16, 'MISSION', 12, PX.text.gold);
+    this.missionText = pixelBody(this, x + 16, missionY + 40, '', 24, PX.text.white).setWordWrapWidth(w - 32).setLineSpacing(-4);
+    this.rewardText = pixelBody(this, x + 16, missionY + missionH - 34, '', 22, PX.text.gold);
+    this.hudContainer.add([missionPanel, missionTitle, this.missionText, this.rewardText]);
+
+    // Bank card with a pixel coin
+    const bankY = missionY + missionH + 12;
+    const bankH = 76;
+    const bankPanel = this.add.graphics();
+    drawPixelPanel(bankPanel, x, bankY, w, bankH);
+    const coin = this.add.image(x + 30, bankY + 38, GAME_ASSETS.UI_COIN.key).setDisplaySize(32, 32);
+    const bankLabel = pixelBody(this, x + 54, bankY + 10, 'BANK', 22, PX.text.muted);
+    this.bankText = pixelBody(this, x + w - 16, bankY + 10, '', 22, PX.text.gold).setOrigin(1, 0);
+    const costLabel = pixelBody(this, x + 54, bankY + 40, 'ROCKET', 22, PX.text.muted);
+    this.costText = pixelBody(this, x + w - 16, bankY + 40, '', 22, PX.text.white).setOrigin(1, 0);
+    this.hudContainer.add([bankPanel, coin, bankLabel, this.bankText, costLabel, this.costText]);
+
+    // Parts inventory
+    const partsY = bankY + bankH + 12;
+    const partsPanel = this.add.graphics();
+    drawPixelPanel(partsPanel, x, partsY, w, PANEL_BOTTOM - partsY);
+    const partsTitle = pixelTitle(this, x + 16, partsY + 14, 'PARTS', 12);
+    this.hudContainer.add([partsPanel, partsTitle]);
+
+    const bayConfigs: Array<{ type: PartType; label: string; hotkey: string; stat: string }> = [
+      { type: 'STRUCTURAL', label: 'BLOCK', hotkey: '1', stat: `${PART_DEFINITIONS.STRUCTURAL.mass} kg` },
+      { type: 'NOSE_CONE', label: 'NOSE CONE', hotkey: '2', stat: 'less drag' },
+      { type: 'ENGINE', label: 'ENGINE', hotkey: '3', stat: `${PART_DEFINITIONS.ENGINE.thrust} thrust` },
+      { type: 'FUEL_TANK', label: 'FUEL TANK', hotkey: '4', stat: `${PART_DEFINITIONS.FUEL_TANK.fuel} L` },
+      { type: 'FIN', label: 'FIN', hotkey: '5', stat: 'stability' }
+    ];
+
+    this.paletteBays = [];
+    bayConfigs.forEach((cfg, idx) => {
+      const cx = x + w / 2;
+      const cy = partsY + 40 + idx * (SLOT_H + 6) + SLOT_H / 2;
+      const bay = this.add.container(cx, cy);
+      const bgGfx = this.add.graphics();
+      const icon = this.add.image(-SLOT_W / 2 + 64, 0, getPartTextureKey(cfg.type, 'LEFT')).setDisplaySize(48, 48);
+      const key = pixelBody(this, -SLOT_W / 2 + 19, 0, cfg.hotkey, 22, PX.text.accent).setOrigin(0.5);
+      const name = pixelTitle(this, -SLOT_W / 2 + 98, -16, cfg.label, 10, PX.text.white);
+      const price = pixelBody(this, -SLOT_W / 2 + 98, 0, `$${PART_DEFINITIONS[cfg.type].cost}`, 22, PX.text.gold);
+      const stat = pixelBody(this, SLOT_W / 2 - 10, 0, cfg.stat, 18, PX.text.muted).setOrigin(1, 0);
+      bay.add([bgGfx, icon, key, name, price, stat]);
+      bay.setSize(SLOT_W, SLOT_H);
+      bay.setInteractive(new Phaser.Geom.Rectangle(0, 0, SLOT_W, SLOT_H), Phaser.Geom.Rectangle.Contains);
+
+      bay.on('pointerover', () => {
+        if (this.game.canvas) this.game.canvas.style.cursor = 'pointer';
+        this.hoveredBay = cfg.type;
+        this.updatePaletteSelectionUI();
+      });
+      bay.on('pointerout', (pointer: Phaser.Input.Pointer) => {
+        this.hoveredBay = null;
+        this.updateCursorStyle(pointer);
+        this.updatePaletteSelectionUI();
+      });
+      bay.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+        if (pointer.button === 0) this.selectPaletteItem(cfg.type);
+      });
+
+      this.hudContainer.add(bay);
+      this.paletteBays.push({ type: cfg.type, label: cfg.label, container: bay, bgGfx, hotkeyNum: cfg.hotkey });
     });
-    this.hudContainer.add([helperBg, helperText]);
+    this.updatePaletteSelectionUI();
+  }
 
-    // Mission + money badge under the controls helper.
-    const econY = padY + helperH + 8;
-    const econBg = this.add.graphics();
-    econBg.fillStyle(0x111c30, 0.95);
-    econBg.fillRoundedRect(helperX, econY, helperW, 58, 8);
-    econBg.lineStyle(2, 0x334d6e, 1);
-    econBg.strokeRoundedRect(helperX, econY, helperW, 58, 8);
-    this.missionText = this.add.text(helperX + 16, econY + 9, '', { fontSize: '13px', color: '#facc15', fontStyle: 'bold', fontFamily: UI.font });
-    this.economyText = this.add.text(helperX + 16, econY + 31, '', { fontSize: '13px', color: '#ffffff', fontStyle: 'bold', fontFamily: UI.font });
-    this.hudContainer.add([econBg, this.missionText, this.economyText]);
+  private drawBayBg(gfx: Phaser.GameObjects.Graphics, isSelected: boolean, isHovered: boolean): void {
+    gfx.clear();
+    drawPixelPanel(gfx, -SLOT_W / 2, -SLOT_H / 2, SLOT_W, SLOT_H, {
+      fill: isSelected ? 0x3a2614 : isHovered ? 0x221d2b : PX.panelDeep,
+      fillAlpha: 1,
+      border: isSelected ? PX.accent : isHovered ? PX.border : PX.borderDim,
+      highlight: isSelected ? 0xffe0b0 : PX.glow,
+      u: 2
+    });
+    // Hotkey cap
+    gfx.fillStyle(0x01020a, 1);
+    gfx.fillRect(-SLOT_W / 2 + 8, -12, 24, 26);
+    gfx.fillStyle(isSelected ? 0x8a4e12 : 0x2a2534, 1);
+    gfx.fillRect(-SLOT_W / 2 + 7, -13, 24, 24);
   }
 
   /** Reload money/missions (they change after every flight) and top up broke players. */
@@ -365,43 +450,9 @@ export class BuilderScene extends Phaser.Scene {
     if (grant > 0) saveProgress(progress);
     this.money = progress.money;
     const mission = currentMission(progress.completedMissions);
-    this.missionText.setText(mission ? `MISSION: ${mission.goal}  (+$${mission.reward})` : 'All missions complete — chase the high score!');
-    if (grant > 0) this.missionText.setText(`Space agency grant: +$${grant}  ·  ${this.missionText.text}`);
-  }
-
-  private createLaunchButton(x: number, y: number): void {
-    const w = 360;
-    const h = 44;
-    this.launchButtonBg = this.add.graphics();
-    this.launchButtonText = this.add.text(x + w / 2, y + h / 2, '', {
-      fontSize: '15px',
-      color: '#ffffff',
-      fontStyle: 'bold',
-      fontFamily: UI.font
-    }).setOrigin(0.5);
-
-    const zone = this.add.zone(x + w / 2, y + h / 2, w, h).setInteractive();
-    zone.on('pointerover', () => {
-      if (this.game.canvas) this.game.canvas.style.cursor = this.launchReady ? 'pointer' : 'not-allowed';
-    });
-    zone.on('pointerout', (pointer: Phaser.Input.Pointer) => this.updateCursorStyle(pointer));
-    zone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (pointer.button === 0) this.launchFlight();
-    });
-
-    this.hudContainer.add([this.launchButtonBg, this.launchButtonText, zone]);
-    this.drawLaunchButton(x, y, w, h);
-  }
-
-  private drawLaunchButton(x = 24, y = this.hudY + this.hudHeight + 10, w = 360, h = 44): void {
-    const g = this.launchButtonBg;
-    g.clear();
-    g.fillStyle(this.launchReady ? 0x14532d : 0x1e293b, 0.95);
-    g.fillRoundedRect(x, y, w, h, 8);
-    g.lineStyle(2, this.launchReady ? 0x22c55e : 0x334d6e, 1);
-    g.strokeRoundedRect(x, y, w, h, 8);
-    this.launchButtonText.setText(this.launchReady ? 'LAUNCH  ▶  (ENTER)' : this.launchBlockedReason);
-    this.launchButtonText.setColor(this.launchReady ? '#ffffff' : '#64748b');
+    this.missionText.setText(mission ? mission.goal : 'All missions complete — chase the high score!');
+    const reward = mission ? `REWARD +$${mission.reward}` : '';
+    this.rewardText.setText(grant > 0 ? `GRANT +$${grant}!  ${reward}` : reward);
   }
 
   /** Hand the assembled rocket to the flight simulator; the builder sleeps so the design is kept. */
@@ -417,45 +468,35 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   private updateHud(telemetry: ReturnType<RocketTree['getTelemetry']>): void {
-    if (telemetry.valid) {
-      this.hudStatusText.setText('STATUS: [ FLIGHT READY ]');
-      this.hudStatusText.setColor('#22c55e');
-    } else {
-      this.hudStatusText.setText('STATUS: [ INCOMPLETE ]');
-      this.hudStatusText.setColor('#f59e0b');
-    }
+    this.hudStatusText.setText(telemetry.valid ? 'FLIGHT READY' : 'INCOMPLETE');
+    this.hudStatusText.setColor(telemetry.valid ? PX.text.green : PX.text.red);
+    this.drawStatusChip(telemetry.valid);
 
     // TWR with the tanks full — what the rocket actually has to lift off the pad.
     const wetMass = telemetry.totalMass + telemetry.totalFuel;
     const wetTwr = wetMass > 0 ? telemetry.totalThrust / wetMass : 0;
-    this.hudStatsText.setText(
-      `MASS: ${wetMass} kg (fuelled)    THRUST: ${telemetry.totalThrust}\nFUEL: ${telemetry.totalFuel} L      TWR: ${wetTwr.toFixed(2)}${wetTwr < 1 && telemetry.totalThrust > 0 ? ' (too heavy!)' : ''}`
-    );
+    this.statValues.mass.setText(`${wetMass} kg`);
+    this.statValues.thrust.setText(`${telemetry.totalThrust}`);
+    this.statValues.fuel.setText(`${telemetry.totalFuel} L`);
+    this.statValues.twr.setText(wetTwr.toFixed(2)).setColor(wetTwr >= 1 ? PX.text.green : telemetry.totalThrust > 0 ? PX.text.red : PX.text.white);
+    this.setGauge(wetTwr);
+    this.warningText.setText(wetTwr < 1 && telemetry.totalThrust > 0 ? 'TOO HEAVY TO LIFT OFF!' : '');
 
     const cost = rocketCost(this.rocketTree.getAllNodes().map(n => n.type));
-    if (this.economyText) {
-      this.economyText.setText(`BANK: $${this.money}      ROCKET COST: $${cost}${cost > this.money ? '   — too expensive!' : ''}`);
-      this.economyText.setColor(cost > this.money ? '#f87171' : '#ffffff');
-    }
     const affordable = cost <= this.money;
+    this.bankText.setText(`$${this.money.toLocaleString()}`);
+    this.costText.setText(`$${cost}`).setColor(affordable ? PX.text.white : PX.text.red);
+
     this.launchReady = telemetry.valid && affordable;
-    this.launchBlockedReason = !telemetry.valid ? 'LAUNCH — needs CMD + FUEL + THRUST' : `LAUNCH — costs $${cost}, you have $${this.money}`;
+    this.launchBlockedReason = !telemetry.valid ? 'NEED CMD + FUEL + ENGINE' : `COSTS $${cost} · YOU HAVE $${this.money}`;
     if (this.launchButtonBg) this.drawLaunchButton();
   }
 
   private createGhostPreview(): void {
     this.ghostContainer.setVisible(false);
     this.ghostGfx = this.add.graphics();
-    this.ghostSprite = this.add.image(0, 0, GAME_ASSETS.PART_COCKPIT.key).setDisplaySize(BuilderScene.CELL_SIZE - 4, BuilderScene.CELL_SIZE - 4);
-    this.ghostText = this.add.text(0, 0, '', {
-      fontSize: '14px',
-      color: '#ffffff',
-      fontStyle: 'bold',
-      fontFamily: UI.font,
-      stroke: '#000000',
-      strokeThickness: 3
-    }).setOrigin(0.5);
-
+    this.ghostSprite = this.add.image(0, 0, GAME_ASSETS.PART_COCKPIT.key).setDisplaySize(BuilderScene.CELL_SIZE, BuilderScene.CELL_SIZE);
+    this.ghostText = pixelTitle(this, 0, BuilderScene.CELL_SIZE / 2 + 10, '', 8, PX.text.red).setOrigin(0.5);
     this.ghostContainer.add([this.ghostGfx, this.ghostSprite, this.ghostText]);
   }
 
@@ -479,18 +520,14 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   private updatePaletteSelectionUI(): void {
-    const h = this.trayHeight;
-    const trayY = this.trayY;
-    const bayY = trayY + Math.round(h / 2);
-
+    const baseX = RIGHT_X + SIDE_W / 2;
     for (const bay of this.paletteBays) {
       const isSelected = bay.type === this.selectedPartType;
-      this.drawBayBg(bay.bgGfx, isSelected, 108, 98);
-
+      this.drawBayBg(bay.bgGfx, isSelected, bay.type === this.hoveredBay);
       this.tweens.add({
         targets: bay.container,
-        y: isSelected ? bayY - 6 : bayY,
-        duration: 150,
+        x: isSelected ? baseX - 8 : bay.type === this.hoveredBay ? baseX - 3 : baseX,
+        duration: 120,
         ease: 'Power2'
       });
     }
@@ -532,10 +569,15 @@ export class BuilderScene extends Phaser.Scene {
     });
   }
 
+  /** The side columns hold the HUD and parts; clicks there never touch the build bay. */
+  private isOverSidePanels(pointer: Phaser.Input.Pointer): boolean {
+    return pointer.worldX < SIDE_X + SIDE_W + 8 || pointer.worldX > RIGHT_X - 8;
+  }
+
   private updateCursorStyle(pointer: Phaser.Input.Pointer): void {
     if (!this.game.canvas) return;
 
-    if (this.selectedPartType) {
+    if (this.selectedPartType && !this.isOverSidePanels(pointer)) {
       this.game.canvas.style.cursor = 'crosshair';
       return;
     }
@@ -546,22 +588,10 @@ export class BuilderScene extends Phaser.Scene {
       return;
     }
 
-    // Check if pointer is hovering over any bay in the console tray
-    const isOverBay = this.paletteBays.some(bay => {
-      const bx = bay.container.x;
-      const by = bay.container.y;
-      return (
-        Math.abs(pointer.worldX - bx) <= 54 &&
-        Math.abs(pointer.worldY - by) <= 49
-      );
-    });
-
-    if (isOverBay) {
-      this.game.canvas.style.cursor = 'pointer';
-      return;
-    }
-
-    this.game.canvas.style.cursor = 'default';
+    const isOverBay = this.paletteBays.some(
+      bay => Math.abs(pointer.worldX - bay.container.x) <= SLOT_W / 2 && Math.abs(pointer.worldY - bay.container.y) <= SLOT_H / 2
+    );
+    this.game.canvas.style.cursor = isOverBay ? 'pointer' : 'default';
   }
 
   private getGridCellAtPointer(pointer: Phaser.Input.Pointer): { col: number; row: number; inside: boolean } {
@@ -596,51 +626,49 @@ export class BuilderScene extends Phaser.Scene {
     }
   }
 
+  /** Pixel corner brackets around a cell, like a targeting reticle. */
+  private drawBrackets(g: Phaser.GameObjects.Graphics, color: number, alpha: number): void {
+    const h = BuilderScene.CELL_SIZE / 2 + 2;
+    const len = 12;
+    const t = 4;
+    g.fillStyle(color, alpha);
+    for (const sx of [-1, 1]) {
+      for (const sy of [-1, 1]) {
+        const cx = sx * h;
+        const cy = sy * h;
+        g.fillRect(sx < 0 ? cx : cx - len, sy < 0 ? cy : cy - t, len, t);
+        g.fillRect(sx < 0 ? cx : cx - t, sy < 0 ? cy : cy - len, t, len);
+      }
+    }
+  }
+
   private updateGhostPreview(pointer: Phaser.Input.Pointer): void {
     this.updateCursorStyle(pointer);
 
-    if (!this.selectedPartType) {
-      this.ghostContainer.setVisible(false);
-      return;
-    }
-
-    // Hide ghost when cursor is over the bottom parts picker tray
-    if (pointer.worldY >= this.trayY) {
+    if (!this.selectedPartType || this.isOverSidePanels(pointer)) {
       this.ghostContainer.setVisible(false);
       return;
     }
 
     this.ghostContainer.setVisible(true);
     const size = BuilderScene.CELL_SIZE;
-    const def = PART_DEFINITIONS[this.selectedPartType];
-
+    const type = this.selectedPartType;
     const { col, row, inside } = this.getGridCellAtPointer(pointer);
+    this.ghostGfx.clear();
+    this.ghostText.setText('');
+    this.ghostSprite.setVisible(false);
+    const showGhost = (finOrientation: 'LEFT' | 'RIGHT', alpha: number) =>
+      this.ghostSprite.setTexture(getPartTextureKey(type, finOrientation)).setDisplaySize(size, size).setAlpha(alpha).setVisible(true);
 
     if (inside) {
-      const snapX = this.gridOriginX + col * size + size / 2;
-      const snapY = this.gridOriginY + row * size + size / 2;
-      this.ghostContainer.setPosition(snapX, snapY);
-
-      const validation = this.rocketTree.validateAttachment(col, row, this.selectedPartType);
+      this.ghostContainer.setPosition(this.gridOriginX + col * size + size / 2, this.gridOriginY + row * size + size / 2);
+      const validation = this.rocketTree.validateAttachment(col, row, type);
 
       if (validation.valid) {
-        let displayLabel = def.label;
-        if (this.selectedPartType === 'FIN') {
-          displayLabel = validation.finOrientation === 'LEFT' ? 'L-FIN' : 'R-FIN';
-        }
-
-        const texKey = getPartTextureKey(this.selectedPartType, validation.finOrientation ?? 'LEFT');
-        this.ghostSprite.setTexture(texKey);
-        this.ghostSprite.setVisible(true);
-        this.ghostSprite.setAlpha(0.85);
-        this.ghostSprite.clearTint();
-
-        this.ghostGfx.clear();
-        this.ghostGfx.lineStyle(2.5, 0x22c55e, 1);
-        this.ghostGfx.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
-
-        this.ghostText.setText(displayLabel);
-        this.ghostText.setColor('#ffffff');
+        this.ghostGfx.fillStyle(PX.green, 0.18);
+        this.ghostGfx.fillRect(-size / 2, -size / 2, size, size);
+        showGhost(validation.finOrientation ?? 'LEFT', 0.8);
+        this.drawBrackets(this.ghostGfx, PX.green, 1);
         return;
       }
 
@@ -652,62 +680,26 @@ export class BuilderScene extends Phaser.Scene {
         this.rocketTree.getNodeAt(col - 1, row) !== undefined ||
         this.rocketTree.getNodeAt(col + 1, row) !== undefined;
 
-      this.ghostGfx.clear();
       if (isOccupied || hasAdjacentNeighbor) {
-        const texKey = getPartTextureKey(this.selectedPartType, 'LEFT');
-        this.ghostSprite.setTexture(texKey);
-        this.ghostSprite.setVisible(true);
-        this.ghostSprite.setAlpha(0.4);
-        this.ghostSprite.setTint(0xef4444);
-
-        this.ghostGfx.fillStyle(0xef4444, 0.25);
-        this.ghostGfx.fillRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
-        this.ghostGfx.lineStyle(2.5, 0xef4444, 0.9);
-        this.ghostGfx.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
-
-        this.ghostText.setText(isOccupied ? '' : 'INVALID');
-        this.ghostText.setColor('#fca5a5');
+        this.ghostGfx.fillStyle(PX.red, 0.25);
+        this.ghostGfx.fillRect(-size / 2, -size / 2, size, size);
+        this.drawBrackets(this.ghostGfx, PX.red, 1);
+        this.ghostText.setText(isOccupied ? '' : 'NOPE');
       } else {
-        // Empty cell not adjacent to any open socket - soft translucent guide
-        const texKey = getPartTextureKey(this.selectedPartType, 'LEFT');
-        this.ghostSprite.setTexture(texKey);
-        this.ghostSprite.setVisible(true);
-        this.ghostSprite.setAlpha(0.2);
-        this.ghostSprite.clearTint();
-
-        this.ghostGfx.fillStyle(0x334155, 0.2);
-        this.ghostGfx.fillRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
-        this.ghostGfx.lineStyle(1.5, 0x64748b, 0.6);
-        this.ghostGfx.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
-
-        this.ghostText.setText(def.label);
-        this.ghostText.setColor('#94a3b8');
+        // Empty cell not next to any open socket: a faint guide.
+        showGhost('LEFT', 0.25);
+        this.drawBrackets(this.ghostGfx, PX.muted, 0.6);
       }
       return;
     }
 
-    // Floating smoothly under cursor when outside grid
+    // Floating under the cursor outside the grid
     this.ghostContainer.setPosition(pointer.worldX, pointer.worldY);
-    const texKey = getPartTextureKey(this.selectedPartType, 'LEFT');
-    this.ghostSprite.setTexture(texKey);
-    this.ghostSprite.setVisible(true);
-    this.ghostSprite.setAlpha(0.7);
-    this.ghostSprite.clearTint();
-
-    this.ghostGfx.clear();
-    this.ghostGfx.lineStyle(2, 0x94a3b8, 0.85);
-    this.ghostGfx.strokeRect(-size / 2, -size / 2, size, size);
-
-    this.ghostText.setText(def.label);
-    this.ghostText.setColor('#ffffff');
+    showGhost('LEFT', 0.6);
   }
 
   private handleLeftClick(pointer: Phaser.Input.Pointer): void {
-    if (pointer.worldY >= this.trayY) {
-      // Handled by bayContainer pointerdown
-      return;
-    }
-
+    if (this.isOverSidePanels(pointer)) return; // Handled by the panels' own buttons
     if (!this.selectedPartType) return;
 
     const { col, row, inside } = this.getGridCellAtPointer(pointer);
@@ -722,31 +714,20 @@ export class BuilderScene extends Phaser.Scene {
       this.updateGhostPreview(pointer);
       this.syncExportableState('[RocketBuilder] Part attached:');
 
-      // VFX: Trigger snap burst particles
-      const snapX = this.gridOriginX + attachResult.node.gridX * BuilderScene.CELL_SIZE + BuilderScene.CELL_SIZE / 2;
-      const snapY = this.gridOriginY + attachResult.node.gridY * BuilderScene.CELL_SIZE + BuilderScene.CELL_SIZE / 2;
-      this.particleManager.triggerEffect('SOCKET_SNAP', snapX, snapY);
-
-      // Docking tactile bounce
+      // Docking tactile bounce + snap burst
       const blockContainer = this.blockDisplayMap.get(attachResult.node.id);
       if (blockContainer) {
-        blockContainer.setScale(1.12);
-        this.tweens.add({
-          targets: blockContainer,
-          scaleX: 1,
-          scaleY: 1,
-          duration: 180,
-          ease: 'Back.easeOut'
-        });
+        blockContainer.setScale(1.18);
+        this.tweens.add({ targets: blockContainer, scaleX: 1, scaleY: 1, duration: 200, ease: 'Back.easeOut' });
+        this.particleManager.triggerEffect('SOCKET_SNAP', blockContainer.x, blockContainer.y);
       }
     } else {
-      // VFX: Rejection error burst when attempting invalid placement
       this.particleManager.triggerEffect('REJECTION_ERROR', pointer.worldX, pointer.worldY);
     }
   }
 
   private handleRightClick(pointer: Phaser.Input.Pointer): void {
-    if (pointer.worldY >= this.trayY) return;
+    if (this.isOverSidePanels(pointer)) return;
 
     if (this.selectedPartType) {
       this.deselectPart();
@@ -761,12 +742,8 @@ export class BuilderScene extends Phaser.Scene {
 
     const removeResult = this.rocketTree.removeNode(targetNode.id);
     if (removeResult.success) {
-      // VFX: Disassemble puff particles
       const size = BuilderScene.CELL_SIZE;
-      const rx = this.gridOriginX + col * size + size / 2;
-      const ry = this.gridOriginY + row * size + size / 2;
-      this.particleManager.triggerEffect('PART_DISASSEMBLE', rx, ry);
-
+      this.particleManager.triggerEffect('PART_DISASSEMBLE', this.gridOriginX + col * size + size / 2, this.gridOriginY + row * size + size / 2);
       this.renderRocket();
       this.syncExportableState('[RocketBuilder] Part removed:');
     } else {
@@ -780,15 +757,13 @@ export class BuilderScene extends Phaser.Scene {
     const cx = this.gridOriginX + node.gridX * size + size / 2;
     const cy = this.gridOriginY + node.gridY * size + size / 2;
 
-    // VFX: Rejection error burst on forbidden deletion
     this.particleManager.triggerEffect('REJECTION_ERROR', cx, cy);
 
     const flash = this.add.graphics();
     flash.setPosition(cx, cy);
-    flash.fillStyle(0xef4444, 0.65);
-    flash.fillRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
-    flash.lineStyle(3, 0xff0000, 1);
-    flash.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
+    flash.fillStyle(PX.red, 0.5);
+    flash.fillRect(-size / 2, -size / 2, size, size);
+    this.drawBrackets(flash, PX.red, 1);
 
     const blockDisplay = this.blockDisplayMap.get(node.id);
     const origX = cx;
@@ -840,62 +815,34 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   private renderBlock(node: RocketNode): void {
-    const def = PART_DEFINITIONS[node.type];
     const size = BuilderScene.CELL_SIZE;
     const cx = this.gridOriginX + node.gridX * size + size / 2;
     const cy = this.gridOriginY + node.gridY * size + size / 2;
 
     const blockContainer = this.add.container(cx, cy);
-
-    // Pixel art sprite representing the part
-    const texKey = getPartTextureKey(node.type, node.finOrientation);
-    const sprite = this.add.image(0, 0, texKey).setDisplaySize(size - 2, size - 2);
-
-    // Subtle framing border
-    const blockGfx = this.add.graphics();
-    blockGfx.lineStyle(1.5, 0xffffff, 0.35);
-    blockGfx.strokeRect(-size / 2 + 2, -size / 2 + 2, size - 4, size - 4);
-
-    let displayLabel = def.label;
-    if (node.type === 'COCKPIT') displayLabel = 'CMD';
-    else if (node.type === 'FIN') displayLabel = node.finOrientation === 'LEFT' ? 'L-FIN' : 'R-FIN';
-
-    const label = this.add.text(size / 2 - 4, size / 2 - 4, displayLabel, {
-      fontSize: '9px',
-      color: '#ffffff',
-      fontStyle: 'bold',
-      fontFamily: UI.font,
-      stroke: '#000000',
-      strokeThickness: 3
-    }).setOrigin(1, 1);
-
-    blockContainer.add([sprite, blockGfx, label]);
+    const sprite = this.add.image(0, 0, getPartTextureKey(node.type, node.finOrientation)).setDisplaySize(size, size);
+    blockContainer.add(sprite);
     this.blocksContainer.add(blockContainer);
     this.blockDisplayMap.set(node.id, blockContainer);
   }
 
   private renderAvailableSockets(): void {
     const ports = this.rocketTree.getAvailablePorts();
-    const radius = 7;
 
     for (const port of ports) {
       const pos = this.getPortPixelPosition(port.gridX, port.gridY, port.direction);
 
+      // Pixel diamond socket
       const socketGfx = this.add.graphics();
-      socketGfx.fillStyle(0x0284c7, 0.95);
-      socketGfx.fillCircle(pos.x, pos.y, radius);
-      socketGfx.lineStyle(2, 0x38bdf8, 1);
-      socketGfx.strokeCircle(pos.x, pos.y, radius);
-
-      // Subtle breathing pulse
-      this.tweens.add({
-        targets: socketGfx,
-        alpha: { from: 0.65, to: 1.0 },
-        duration: 800,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut'
-      });
+      socketGfx.setPosition(pos.x, pos.y);
+      socketGfx.fillStyle(0x01020a, 1);
+      socketGfx.fillRect(-4, -8, 8, 16);
+      socketGfx.fillRect(-8, -4, 16, 8);
+      socketGfx.fillStyle(PX.accent, 1);
+      socketGfx.fillRect(-2, -6, 4, 12);
+      socketGfx.fillRect(-6, -2, 12, 4);
+      socketGfx.fillStyle(0xffffff, 1);
+      socketGfx.fillRect(-2, -2, 4, 4);
 
       this.socketsContainer.add(socketGfx);
     }
