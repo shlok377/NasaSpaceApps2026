@@ -34,28 +34,43 @@ interface Peak {
 }
 
 // Peaks sit where the see-through build bay (backdrop x 70-250) shows them.
-const LEFT_RANGE: Peak[] = [
+const NEAR_PEAKS: Peak[] = [
   { x: 30, top: 88, slope: 1.0 },
   { x: 64, top: 98, slope: 0.95 },
   { x: 92, top: 112, slope: 0.85 },
-  { x: 112, top: 134, slope: 0.8 }
-];
-const RIGHT_RANGE: Peak[] = [
+  { x: 112, top: 134, slope: 0.8 },
   { x: 206, top: 134, slope: 0.8 },
   { x: 226, top: 114, slope: 0.85 },
   { x: 254, top: 96, slope: 0.95 },
   { x: 290, top: 86, slope: 1.0 }
 ];
+// A paler range behind, peeking out between the near peaks.
+const FAR_PEAKS: Peak[] = [
+  { x: 10, top: 104, slope: 0.7 },
+  { x: 78, top: 118, slope: 0.65 },
+  { x: 150, top: 132, slope: 0.6 },
+  { x: 240, top: 112, slope: 0.7 },
+  { x: 310, top: 100, slope: 0.7 }
+];
+const SNOW_ROW = 112;
 
-/** Mountain surface row at column x (smaller = higher), and which peak owns it. */
-function mountainTop(x: number, peaks: Peak[]): { row: number; peak: Peak } {
-  let best = { row: H, peak: peaks[0] };
+/** Ridge surface row at column x (smaller = higher): one continuous skyline from every peak. */
+function ridgeRow(x: number, peaks: Peak[], seed: number): number {
+  let best = H;
   for (const p of peaks) {
-    const jag = (hash(x, p.x) - 0.5) * 2.2;
-    const row = p.top + Math.abs(x - p.x) * p.slope + jag;
-    if (row < best.row) best = { row, peak: p };
+    const row = p.top + Math.abs(x - p.x) * p.slope + (hash(x, p.x + seed) - 0.5) * 1.6;
+    if (row < best) best = row;
   }
   return best;
+}
+
+/**
+ * Left faces catch the light. Sampling the skyline slope along a diagonal that leans back toward the
+ * summit makes each peak's light/shadow edge a ridge line running down from its top, with no vertical seams.
+ */
+function isLit(x: number, depth: number, peaks: Peak[], seed: number): boolean {
+  const sx = x + Math.round(depth * 0.35);
+  return ridgeRow(sx + 3, peaks, seed) < ridgeRow(sx - 3, peaks, seed);
 }
 
 export function createBackdropTexture(scene: Phaser.Scene, key: string): void {
@@ -84,14 +99,20 @@ export function createBackdropTexture(scene: Phaser.Scene, key: string): void {
       const far = 146 + Math.round(4 * Math.sin(x * 0.045) + 3 * Math.sin(x * 0.11 + 2));
       if (y >= far) color = y === far ? 0x4a2a3d : (y - far < 3 && dither(x, y) > 0.5) ? 0x3a2133 : 0x2c1a2c;
 
-      // 3. Mountain ranges on both sides, lit from the left, with snowy caps.
-      const peaks = x < W / 2 ? LEFT_RANGE : RIGHT_RANGE;
-      const { row, peak } = mountainTop(x, peaks);
+      // 3. Two continuous mountain ranges, shaded by the slope of the skyline (light from the left),
+      //    so neighbouring peaks blend into one range instead of reading as stacked cut-outs.
+      const farRow = ridgeRow(x, FAR_PEAKS, 11);
+      if (y >= farRow) {
+        const lit = isLit(x, y - farRow, FAR_PEAKS, 11);
+        color = y - farRow < 1 ? 0x6a5a78 : lit ? 0x55466a : 0x3f3350;
+        if (y < SNOW_ROW + 8 && y - farRow < 7) color = lit ? 0x8a7d9c : 0x6a5a78;
+      }
+
+      const row = ridgeRow(x, NEAR_PEAKS, 3);
       if (y >= row) {
         const depth = y - row;
-        // Diagonal ridge line from each summit: left faces catch the light.
-        const lit = x < peak.x - (y - peak.top) * 0.35 + (hash(y, peak.x) - 0.5) * 2;
-        const snowLine = peak.top + 9 + hash(x) * 3;
+        const lit = isLit(x, depth, NEAR_PEAKS, 3);
+        const snowLine = SNOW_ROW + hash(x) * 4;
         if (y < snowLine) {
           color = depth === 0 ? 0xf2eef8 : lit ? 0xd8d2e4 : 0x9d95b0;
           if (y > snowLine - 3 && dither(x, y) > 0.5) color = lit ? 0x6b5d6e : 0x463a4c;

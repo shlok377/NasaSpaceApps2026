@@ -135,7 +135,7 @@ describe('Surface Flags & Moon Big Sprite in WorldRenderer', () => {
     const skyMoon = images.find(img => img.key === GAME_ASSETS.UI_MOON_BIG.key);
     expect(skyMoon).toBeDefined();
     expect(skyMoon?.visible).toBe(false);
-    expect(skyMoon?.depth).toBe(1);
+    expect(skyMoon?.depth).toBe(-1);
 
     const greenFlag = images.find(img => img.key === GAME_ASSETS.FLAG_GREEN.key);
     expect(greenFlag).toBeDefined();
@@ -203,7 +203,7 @@ describe('Surface Flags & Moon Big Sprite in WorldRenderer', () => {
     expect(blueFlag.rotation).toBeCloseTo(expectedSiteRot, 4);
 
     // Pixel-art Moon sprite must be visible and properly sized in Orbit Map
-    const mapMoon = images.find(img => img.key === GAME_ASSETS.UI_MOON_BIG.key && img.depth === 0)!;
+    const mapMoon = images.find(img => img.key === GAME_ASSETS.UI_MOON_BIG.key && img.depth === -2)!;
     expect(mapMoon.visible).toBe(true);
     expect(mapMoon.displayWidth).toBeCloseTo(2000 * 0.08 * 2, 1);
     expect(mapMoon.displayHeight).toBeCloseTo(2000 * 0.08 * 2, 1);
@@ -237,9 +237,9 @@ describe('Surface Flags & Moon Big Sprite in WorldRenderer', () => {
     expect(blueFlag.visible).toBe(false);
 
     // Sky moon sprite should be visible during ascent, map moon sprite should be hidden
-    const skyMoon = images.find(img => img.key === GAME_ASSETS.UI_MOON_BIG.key && img.depth === 1)!;
+    const skyMoon = images.find(img => img.key === GAME_ASSETS.UI_MOON_BIG.key && img.depth === -1)!;
     expect(skyMoon.visible).toBe(true);
-    const mapMoon = images.find(img => img.key === GAME_ASSETS.UI_MOON_BIG.key && img.depth === 0)!;
+    const mapMoon = images.find(img => img.key === GAME_ASSETS.UI_MOON_BIG.key && img.depth === -2)!;
     expect(mapMoon.visible).toBe(false);
   });
 });

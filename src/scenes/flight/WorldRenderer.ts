@@ -11,10 +11,13 @@ import { FlightPart } from '../../physics/vehicle';
 import { computeScreenRetrograde, ScreenRetrogradeVector } from '../../physics/guidance';
 import { GAME_ASSETS, getPartTextureKey } from '../../core/assets';
 import { UI } from '../../ui/theme';
-import { DAY_SKY_KEY, PIXEL, SITE_GROUND_ROW, SITE_KEY, SITE_SIZE, createDaySkyTexture, createLaunchSiteTexture } from './LaunchSite';
+import { DAY_SKY_KEY, PIXEL, SITE_GROUND_ROW, SITE_FAR_KEY, SITE_KEY, SITE_SIZE, createDaySkyTexture, createLaunchSiteFarTexture, createLaunchSiteTexture } from './LaunchSite';
 
 export const SCREEN_CX = 640;
 export const SCREEN_CY = 400;
+/** How far the far mountain range scrolls relative to the ground (1 = rigid). */
+const FAR_PARALLAX = 0.85;
+
 /** Pixels per metre on the pad (one grid cell = one metre). */
 export const CELL_PX = CONFIG.camera.ascentScale;
 /** In the orbit map the rocket is drawn this many pixels per part, so its heading stays readable. */
@@ -124,7 +127,8 @@ export class WorldRenderer {
   private lastSkyMode: CameraMode | null = null;
   public skyRedrawCount = 0;
   private readonly daySky: Phaser.GameObjects.Image;
-  private readonly launchSite: Phaser.GameObjects.Image;
+  private readonly launchSite: Phaser.GameObjects.TileSprite;
+  private readonly launchSiteFar: Phaser.GameObjects.TileSprite;
   private readonly siteGroundGfx: Phaser.GameObjects.Graphics;
   private readonly worldGfx: Phaser.GameObjects.Graphics;
   private readonly rocketGfx: Phaser.GameObjects.Graphics;
@@ -156,19 +160,23 @@ export class WorldRenderer {
       };
     });
     this.dust = Array.from({ length: 34 }, () => ({ x: rng.realInRange(-30, 30), y: rng.realInRange(-20, 20) }));
+    // Backdrop layers sit below everything else (world, HUD and labels) so nothing is ever covered by the sky or Moon.
     this.skyGfx = scene.add.graphics();
+    this.skyGfx?.setDepth?.(-3);
     createDaySkyTexture(scene);
     createLaunchSiteTexture(scene);
+    createLaunchSiteFarTexture(scene);
     this.daySky = scene.add.image(0, 0, DAY_SKY_KEY);
     this.daySky?.setOrigin?.(0);
+    this.daySky?.setDepth?.(-2);
     this.daySky?.setScale?.(PIXEL);
     this.skyMoonSprite = scene.add.image(0, 0, GAME_ASSETS.UI_MOON_BIG.key);
     this.skyMoonSprite?.setVisible?.(false);
-    this.skyMoonSprite?.setDepth?.(1);
+    this.skyMoonSprite?.setDepth?.(-1);
     this.mapMoonSprite = scene.add.image(0, 0, GAME_ASSETS.UI_MOON_BIG.key);
     this.mapMoonSprite?.setOrigin?.(0.5, 0.5);
     this.mapMoonSprite?.setVisible?.(false);
-    this.mapMoonSprite?.setDepth?.(0);
+    this.mapMoonSprite?.setDepth?.(-2);
     this.roverFlagSprite = scene.add.image(0, 0, GAME_ASSETS.FLAG_GREEN.key);
     this.roverFlagSprite?.setOrigin?.(0.08, 0.97);
     this.roverFlagSprite?.setVisible?.(false);
@@ -180,9 +188,13 @@ export class WorldRenderer {
     this.ensureSmokeTexture();
     this.smokeSpritesContainer = scene.add.container(0, 0);
     this.siteGroundGfx = scene.add.graphics();
-    this.launchSite = scene.add.image(0, 0, SITE_KEY);
-    this.launchSite?.setOrigin?.(0.5, SITE_GROUND_ROW / (SITE_SIZE.height / PIXEL));
-    this.launchSite?.setScale?.(PIXEL);
+    // Both layers tile sideways forever: full-screen strips whose texture offset follows the pad.
+    this.launchSiteFar = scene.add.tileSprite?.(0, 0, 1280, SITE_SIZE.height, SITE_FAR_KEY);
+    this.launchSiteFar?.setOrigin?.(0, 0);
+    this.launchSiteFar?.setTileScale?.(PIXEL, PIXEL);
+    this.launchSite = scene.add.tileSprite?.(0, 0, 1280, SITE_SIZE.height, SITE_KEY);
+    this.launchSite?.setOrigin?.(0, 0);
+    this.launchSite?.setTileScale?.(PIXEL, PIXEL);
     this.worldGfx = scene.add.graphics();
     this.rocketGfx = scene.add.graphics();
     this.partSpritesContainer = scene.add.container(0, 0);
@@ -465,7 +477,15 @@ export class WorldRenderer {
     const siteTop = ground.y - SITE_GROUND_ROW * PIXEL;
     const siteVisible = this.camera.mode === 'ASCENT' && siteTop < 720;
     this.launchSite?.setVisible?.(siteVisible);
-    this.launchSite?.setPosition?.(Math.round(ground.x), Math.round(ground.y));
+    this.launchSiteFar?.setVisible?.(siteVisible);
+    // Texture column under the screen's left edge so the panorama's centre (x = 320) sits on the pad.
+    // The far range scrolls slower (parallax about the screen centre) for depth.
+    const tileX = (screenX: number): number => Math.round(SITE_SIZE.width / PIXEL / 2 - screenX / PIXEL);
+    const siteY = Math.round(ground.y) - SITE_GROUND_ROW * PIXEL;
+    this.launchSite?.setPosition?.(0, siteY);
+    if (this.launchSite) this.launchSite.tilePositionX = tileX(ground.x);
+    this.launchSiteFar?.setPosition?.(0, siteY);
+    if (this.launchSiteFar) this.launchSiteFar.tilePositionX = tileX(640 + (ground.x - 640) * FAR_PARALLAX);
     const g = this.siteGroundGfx;
     g?.clear?.();
     if (siteVisible && ground.y < 720) {

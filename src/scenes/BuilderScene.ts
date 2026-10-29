@@ -182,8 +182,9 @@ export class BuilderScene extends Phaser.Scene {
 
     g.clear();
     // See-through bay so the planet shows behind the build area, with a hard pixel frame.
-    g.fillStyle(0x0b0910, 0.35);
+    g.fillStyle(0x0b0910, 0.22);
     g.fillRect(x0, y0, width, height);
+    this.drawGlassPanes(g, x0, y0);
     g.fillStyle(0x01020a, 1);
     g.fillRect(x0 - 9, y0 - 6, 3, height + 12);
     g.fillRect(x0 + width + 6, y0 - 6, 3, height + 12);
@@ -197,6 +198,38 @@ export class BuilderScene extends Phaser.Scene {
     g.fillStyle(PX.glow, 0.35);
     g.fillRect(x0, y0 - 6, width, 3);
 
+  }
+
+  /** Every grid cell is a Minecraft-style glass pane: pale tint, light pixel rim and a diagonal glint. */
+  private drawGlassPanes(g: Phaser.GameObjects.Graphics, x0: number, y0: number): void {
+    const size = BuilderScene.CELL_SIZE;
+    const u = 3; // one glass "texel"
+    for (let col = 0; col < BuilderScene.GRID_COLS; col++) {
+      for (let row = 0; row < BuilderScene.GRID_ROWS; row++) {
+        const x = x0 + col * size;
+        const y = y0 + row * size;
+        g.fillStyle(0xbfe6f2, 0.04);
+        g.fillRect(x, y, size, size);
+        // Rim: bright top/left edge, softer bottom/right edge.
+        g.fillStyle(0xe6f8ff, 0.32);
+        g.fillRect(x, y, size, u);
+        g.fillRect(x, y, u, size);
+        g.fillStyle(0x9fcfe0, 0.24);
+        g.fillRect(x, y + size - u, size, u);
+        g.fillRect(x + size - u, y, u, size);
+        // Corner studs where the panes meet.
+        g.fillStyle(0xffffff, 0.5);
+        g.fillRect(x, y, u, u);
+        // Diagonal glint (a few texels), shifted per cell so the glass doesn't look tiled.
+        const shift = ((col * 7 + row * 3) % 4) * u;
+        g.fillStyle(0xffffff, 0.34);
+        for (let i = 0; i < 4; i++) g.fillRect(x + 9 + shift + i * u, y + 24 - i * u, u, u);
+        if ((col + row) % 3 === 0) {
+          g.fillStyle(0xffffff, 0.25);
+          for (let i = 0; i < 2; i++) g.fillRect(x + 27 + i * u, y + 33 - i * u, u, u);
+        }
+      }
+    }
   }
 
   private createTitle(): void {

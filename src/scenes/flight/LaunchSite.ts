@@ -4,7 +4,8 @@ import { dither, hash, rgb } from '../../ui/backdrop';
 /**
  * Daylight pixel art for the launch: a light dithered sky (screen-fixed) and a
  * launch-site panorama (world-fixed: mountains either side, hills, grass and dirt).
- * Both are painted once on small canvases and drawn at PIXEL x scale.
+ * Both are painted once on small canvases and drawn at PIXEL x scale. The panorama
+ * wraps horizontally (and the far range is its own layer) so it can be tiled forever.
  */
 export const PIXEL = 4;
 
@@ -14,6 +15,7 @@ const SKY_H = 180;
 const DAY_SKY = [0x7fb8e8, 0x8cc2ec, 0x9bcbef, 0xabd4f2, 0xbcdcf4, 0xcde5f6, 0xdcecf7, 0xe9f3f8];
 
 export const SITE_KEY = 'launch_site';
+export const SITE_FAR_KEY = 'launch_site_far';
 const SITE_W = 640;
 const SITE_H = 150;
 /** Row of the panorama that sits exactly on the world's ground line (y = 0). */
@@ -108,13 +110,33 @@ const NEAR_PEAKS: Peak[] = [
   { x: 615, top: 40, slope: 1.0 }
 ];
 
-function ridge(x: number, peaks: Peak[], seed: number): { row: number; peak: Peak } {
-  let best = { row: SITE_H, peak: peaks[0] };
+/** Signed horizontal distance from a peak, wrapped so the panorama tiles seamlessly. */
+function wrapDx(x: number, px: number): number {
+  let d = x - px;
+  if (d >= SITE_W / 2) d -= SITE_W;
+  else if (d < -SITE_W / 2) d += SITE_W;
+  return d;
+}
+
+function ridge(x: number, peaks: Peak[], seed: number): { row: number; peak: Peak; dx: number } {
+  let best = { row: SITE_H, peak: peaks[0], dx: 0 };
   for (const p of peaks) {
-    const row = p.top + Math.abs(x - p.x) * p.slope + (hash(x, p.x + seed) - 0.5) * 2;
-    if (row < best.row) best = { row, peak: p };
+    const dx = wrapDx(x, p.x);
+    const row = p.top + Math.abs(dx) * p.slope + (hash(x, p.x + seed) - 0.5) * 2;
+    if (row < best.row) best = { row, peak: p, dx };
   }
   return best;
+}
+
+/** Far range on its own layer: pale and hazy (daylight air perspective). */
+export function createLaunchSiteFarTexture(scene: Phaser.Scene): void {
+  paint(scene, SITE_FAR_KEY, SITE_W, SITE_H, (x, y) => {
+    const far = ridge(x, FAR_PEAKS, 7);
+    if (y < far.row) return null;
+    const lit = far.dx < -(y - far.peak.top) * 0.4;
+    if (y < far.peak.top + 6) return lit ? 0xf4f8fc : 0xdde7f1;
+    return lit ? 0xc3d3e4 : 0xadc0d6;
+  });
 }
 
 export function createLaunchSiteTexture(scene: Phaser.Scene): void {
@@ -122,19 +144,11 @@ export function createLaunchSiteTexture(scene: Phaser.Scene): void {
   paint(scene, SITE_KEY, SITE_W, SITE_H, (x, y) => {
     let color: number | null = null;
 
-    // Far range: pale and hazy (daylight air perspective).
-    const far = ridge(x, FAR_PEAKS, 7);
-    if (y >= far.row) {
-      const lit = x < far.peak.x - (y - far.peak.top) * 0.4;
-      color = lit ? 0xc3d3e4 : 0xadc0d6;
-      if (y < far.peak.top + 6) color = lit ? 0xf4f8fc : 0xdde7f1;
-    }
-
     // Near range: rocky slate with snow caps, lit from the left.
     const near = ridge(x, NEAR_PEAKS, 3);
     if (y >= near.row) {
       const p = near.peak;
-      const lit = x < p.x - (y - p.top) * 0.35 + (hash(y, p.x) - 0.5) * 2;
+      const lit = near.dx < -(y - p.top) * 0.35 + (hash(y, p.x) - 0.5) * 2;
       const snowLine = p.top + 10 + hash(x) * 4;
       if (y < snowLine) {
         color = y - near.row < 1 ? 0xffffff : lit ? 0xf3f7fb : 0xc9d6e4;
@@ -149,7 +163,7 @@ export function createLaunchSiteTexture(scene: Phaser.Scene): void {
     }
 
     // Rolling hills in front of everything.
-    const hill = G - 7 + Math.round(3 * Math.sin(x * 0.05) + 2 * Math.sin(x * 0.13 + 1));
+    const hill = G - 7 + Math.round(3 * Math.sin(x * ((Math.PI * 2 * 5) / SITE_W)) + 2 * Math.sin(x * ((Math.PI * 2 * 13) / SITE_W) + 1));
     if (y >= hill && y < G) color = y === hill ? 0x9fd46a : dither(x, y) > 0.6 ? 0x6fb04a : 0x7dbb52;
 
     // Ground: grass lip, then layered dirt with pebbles.
