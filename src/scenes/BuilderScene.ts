@@ -31,6 +31,8 @@ export class BuilderScene extends Phaser.Scene {
   public static readonly GRID_COLS = 15;
   public static readonly GRID_ROWS = 13;
   public static readonly CELL_SIZE = 48;
+  /** Overall opacity of the glass panes over the build bay. */
+  private static readonly GLASS_OPACITY = 0.4;
 
   public readonly hudHeight = 300;
   public readonly hudY = PANEL_TOP;
@@ -38,6 +40,7 @@ export class BuilderScene extends Phaser.Scene {
   private rocketTree!: RocketTree;
   private sceneryGraphics!: Phaser.GameObjects.Graphics;
   private gridGraphics!: Phaser.GameObjects.Graphics;
+  private glassGraphics!: Phaser.GameObjects.Graphics;
   private blocksContainer!: Phaser.GameObjects.Container;
   private socketsContainer!: Phaser.GameObjects.Container;
   private ghostContainer!: Phaser.GameObjects.Container;
@@ -97,6 +100,7 @@ export class BuilderScene extends Phaser.Scene {
     this.sceneryGraphics = this.add.graphics();
     this.drawScenery();
     this.gridGraphics = this.add.graphics();
+    this.glassGraphics = this.add.graphics().setAlpha(BuilderScene.GLASS_OPACITY);
     this.blocksContainer = this.add.container(0, 0);
     this.socketsContainer = this.add.container(0, 0);
     this.ghostContainer = this.add.container(0, 0);
@@ -184,7 +188,8 @@ export class BuilderScene extends Phaser.Scene {
     // See-through bay so the planet shows behind the build area, with a hard pixel frame.
     g.fillStyle(0x0b0910, 0.22);
     g.fillRect(x0, y0, width, height);
-    this.drawGlassPanes(g, x0, y0);
+    this.glassGraphics.clear();
+    this.drawGlassPanes(this.glassGraphics, x0, y0);
     g.fillStyle(0x01020a, 1);
     g.fillRect(x0 - 9, y0 - 6, 3, height + 12);
     g.fillRect(x0 + width + 6, y0 - 6, 3, height + 12);
@@ -208,21 +213,21 @@ export class BuilderScene extends Phaser.Scene {
       for (let row = 0; row < BuilderScene.GRID_ROWS; row++) {
         const x = x0 + col * size;
         const y = y0 + row * size;
-        g.fillStyle(0xbfe6f2, 0.04);
+        g.fillStyle(0xbfe6f2, 0.12);
         g.fillRect(x, y, size, size);
         // Rim: bright top/left edge, softer bottom/right edge.
-        g.fillStyle(0xe6f8ff, 0.32);
+        g.fillStyle(0xe6f8ff, 0.8);
         g.fillRect(x, y, size, u);
         g.fillRect(x, y, u, size);
-        g.fillStyle(0x9fcfe0, 0.24);
+        g.fillStyle(0x9fcfe0, 0.6);
         g.fillRect(x, y + size - u, size, u);
         g.fillRect(x + size - u, y, u, size);
         // Corner studs where the panes meet.
-        g.fillStyle(0xffffff, 0.5);
+        g.fillStyle(0xffffff, 1);
         g.fillRect(x, y, u, u);
         // Diagonal glint (a few texels), shifted per cell so the glass doesn't look tiled.
         const shift = ((col * 7 + row * 3) % 4) * u;
-        g.fillStyle(0xffffff, 0.34);
+        g.fillStyle(0xffffff, 0.8);
         for (let i = 0; i < 4; i++) g.fillRect(x + 9 + shift + i * u, y + 24 - i * u, u, u);
         if ((col + row) % 3 === 0) {
           g.fillStyle(0xffffff, 0.25);
