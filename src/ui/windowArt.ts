@@ -24,6 +24,23 @@ export interface WindowPalette {
   /** Sun or Moon disc on the sky ('none' = off-screen). */
   disc: 'sun-high' | 'sun-setting' | 'moon';
   discColor: number;
+  /** Palm trunks and fronds (lit, shade). */
+  trunk: number;
+  palm: [number, number];
+  /** Wet sand and deep ground under the beach. */
+  sandDeep: [number, number];
+  foam: number;
+  /** Launch pad slab (body, lit top) and tower lattice (main, alternate stripe). */
+  pad: [number, number];
+  tower: [number, number];
+  /** Clouds: sunlit top, shaded underside. */
+  cloud: [number, number];
+  /** Thin bright band where the atmosphere meets space on the curved horizon. */
+  limbGlow: number;
+  /** The Earth seen from high up. */
+  earth: number;
+  /** Sky high up, just before it turns black. */
+  skyHigh: number;
 }
 
 export const WINDOW_PALETTES: Record<LaunchWindowId, WindowPalette> = {
@@ -37,7 +54,17 @@ export const WINDOW_PALETTES: Record<LaunchWindowId, WindowPalette> = {
     lights: 0,
     stars: false,
     disc: 'sun-high',
-    discColor: 0xfff6c8
+    discColor: 0xfff6c8,
+    trunk: 0x8a6a44,
+    palm: [0x4f9a3c, 0x3a7a30],
+    sandDeep: [0xc9a46a, 0x9c7a4a],
+    foam: 0xffffff,
+    pad: [0xb7b2a8, 0xe2ddd3],
+    tower: [0xd94a4a, 0xf4eee6],
+    cloud: [0xffffff, 0xd6e4f2],
+    limbGlow: 0x8fd0ff,
+    earth: 0x1f5f9a,
+    skyHigh: 0x1d3b6e
   },
   SUNSET: {
     sky: [0x1d1226, 0x2a172f, 0x3b1d36, 0x512639, 0x6c3239, 0x8a4438, 0xb85a3c, 0xe07d3e, 0xffa94f, 0xffd27a],
@@ -49,7 +76,17 @@ export const WINDOW_PALETTES: Record<LaunchWindowId, WindowPalette> = {
     lights: 0xffc86a,
     stars: false,
     disc: 'sun-setting',
-    discColor: 0xffe08a
+    discColor: 0xffe08a,
+    trunk: 0x2a1626,
+    palm: [0x3a1f34, 0x2a1626],
+    sandDeep: [0x6a3c42, 0x48283a],
+    foam: 0xffd6a8,
+    pad: [0x7a5a62, 0xe0a07a],
+    tower: [0xb8403f, 0xffd2b0],
+    cloud: [0xffb98a, 0x8a4a6a],
+    limbGlow: 0xff9a4a,
+    earth: 0x2a1838,
+    skyHigh: 0x1a0f2e
   },
   NIGHT: {
     sky: [0x02030a, 0x040714, 0x070c1f, 0x0b122a, 0x101a36, 0x162244, 0x1d2c52],
@@ -61,7 +98,17 @@ export const WINDOW_PALETTES: Record<LaunchWindowId, WindowPalette> = {
     lights: 0xffd27a,
     stars: true,
     disc: 'moon',
-    discColor: 0xe8eefc
+    discColor: 0xe8eefc,
+    trunk: 0x0c1220,
+    palm: [0x141c30, 0x0c1220],
+    sandDeep: [0x262c40, 0x1a1e2e],
+    foam: 0x9fb4e0,
+    pad: [0x3e4458, 0x6a7290],
+    tower: [0x7a2a36, 0x8a90a8],
+    cloud: [0x8a9ac4, 0x2e3654],
+    limbGlow: 0x3a6ad0,
+    earth: 0x060a18,
+    skyHigh: 0x03050e
   }
 };
 

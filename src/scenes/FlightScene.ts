@@ -246,7 +246,7 @@ export class FlightScene extends Phaser.Scene {
     this.exposeForDebug();
     if (this.game.canvas) this.game.canvas.style.cursor = 'default';
 
-    this.world = new WorldRenderer(this);
+    this.world = new WorldRenderer(this, this.launchWindow.id);
     this.world.rockVisibility = this.launchWindow.rockVisibility;
     this.world.updateCamera(this.sim, this.sim.getTelemetry(), 0, 'ASCENT');
     this.fx = new Effects(this);

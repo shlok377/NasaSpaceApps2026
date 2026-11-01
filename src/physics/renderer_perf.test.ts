@@ -301,7 +301,11 @@ describe('WorldRenderer Performance & Allocation Optimizations', () => {
           fillPath: () => {},
           strokePath: () => {},
           strokeRect: () => {},
-          strokeCircle: () => {}
+          strokeCircle: () => {},
+          fillTriangle: () => {},
+          fillEllipse: () => {},
+          strokeEllipse: () => {},
+          setBlendMode: () => {}
         }),
         image: () => {
           imagesCreated++;
