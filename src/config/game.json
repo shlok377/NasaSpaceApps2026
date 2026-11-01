@@ -105,6 +105,12 @@
     "controlAuthority": 0.4,
     "asymmetryMoment": 0.3
   },
+  "timeOfDay": {
+    "DAWN": { "wind": 1, "reward": 1 },
+    "NOON": { "wind": 1.4, "reward": 1.25 },
+    "DUSK": { "wind": 1.8, "reward": 1.5 },
+    "NIGHT": { "wind": 2.2, "reward": 2 }
+  },
   "wind": {
     "ceiling": 2400,
     "surface": 3.8,

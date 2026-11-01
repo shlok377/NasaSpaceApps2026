@@ -301,6 +301,11 @@ Take it away, fly safe! 🛰️
 - `src/scenes/flight/LaunchSite.ts` paints two canvases once (shown at 4×): a light dithered **day sky** with pixel clouds (screen-fixed, faded out with altitude in `drawSky`) and a **launch-site panorama** (world-fixed at y = 0: hazy far range, snowy mountain ranges either side of the pad, green hills, grass + layered dirt). Plain dirt fills past its edges. The old flat green ground rect is gone; pad recoloured to concrete.
 - Draw order in `WorldRenderer`: gradient → day sky → Moon → launch site → world graphics.
 
+#### 🟣 [Claude] - 2026-11-01 (Seaside spaceport, launch time of day, lab payload slot)
+- **Launch time** (`src/game/timeOfDay.ts`, numbers in `game.json` → `timeOfDay`): DAWN / NOON / DUSK / NIGHT picker on the pad (click or ←/→), resets to DAWN every launch. Later = windier (`FlightSim.windScale` ×1 → ×2.2) and pays more (phase, outcome and mission rewards ×1 → ×2; `flightEarnings(..., rewardScale)`). Each time has its own pixel sky, land tint and sky-to-space gradient.
+- **Seaside spaceport** (`LaunchSite.ts`): land and mountains left, cliff + lighthouse, ocean to the horizon on the right (wraps to a beach so it still tiles). Painted complex: control bunker with dish, flags, water tower, floodlight masts, fuel spheres, palms. `WorldRenderer.drawSiteLife` animates flags, sea glints, birds, pad steam, and lamps/beacon after dark; `drawPad` draws the slab, flame trench and a pixel gantry sized to the rocket, with an arm until liftoff. Clouds drift; the Moon starts pale in the top-right corner.
+- **Lab**: COCKPIT / SATELLITE / ROVER payload slot in PARTS (card fan, C key); bank card moved to the left column; FLIGHT READY chip removed; BLOCK is selected on open.
+
 ---
 
 ## 📋 Task Board & Progress Tracker

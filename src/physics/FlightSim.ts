@@ -157,6 +157,8 @@ export class FlightSim {
   public readonly initialVehicle: FlightVehicle;
   public state: FlightState;
   public phase: FlightPhase = 'PRELAUNCH';
+  /** Wind strength multiplier (later launch times blow harder). */
+  public windScale = 1;
   public onGround = true;
   public tanks: Map<string, number>;
   public debris: Debris[] = [];
@@ -329,7 +331,7 @@ export class FlightSim {
 
     // --- Aerodynamics ---------------------------------------------------------
     const rho = airDensity(s.y);
-    const wind = rho > 0 ? windAt(s.y, s.time) : 0;
+    const wind = rho > 0 ? windAt(s.y, s.time) * this.windScale : 0;
     const airVx = s.vx - wind;
     const airVy = s.vy;
     const speed = Math.hypot(airVx, airVy);
@@ -813,7 +815,7 @@ export class FlightSim {
       mach: rho > 0 ? speed / WORLD.speedOfSound : 0,
       dynamicPressure: this.lastQ,
       airDensity: rho,
-      wind: rho > 0 ? windAt(s.y, s.time) : 0,
+      wind: rho > 0 ? windAt(s.y, s.time) * this.windScale : 0,
       pitchFromVertical: wrapAngle(s.theta - upAngle),
       progradeFromVertical: speed > 0.5 ? wrapAngle(Math.atan2(s.vy, s.vx) - upAngle) : 0,
       angleOfAttack: speed > 0.5 ? wrapAngle(s.theta - Math.atan2(s.vy, s.vx)) : 0,

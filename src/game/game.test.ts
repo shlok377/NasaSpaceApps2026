@@ -56,6 +56,22 @@ describe('missions', () => {
     expect(rocketCost(['COCKPIT', 'FUEL_TANK', 'ENGINE'])).toBeGreaterThan(0);
     expect(rocketCost(['COCKPIT', 'FUEL_TANK', 'ENGINE', 'ENGINE'])).toBeGreaterThan(rocketCost(['COCKPIT', 'FUEL_TANK', 'ENGINE']));
   });
+
+  it('charges extra for picked fuel, engine and payload types', () => {
+    const base = rocketCost(['COCKPIT', 'FUEL_TANK', 'ENGINE']);
+    const standard = rocketCost([
+      { type: 'COCKPIT', payload: 'CREW' },
+      { type: 'FUEL_TANK', fuelKind: 'STANDARD' },
+      { type: 'ENGINE', engineKind: 'STANDARD' }
+    ]);
+    const fancy = rocketCost([
+      { type: 'COCKPIT', payload: 'ROVER' },
+      { type: 'FUEL_TANK', fuelKind: 'PURPLE' },
+      { type: 'ENGINE', engineKind: 'TWIN' }
+    ]);
+    expect(standard).toBe(base);
+    expect(fancy).toBe(base + 15 + 10 + 12);
+  });
 });
 
 describe('economy', () => {
@@ -80,6 +96,14 @@ describe('economy', () => {
     const moon = flightEarnings('CREW_LANDED', [], 150, 100, false);
     expect(home.total - space.total).toBe(50);
     expect(moon.total).toBeGreaterThan(space.total);
+  });
+
+  it('pays double for a night launch, but not on the rocket refund', () => {
+    const dawn = flightEarnings('SPACE', [], 20, 100, true);
+    const night = flightEarnings('SPACE', [], 20, 100, true, 0, 2);
+    expect(night.outcome).toBe(dawn.outcome * 2);
+    expect(night.mission).toBe(40);
+    expect(night.recovery).toBe(dawn.recovery);
   });
 
   it('never leaves a player too broke to fly', () => {

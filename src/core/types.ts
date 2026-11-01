@@ -8,6 +8,15 @@ export type PartType =
   | 'FIN'
   | 'STRUCTURAL';
 
+/** Cosmetic fuel choice for a tank (builder UI only for now). */
+export type FuelKind = 'STANDARD' | 'GREEN' | 'PURPLE';
+
+/** Cosmetic engine choice (builder UI only for now). */
+export type EngineKind = 'STANDARD' | 'TWIN' | 'LANDER';
+
+/** What sits in the root slot in place of the crew cockpit (builder UI only for now). */
+export type PayloadKind = 'CREW' | 'SATELLITE' | 'ROVER';
+
 export interface PartDefinition {
   type: PartType;
   label: string;
@@ -30,6 +39,9 @@ export interface RocketNode {
   parentPort: PortDirection | null;
   childrenIds: string[];
   finOrientation?: 'LEFT' | 'RIGHT';
+  fuelKind?: FuelKind;
+  engineKind?: EngineKind;
+  payload?: PayloadKind;
   mass: number;
   fuel: number;
   thrust: number;

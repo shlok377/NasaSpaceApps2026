@@ -84,11 +84,20 @@ export interface FlightEarnings {
 }
 
 /** `phasePaid`: phase rewards already paid out during the flight (so they aren't paid twice). */
-export function flightEarnings(outcome: MissionOutcome, awards: readonly Award[], missionReward: number, rocketCost: number, landedHome: boolean, phasePaid = 0): FlightEarnings {
+export function flightEarnings(
+  outcome: MissionOutcome,
+  awards: readonly Award[],
+  missionReward: number,
+  rocketCost: number,
+  landedHome: boolean,
+  phasePaid = 0,
+  /** Launch-time bonus on the outcome and mission payouts (phasePaid is already scaled). */
+  rewardScale = 1
+): FlightEarnings {
   const e = {
-    outcome: Math.max(0, OUTCOME_PAYOUT[outcome] - phasePaid),
+    outcome: Math.max(0, Math.round(OUTCOME_PAYOUT[outcome] * rewardScale) - phasePaid),
     awards: cashFromAwards(awards),
-    mission: missionReward,
+    mission: Math.round(missionReward * rewardScale),
     recovery: landedHome ? Math.round(rocketCost * CONFIG.economy.recoveryRefund) : 0
   };
   return { ...e, total: e.outcome + e.awards + e.mission + e.recovery };

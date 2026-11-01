@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { CONFIG } from '../config';
-import { HierarchicalRocketNode, PartType } from '../core/types';
+import { HierarchicalRocketNode } from '../core/types';
 import { currentMission, Mission, MissionContext, newlyCompleted, rocketCost } from '../game/missions';
 import {
   ActiveProblem,
@@ -17,6 +17,8 @@ import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, PlayerPro
 import { checkBelt, Combo, generateBelt, generateLaneWaves, Rock } from '../game/rocks';
 import { createEvasiveRunnerState, EvasiveRunnerState, updateEvasiveRunner, RUNNER_CONFIG } from '../game/evasiveRunner';
 import { Award, StuntTracker } from '../game/stunts';
+import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay, timeOfDayReward, timeOfDayWind } from '../game/timeOfDay';
+import { PX, drawPixelPanel, pixelBody, pixelTitle } from '../ui/pixel';
 import { moonSoiAltitude } from '../physics/bodies';
 import { ENGINE, FINS, G0, LIMITS, ROCK_BELT, WORLD } from '../physics/constants';
 import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physics/FlightSim';
@@ -73,8 +75,8 @@ interface SceneCheckpoint extends Checkpoint {
   failedProblems: number;
 }
 
-function flattenTypes(node: HierarchicalRocketNode): PartType[] {
-  return [node.type, ...node.children.flatMap(flattenTypes)];
+function flattenParts(node: HierarchicalRocketNode): HierarchicalRocketNode[] {
+  return [node, ...node.children.flatMap(flattenParts)];
 }
 
 /**
@@ -127,6 +129,10 @@ export class FlightScene extends Phaser.Scene {
   private coins!: CoinCounter;
   private launchButton!: LaunchButton;
   private missionText!: Phaser.GameObjects.Text;
+  /** Launch time picked on the pad (resets to DAWN every launch). */
+  private timeOfDay: TimeOfDay = 'DAWN';
+  private timePicker!: Phaser.GameObjects.Container;
+  private timeCards: Array<{ time: TimeOfDay; gfx: Phaser.GameObjects.Graphics; hover: boolean }> = [];
   private hintText!: Phaser.GameObjects.Text;
   private bannerText!: Phaser.GameObjects.Text;
   private phaseTitle!: Phaser.GameObjects.Text;
@@ -220,6 +226,7 @@ export class FlightScene extends Phaser.Scene {
     this.dropMarker = null;
     this.impactMarker = null;
     this.markerAt = -Infinity;
+    this.timeOfDay = 'DAWN';
   }
 
   preload(): void {
@@ -232,7 +239,7 @@ export class FlightScene extends Phaser.Scene {
     this.sim = new FlightSim(this.vehicle);
     this.runner = new PhaseRunner();
     this.runner.drainEvents();
-    this.cost = rocketCost(flattenTypes(this.tree));
+    this.cost = rocketCost(flattenParts(this.tree));
     this.exposeForDebug();
     if (this.game.canvas) this.game.canvas.style.cursor = 'default';
 
@@ -280,9 +287,8 @@ export class FlightScene extends Phaser.Scene {
     this.launchButton = new LaunchButton(this, 640, 600, verdict, color, affordable ? `Launch cost $${this.cost}  ·  SPACE` : `Costs $${this.cost}, you have $${this.progress.money}`, () =>
       this.startCountdown()
     );
-    this.missionText = this.add
-      .text(640, 168, this.mission ? `MISSION: ${this.mission.title}: ${this.mission.goal}  (+$${this.mission.reward})` : 'All missions done: fly for the high score!', TEXT_STYLE(15, UI.goldText))
-      .setOrigin(0.5);
+    this.missionText = this.add.text(640, 168, '', TEXT_STYLE(15, UI.goldText)).setOrigin(0.5);
+    this.createTimePicker();
     this.hintText = this.add.text(640, 694, '', TEXT_STYLE(14)).setOrigin(0.5).setDepth(20);
     this.bannerText = this.add.text(640, 236, '', TEXT_STYLE(20, '#ffffff')).setOrigin(0.5, 0).setAlpha(0).setDepth(20);
     this.phaseTitle = this.add.text(640, 300, '', TEXT_STYLE(44, '#ffffff')).setOrigin(0.5).setAlpha(0).setDepth(30);
@@ -295,6 +301,73 @@ export class FlightScene extends Phaser.Scene {
     this.endButton.on('pointerdown', () => {
       if (!this.result && this.launched) this.finishMission();
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Launch time picker (on the pad only)
+  // ---------------------------------------------------------------------------
+
+  private static readonly TIME_CARD_W = 120;
+  private static readonly TIME_CARD_H = 56;
+
+  /** DAWN → NIGHT strip under the mission line: later is windier and pays more. */
+  private createTimePicker(): void {
+    const w = FlightScene.TIME_CARD_W;
+    const h = FlightScene.TIME_CARD_H;
+    this.timePicker = this.add.container(0, 0).setDepth(15);
+    this.timeCards = TIMES_OF_DAY.map((time, i) => {
+      const x = 640 + (i - 1.5) * (w + 10) - w / 2;
+      const y = 196;
+      const look = TIME_LOOKS[time];
+      const gfx = this.add.graphics();
+      const label = pixelTitle(this, x + w / 2, y + 10, look.label, 10, PX.text.white).setOrigin(0.5, 0);
+      const pay = timeOfDayReward(time);
+      const sub = pixelBody(this, x + w / 2, y + 28, `${look.blurb} · $×${pay}`, 18, PX.text.muted).setOrigin(0.5, 0);
+      const zone = this.add.zone(x + w / 2, y + h / 2, w, h).setInteractive({ useHandCursor: true });
+      const card = { time, gfx, hover: false };
+      zone.on('pointerover', () => ((card.hover = true), this.drawTimePicker()));
+      zone.on('pointerout', () => ((card.hover = false), this.drawTimePicker()));
+      zone.on('pointerdown', () => this.setTimeOfDay(time));
+      this.timePicker.add([gfx, label, sub, zone]);
+      return card;
+    });
+    this.setTimeOfDay(this.timeOfDay);
+  }
+
+  private drawTimePicker(): void {
+    const w = FlightScene.TIME_CARD_W;
+    const h = FlightScene.TIME_CARD_H;
+    this.timeCards.forEach(({ time, gfx, hover }, i) => {
+      const x = 640 + (i - 1.5) * (w + 10) - w / 2;
+      const on = time === this.timeOfDay;
+      const accent = TIME_LOOKS[time].accent;
+      gfx.clear();
+      drawPixelPanel(gfx, x, 196, w, h, {
+        fill: on ? 0x2a2236 : PX.panelDeep,
+        fillAlpha: 0.92,
+        border: on ? accent : hover ? PX.border : PX.borderDim,
+        highlight: on ? 0xffffff : PX.glow,
+        u: on ? 3 : 2
+      });
+      // Swatch of the sky in the corner.
+      gfx.fillStyle(accent, on ? 1 : 0.5);
+      gfx.fillRect(x + 8, 196 + 8, 8, 8);
+    });
+  }
+
+  private setTimeOfDay(time: TimeOfDay): void {
+    if (this.sim.phase !== 'PRELAUNCH' || this.countdown !== null) return;
+    this.timeOfDay = time;
+    this.sim.windScale = timeOfDayWind(time);
+    this.world.setTimeOfDay(time);
+    const reward = this.mission ? Math.round(this.mission.reward * timeOfDayReward(time)) : 0;
+    this.missionText.setText(this.mission ? `MISSION: ${this.mission.title}: ${this.mission.goal}  (+$${reward})` : 'All missions done: fly for the high score!');
+    this.drawTimePicker();
+  }
+
+  private stepTimeOfDay(dir: number): void {
+    const i = TIMES_OF_DAY.indexOf(this.timeOfDay);
+    this.setTimeOfDay(TIMES_OF_DAY[(i + dir + TIMES_OF_DAY.length) % TIMES_OF_DAY.length]);
   }
 
   /** What the rocket can do, in plain words, from a quick headless test flight. */
@@ -325,8 +398,14 @@ export class FlightScene extends Phaser.Scene {
       else if (this.runnerState.promptActive) this.spacePressedThisFrame = true;
       else if (this.runner.dropRover(this.sim)) this.fx.ring(this.world.rocketScreen(this.sim).x, this.world.rocketScreen(this.sim).y, WORLD_COLORS.rover, 50, 0.5);
     });
-    const onLeftDown = () => { if (this.runnerState.active) this.laneSteerInput = -1; };
-    const onRightDown = () => { if (this.runnerState.active) this.laneSteerInput = 1; };
+    const onLeftDown = () => {
+      if (this.runnerState.active) this.laneSteerInput = -1;
+      else if (this.sim.phase === 'PRELAUNCH') this.stepTimeOfDay(-1);
+    };
+    const onRightDown = () => {
+      if (this.runnerState.active) this.laneSteerInput = 1;
+      else if (this.sim.phase === 'PRELAUNCH') this.stepTimeOfDay(1);
+    };
     this.keys.A.on('down', onLeftDown);
     this.keys.LEFT.on('down', onLeftDown);
     this.keys.D.on('down', onRightDown);
@@ -562,7 +641,7 @@ export class FlightScene extends Phaser.Scene {
           this.showPhaseTitle(e.phase);
           break;
         case 'PHASE_DONE': {
-          const reward = CONFIG.economy.phaseRewards[e.phase];
+          const reward = Math.round(CONFIG.economy.phaseRewards[e.phase] * timeOfDayReward(this.timeOfDay));
           this.progress = { ...this.progress, money: this.progress.money + reward };
           this.phasePaid += reward;
           saveProgress(this.progress);
@@ -764,6 +843,7 @@ export class FlightScene extends Phaser.Scene {
     this.coins.update(this.progress.money + (this.result ? 0 : cashFromAwards(this.stunts.awards)), dt);
 
     this.launchButton.setVisible(onPad);
+    this.timePicker.setVisible(onPad);
     this.launchButton.update(now);
     this.missionText.setVisible(onPad);
     this.endButton.setVisible(flying && this.launched);
@@ -876,7 +956,8 @@ export class FlightScene extends Phaser.Scene {
     };
     this.completedNow = newlyCompleted(ctx, this.progress.completedMissions);
     const missionReward = this.completedNow.reduce((s, m) => s + m.reward, 0);
-    this.earnings = flightEarnings(this.result.outcome, this.stunts.awards, missionReward, this.cost, st.landedOn === 'EARTH' && st.reachedSpace, this.phasePaid);
+    const rewardScale = timeOfDayReward(this.timeOfDay);
+    this.earnings = flightEarnings(this.result.outcome, this.stunts.awards, missionReward, this.cost, st.landedOn === 'EARTH' && st.reachedSpace, this.phasePaid, rewardScale);
 
     this.progress = {
       ...this.progress,

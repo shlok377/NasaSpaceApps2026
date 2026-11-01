@@ -11,7 +11,9 @@ import { FlightPart } from '../../physics/vehicle';
 import { computeScreenRetrograde, ScreenRetrogradeVector } from '../../physics/guidance';
 import { GAME_ASSETS, getPartTextureKey } from '../../core/assets';
 import { UI } from '../../ui/theme';
-import { DAY_SKY_KEY, PIXEL, SITE_GROUND_ROW, SITE_FAR_KEY, SITE_KEY, SITE_SIZE, createDaySkyTexture, createLaunchSiteFarTexture, createLaunchSiteTexture } from './LaunchSite';
+import { COMPLEX, HORIZON_ROW, PAD_COLUMN, PIXEL, SITE_GROUND_ROW, SITE_FAR_KEY, SITE_KEY, SITE_SIZE, createDaySkyTexture, createLaunchSiteFarTexture, createLaunchSiteTexture, daySkyKey, isSeaColumn } from './LaunchSite';
+import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay } from '../../game/timeOfDay';
+import { hash } from '../../ui/backdrop';
 
 export const SCREEN_CX = 640;
 export const SCREEN_CY = 400;
@@ -103,6 +105,12 @@ function lerpColor(c1: number, c2: number, t: number): number {
   return (mix(16) << 16) | (mix(8) << 8) | mix(0);
 }
 
+/** A colour lit by `tint`, the same way a sprite tint multiplies its texture. */
+function multiplyColor(c: number, tint: number): number {
+  const ch = (shift: number) => Math.round((((c >> shift) & 0xff) * ((tint >> shift) & 0xff)) / 255);
+  return (ch(16) << 16) | (ch(8) << 8) | ch(0);
+}
+
 /** Part outline in its own frame (cell-centred, nose up, y down), as flat points scaled by `h` (half a cell). */
 function partShape(p: FlightPart, h: number): number[] {
   if (p.type === 'NOSE_CONE') return [-h, h, -h * 0.85, 0, -h * 0.5, -h * 0.65, 0, -h, h * 0.5, -h * 0.65, h * 0.85, 0, h, h];
@@ -126,7 +134,13 @@ export class WorldRenderer {
   private lastSkyAltitude = -Infinity;
   private lastSkyMode: CameraMode | null = null;
   public skyRedrawCount = 0;
-  private readonly daySky: Phaser.GameObjects.Image;
+  private readonly daySky: Phaser.GameObjects.TileSprite;
+  /** Live touches on the launch site: flags, sea glints, birds, pad steam, lamps. */
+  private readonly siteFxGfx: Phaser.GameObjects.Graphics;
+  /** Gantry placement, measured from the rocket while it stands on the pad. */
+  private padRig: { left: number; top: number } | null = null;
+  /** Launch time picked on the pad: sets the sky, light on the land and the gradient up to space. */
+  private time: TimeOfDay = 'DAWN';
   private readonly launchSite: Phaser.GameObjects.TileSprite;
   private readonly launchSiteFar: Phaser.GameObjects.TileSprite;
   private readonly siteGroundGfx: Phaser.GameObjects.Graphics;
@@ -163,13 +177,14 @@ export class WorldRenderer {
     // Backdrop layers sit below everything else (world, HUD and labels) so nothing is ever covered by the sky or Moon.
     this.skyGfx = scene.add.graphics();
     this.skyGfx?.setDepth?.(-3);
-    createDaySkyTexture(scene);
+    for (const time of TIMES_OF_DAY) createDaySkyTexture(scene, time);
     createLaunchSiteTexture(scene);
     createLaunchSiteFarTexture(scene);
-    this.daySky = scene.add.image(0, 0, DAY_SKY_KEY);
+    // A full-screen strip so the clouds can drift (the texture wraps sideways).
+    this.daySky = scene.add.tileSprite?.(0, 0, 1280, 720, daySkyKey(this.time));
     this.daySky?.setOrigin?.(0);
     this.daySky?.setDepth?.(-2);
-    this.daySky?.setScale?.(PIXEL);
+    this.daySky?.setTileScale?.(PIXEL, PIXEL);
     this.skyMoonSprite = scene.add.image(0, 0, GAME_ASSETS.UI_MOON_BIG.key);
     this.skyMoonSprite?.setVisible?.(false);
     this.skyMoonSprite?.setDepth?.(-1);
@@ -195,9 +210,20 @@ export class WorldRenderer {
     this.launchSite = scene.add.tileSprite?.(0, 0, 1280, SITE_SIZE.height, SITE_KEY);
     this.launchSite?.setOrigin?.(0, 0);
     this.launchSite?.setTileScale?.(PIXEL, PIXEL);
+    this.siteFxGfx = scene.add.graphics();
+    this.setTimeOfDay(this.time);
     this.worldGfx = scene.add.graphics();
     this.rocketGfx = scene.add.graphics();
     this.partSpritesContainer = scene.add.container(0, 0);
+  }
+
+  public setTimeOfDay(time: TimeOfDay): void {
+    this.time = time;
+    const look = TIME_LOOKS[time];
+    this.daySky?.setTexture?.(daySkyKey(time));
+    this.launchSite?.setTint?.(look.landTint);
+    this.launchSiteFar?.setTint?.(look.farTint);
+    this.lastSkyAltitude = -Infinity;
   }
 
   private ensureSmokeTexture(): void {
@@ -457,8 +483,10 @@ export class WorldRenderer {
       const g = this.skyGfx;
       g.clear();
       const air = this.camera.mode === 'ASCENT' ? Phaser.Math.Clamp(1 - y / WORLD.atmosphereTop, 0, 1) : 0;
-      const top = air > 0.5 ? lerpColor(WORLD_COLORS.skyHigh, WORLD_COLORS.skyLow, (air - 0.5) * 2) : lerpColor(WORLD_COLORS.space, WORLD_COLORS.skyHigh, air * 2);
-      const bottom = lerpColor(WORLD_COLORS.space, 0xb9dcf5, Math.pow(air, 0.7));
+      const look = TIME_LOOKS[this.time];
+      const high = lerpColor(WORLD_COLORS.space, look.skyLow, 0.6);
+      const top = air > 0.5 ? lerpColor(high, look.skyLow, (air - 0.5) * 2) : lerpColor(WORLD_COLORS.space, high, air * 2);
+      const bottom = lerpColor(WORLD_COLORS.space, look.horizon, Math.pow(air, 0.7));
       g.fillGradientStyle(top, top, bottom, bottom, 1);
       g.fillRect(0, 0, 1280, 720);
 
@@ -469,8 +497,10 @@ export class WorldRenderer {
 
     // Daylight pixel sky near the ground, fading out as the air thins.
     const air = this.camera.mode === 'ASCENT' ? Phaser.Math.Clamp(1 - y / WORLD.atmosphereTop, 0, 1) : 0;
+    const now = this.scene.time?.now ?? 0;
     this.daySky?.setVisible?.(air > 0);
     this.daySky?.setAlpha?.(Phaser.Math.Clamp((air - 0.55) / 0.4, 0, 1));
+    if (this.daySky) this.daySky.tilePositionX = now / 400;
 
     // Launch-site panorama pinned to the ground line, with plain dirt past its edges.
     const ground = this.toScreen(0, 0);
@@ -486,27 +516,176 @@ export class WorldRenderer {
     if (this.launchSite) this.launchSite.tilePositionX = tileX(ground.x);
     this.launchSiteFar?.setPosition?.(0, siteY);
     if (this.launchSiteFar) this.launchSiteFar.tilePositionX = tileX(640 + (ground.x - 640) * FAR_PARALLAX);
+    this.drawSiteLife(sim, ground.x, siteY, siteVisible, now);
     const g = this.siteGroundGfx;
     g?.clear?.();
     if (siteVisible && ground.y < 720) {
-      g?.fillStyle?.(0x8a5d36, 1);
+      const tint = TIME_LOOKS[this.time].landTint;
+      g?.fillStyle?.(multiplyColor(0x8a5d36, tint), 1);
       g?.fillRect?.(0, ground.y, 1280, 720 - ground.y);
-      g?.fillStyle?.(0x86c058, 1);
+      g?.fillStyle?.(multiplyColor(0x86c058, tint), 1);
       g?.fillRect?.(0, ground.y, 1280, PIXEL);
     }
 
     // During the climb the Moon hangs in the sky ahead and grows as you near it.
     if (this.camera.mode === 'ASCENT') {
       const k = Phaser.Math.Clamp(y / (MOON_CENTER.y - MOON.sphereOfInfluence), 0, 1);
-      const r = 26 + 210 * k * k;
-      const cx = 900 - Phaser.Math.Clamp(sim.state.x * 0.08, -200, 200) - 200 * k;
-      const cy = 230 - 120 * k;
+      // On the pad it is a small pale daytime Moon high in the top-right corner; it slides in and grows on the way up.
+      const r = 30 + 206 * k * k;
+      const cx = 1090 - Phaser.Math.Clamp(sim.state.x * 0.08, -200, 200) - 390 * k;
+      const cy = 118 - 8 * k;
+      const daylight = this.time === 'NIGHT' ? 0 : this.time === 'DUSK' ? 0.4 : 1;
       this.skyMoonSprite?.setPosition?.(cx, cy);
       this.skyMoonSprite?.setDisplaySize?.(r * 2, r * 2);
-      this.skyMoonSprite?.setAlpha?.(0.25 + 0.75 * (1 - air * 0.5));
+      this.skyMoonSprite?.setAlpha?.(Phaser.Math.Clamp(1 - air * daylight * 0.55, 0.4, 1));
       this.skyMoonSprite?.setVisible?.(true);
     } else {
       this.skyMoonSprite?.setVisible?.(false);
+    }
+  }
+
+  /**
+   * The subtle moving parts of the spaceport, drawn over the painted panorama in its own
+   * pixel grid: flags flapping, glints on the sea, a few birds, steam at the pad and,
+   * after dark, the lamps.
+   */
+  private drawSiteLife(sim: FlightSim, groundX: number, siteY: number, visible: boolean, now: number): void {
+    const g = this.siteFxGfx;
+    g?.clear?.();
+    if (!g || !visible) return;
+    const look = TIME_LOOKS[this.time];
+    const tint = look.landTint;
+    const dark = this.time === 'NIGHT' || this.time === 'DUSK';
+    // Panorama pixel (column, row) → screen.
+    const sx = (col: number) => Math.round(groundX + (col - PAD_COLUMN) * PIXEL);
+    const sy = (row: number) => siteY + row * PIXEL;
+    const dot = (col: number, row: number, color: number, alpha = 1, w = 1, h = 1) => {
+      g.fillStyle(color, alpha);
+      g.fillRect(sx(col), sy(row), w * PIXEL, h * PIXEL);
+    };
+
+    // Flags: each column of cloth bobs on a travelling wave.
+    for (const [i, f] of COMPLEX.flags.entries()) {
+      for (let c = 1; c <= 7; c++) {
+        const wave = Math.round(Math.sin(now / 160 - c * 0.9 + i * 2) * Math.min(1, c / 3));
+        const shade = (c + wave) % 3 === 0 ? 0.82 : 1;
+        dot(f.x + c, f.top + 1 + wave, multiplyColor(lerpColor(f.color, 0x000000, 1 - shade), tint), 1, 1, 4);
+      }
+    }
+
+    // Glints on the sea: a few pixels that wink in and out (fewer and bluer at night).
+    const firstCol = PAD_COLUMN + Math.floor(-groundX / PIXEL);
+    for (let k = 0; k < 40; k++) {
+      const cycle = Math.floor(now / 900 + k * 0.37);
+      const col = firstCol + Math.floor(hash(k, cycle) * (1280 / PIXEL));
+      if (!isSeaColumn(col)) continue;
+      const row = HORIZON_ROW + 2 + Math.floor(hash(cycle, k) ** 2 * 40);
+      const life = (now / 900 + k * 0.37) % 1;
+      const a = Math.sin(life * Math.PI) * (this.time === 'NIGHT' ? 0.45 : 0.85);
+      dot(col, row, this.time === 'NIGHT' ? 0x9fb8e8 : 0xffffff, a, row - HORIZON_ROW > 14 ? 2 : 1, 1);
+    }
+
+    // Birds (not at night): small Vs gliding out to sea, flapping now and then.
+    if (this.time !== 'NIGHT') {
+      for (let b = 0; b < 3; b++) {
+        const span = 1280 + 200;
+        const x = ((now / (55 + b * 9) + b * 470) % span) - 100;
+        const y = siteY + (HORIZON_ROW - 34 - b * 7) * PIXEL + Math.sin(now / 900 + b) * 8;
+        const flap = Math.sin(now / 140 + b * 2) > 0.3;
+        g.fillStyle(multiplyColor(0x2a2f3a, tint), 0.9);
+        g.fillRect(x - 8, y + (flap ? -4 : 0), 4, 4);
+        g.fillRect(x - 4, y, 4, 4);
+        g.fillRect(x, y, 4, 4);
+        g.fillRect(x + 4, y + (flap ? -4 : 0), 4, 4);
+      }
+    }
+
+    // Steam venting either side of the pad while it waits to launch.
+    if (sim.phase === 'PRELAUNCH') {
+      for (let k = 0; k < 10; k++) {
+        const life = (now / 2200 + k / 10) % 1;
+        const side = k % 2 === 0 ? -1 : 1;
+        const col = PAD_COLUMN + side * (27 + life * 10 + hash(k) * 3);
+        const row = SITE_GROUND_ROW - 2 - life * 14;
+        const size = 1 + Math.floor(life * 3);
+        dot(Math.round(col), Math.round(row), multiplyColor(0xf4f6f8, lerpColor(tint, 0xffffff, 0.4)), 0.55 * (1 - life), size, size);
+      }
+    }
+
+    // After dark: lit lamps on the masts, light pools on the pad, a beacon on the lighthouse.
+    if (dark) {
+      const strength = this.time === 'NIGHT' ? 1 : 0.55;
+      for (const f of COMPLEX.floods) {
+        dot(f.x - 2, f.top + 1, 0xfff3c4, strength, 5, 1);
+        g.fillStyle(0xfff3c4, 0.08 * strength);
+        g.fillTriangle(sx(f.x), sy(f.top + 2), sx(PAD_COLUMN - 26), sy(SITE_GROUND_ROW), sx(PAD_COLUMN + 26), sy(SITE_GROUND_ROW));
+      }
+      const beam = 0.5 + 0.5 * Math.sin(now / 700);
+      const lh = COMPLEX.lighthouse;
+      dot(lh.x - 1, lh.top + 3, 0xffe9a0, 0.6 + 0.4 * beam, 3, 2);
+      g.fillStyle(0xffe9a0, 0.1 * strength * beam);
+      g.fillTriangle(sx(lh.x + 1), sy(lh.top + 4), sx(lh.x + 90), sy(lh.top - 6), sx(lh.x + 90), sy(lh.top + 12));
+    }
+  }
+
+  /** Concrete pad with a flame trench, and a red lattice gantry whose arm holds the rocket's nose until launch. */
+  private drawPad(g: Phaser.GameObjects.Graphics, sim: FlightSim, scale: number): void {
+    const tint = TIME_LOOKS[this.time].landTint;
+    const c = (color: number) => multiplyColor(color, lerpColor(tint, 0xffffff, 0.35));
+    const box = (x0: number, y0: number, x1: number, y1: number, color: number) => {
+      const a = this.toScreen(x0, y0);
+      const b = this.toScreen(x1, y1);
+      g.fillStyle(color, 1);
+      g.fillRect(Math.round(Math.min(a.x, b.x)), Math.round(Math.min(a.y, b.y)), Math.max(PIXEL, Math.round(Math.abs(b.x - a.x))), Math.max(PIXEL, Math.round(Math.abs(b.y - a.y))));
+    };
+    const px = PIXEL / scale; // one art pixel in metres
+
+    // Slab: lit top edge, body, dark trench under the engines, hazard stripes at both ends.
+    box(-5, 0, 5, -1.1, c(0x9d998f));
+    box(-5, 0, 5, -px, c(0xd9d5ca));
+    box(-1.2, -px, 1.2, -1.1, c(0x2e2b28));
+    for (let i = 0; i < 4; i++) {
+      box(-5 + i * 0.5, -0.5, -5 + i * 0.5 + 0.25, -0.75, c(i % 2 ? 0x2e2b28 : 0xffc23d));
+      box(4.75 - i * 0.5, -0.5, 4.75 - i * 0.5 + 0.25, -0.75, c(i % 2 ? 0x2e2b28 : 0xffc23d));
+    }
+
+    // Where the rocket stands: measured once it is on the pad, then fixed for the climb.
+    if (sim.phase === 'PRELAUNCH' || !this.padRig) {
+      const com = sim.com;
+      const visual = this.camera.rocketScale / this.camera.scale;
+      let minU = Infinity;
+      let maxA = -Infinity;
+      for (const p of sim.vehicle.parts) {
+        minU = Math.min(minU, (p.u - com.u) * visual);
+        maxA = Math.max(maxA, (p.a - com.a) * visual);
+      }
+      if (Number.isFinite(minU)) this.padRig = { left: sim.state.x + minU - 0.5 * visual, top: sim.state.y + maxA + 0.5 * visual };
+    }
+    const rig = this.padRig;
+    if (!rig) return;
+
+    // Gantry: two rails, rungs every metre, a zigzag brace, a cap and a blinking red light.
+    const right = rig.left - 0.5;
+    const left = right - 1.1;
+    const height = Math.max(4, Math.ceil(rig.top + 1.2));
+    const red = c(0xd8432f);
+    const redDark = c(0x9c2a1f);
+    box(left, 0, left + px, height, redDark);
+    box(right - px, 0, right, height, red);
+    for (let h = 1; h < height; h++) box(left, h, right, h - px, red);
+    for (let h = 0; h < height; h += 0.25) {
+      const t = (h % 2) / 2;
+      const x = left + (t < 0.5 ? t * 2 : 2 - t * 2) * (right - left - px);
+      box(x, h, x + px, h + px, redDark);
+    }
+    box(left - px, height, right + px, height - px * 2, c(0x5f6a78));
+    if (Math.floor((this.scene.time?.now ?? 0) / 600) % 2 === 0) box(left + 0.4, height + px * 2, left + 0.4 + px * 2, height, 0xff4040);
+
+    // Access arm to the top of the rocket, swung away once the rocket leaves.
+    if (sim.phase === 'PRELAUNCH') {
+      const armY = rig.top - 0.6;
+      box(right, armY, rig.left - px * 0.5, armY - px * 2, c(0x8e99a6));
+      box(right, armY - px * 2, right + px * 2, armY - px * 5, c(0x5f6a78));
     }
   }
 
@@ -547,23 +726,7 @@ export class WorldRenderer {
     }
 
     // The ground itself is the launch-site panorama (see drawSky); here just the pad and its tower.
-    if (s.y < 60) {
-      const pad = [this.toScreen(-5, 0), this.toScreen(5, 0), this.toScreen(5, -1), this.toScreen(-5, -1)];
-      g.fillStyle(0xb7b2a8, 1);
-      polygon(g, pad.flatMap(p => [p.x, p.y]), true);
-      const padTop = this.toScreen(-5, 0);
-      g.fillStyle(0xe2ddd3, 1);
-      g.fillRect(padTop.x, padTop.y, 10 * scale, PIXEL);
-      const towerBase = this.toScreen(-3.2, 0);
-      const towerTop = this.toScreen(-2.4, 9);
-      g.lineStyle(Math.max(1, scale * 0.12), 0xf97316, 1);
-      g.strokeRect(Math.min(towerBase.x, towerTop.x), Math.min(towerBase.y, towerTop.y), Math.abs(towerTop.x - towerBase.x), Math.abs(towerBase.y - towerTop.y));
-      for (let h = 1; h < 9; h += 1.5) {
-        const a = this.toScreen(-3.2, h);
-        const b = this.toScreen(-2.4, h + 1.5);
-        g.lineBetween(a.x, a.y, b.x, b.y);
-      }
-    }
+    if (s.y < 60) this.drawPad(g, sim, scale);
 
     // Speed streaks: still air (or dust, up high) whipping past shows how fast you're going.
     const halfW = 640 / scale;

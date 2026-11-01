@@ -1,5 +1,5 @@
 import { PART_DEFINITIONS } from './partDefinitions';
-import { HierarchicalRocketNode, PartType, PortDirection, RocketNode, RocketTelemetry } from './types';
+import { EngineKind, FuelKind, HierarchicalRocketNode, PartType, PayloadKind, PortDirection, RocketNode, RocketTelemetry } from './types';
 
 export interface AvailablePort {
   nodeId: string;
@@ -23,6 +23,8 @@ export interface AttachmentValidation {
 export class RocketTree {
   private rootId = '0';
   private nodes: Map<string, RocketNode> = new Map();
+  // Ids are never reused: removing a part must not let the next one collide with a survivor.
+  private nextId = 1;
   private gridOccupancy: Map<string, string> = new Map(); // "x,y" -> nodeId
 
   constructor(rootX = 7, rootY = 5) {
@@ -192,14 +194,14 @@ export class RocketTree {
     return { valid: false, reason: 'Part orientation incompatible with socket' };
   }
 
-  public attachPart(gridX: number, gridY: number, childType: PartType): { success: boolean; node?: RocketNode; reason?: string } {
+  public attachPart(gridX: number, gridY: number, childType: PartType, kind?: FuelKind | EngineKind): { success: boolean; node?: RocketNode; reason?: string } {
     const validation = this.validateAttachment(gridX, gridY, childType);
     if (!validation.valid || !validation.parentNode || !validation.parentPort) {
       return { success: false, reason: validation.reason || 'Invalid attachment' };
     }
 
     const def = PART_DEFINITIONS[childType];
-    const newId = String(this.nodes.size);
+    const newId = String(this.nextId++);
 
     const newNode: RocketNode = {
       id: newId,
@@ -210,6 +212,8 @@ export class RocketTree {
       parentPort: validation.parentPort,
       childrenIds: [],
       finOrientation: validation.finOrientation,
+      ...(childType === 'FUEL_TANK' && kind ? { fuelKind: kind as FuelKind } : {}),
+      ...(childType === 'ENGINE' && kind ? { engineKind: kind as EngineKind } : {}),
       mass: def.mass,
       fuel: def.fuel,
       thrust: def.thrust
@@ -220,6 +224,12 @@ export class RocketTree {
     validation.parentNode.childrenIds.push(newId);
 
     return { success: true, node: newNode };
+  }
+
+  /** Swap what sits in the root slot (crew cockpit, satellite or rover). */
+  public setPayload(payload: PayloadKind): void {
+    const root = this.nodes.get(this.rootId);
+    if (root) root.payload = payload;
   }
 
   public removeNode(id: string): { success: boolean; reason?: string } {

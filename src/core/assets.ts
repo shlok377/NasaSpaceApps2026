@@ -1,11 +1,17 @@
 import type Phaser from 'phaser';
-import { PartType } from './types';
+import { EngineKind, FuelKind, PartType, PayloadKind } from './types';
 
 export const GAME_ASSETS = {
   // Rocket Parts
   PART_COCKPIT: { key: 'part_cockpit', path: 'assets/cockpit.png' },
   PART_FUEL: { key: 'part_fuel', path: 'assets/fuel.png' },
   PART_FUEL_EMPTY: { key: 'part_fuel_empty', path: 'assets/fuel_empty.png' },
+  PART_FUEL_GREEN: { key: 'part_fuel_green', path: 'assets/fuel_green.png' },
+  PART_FUEL_PURPLE: { key: 'part_fuel_purple', path: 'assets/fuel_purple.png' },
+  PART_ENGINE_TWIN: { key: 'part_engine_twin', path: 'assets/engine_twin.png' },
+  PART_ENGINE_LANDER: { key: 'part_engine_lander', path: 'assets/engine_lander.png' },
+  PART_SATELLITE: { key: 'part_satellite', path: 'assets/satellite.png' },
+  PART_ROVER: { key: 'part_rover', path: 'assets/rover.png' },
   PART_FUEL_TRANSPARENT: { key: 'part_fuel_transparent', path: 'assets/fuel_transparent.png' },
   PART_ENGINE: { key: 'part_thrust', path: 'assets/thrust.png' },
   PART_NOSE_CONE: { key: 'part_tip', path: 'assets/tip.png' },
@@ -71,17 +77,24 @@ export function preloadGameAssets(scene: Phaser.Scene): void {
 export function getPartTextureKey(
   type: PartType,
   finOrientation?: 'LEFT' | 'RIGHT',
-  fuel?: number
+  fuel?: number,
+  kind?: FuelKind | EngineKind | PayloadKind
 ): string {
   switch (type) {
     case 'COCKPIT':
+      if (kind === 'SATELLITE') return GAME_ASSETS.PART_SATELLITE.key;
+      if (kind === 'ROVER') return GAME_ASSETS.PART_ROVER.key;
       return GAME_ASSETS.PART_COCKPIT.key;
     case 'FUEL_TANK':
       if (typeof fuel === 'number' && fuel <= 0.001) {
         return GAME_ASSETS.PART_FUEL_EMPTY.key;
       }
+      if (kind === 'GREEN') return GAME_ASSETS.PART_FUEL_GREEN.key;
+      if (kind === 'PURPLE') return GAME_ASSETS.PART_FUEL_PURPLE.key;
       return GAME_ASSETS.PART_FUEL.key;
     case 'ENGINE':
+      if (kind === 'TWIN') return GAME_ASSETS.PART_ENGINE_TWIN.key;
+      if (kind === 'LANDER') return GAME_ASSETS.PART_ENGINE_LANDER.key;
       return GAME_ASSETS.PART_ENGINE.key;
     case 'NOSE_CONE':
       return GAME_ASSETS.PART_NOSE_CONE.key;

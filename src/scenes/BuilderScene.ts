@@ -2,8 +2,8 @@ import Phaser from 'phaser';
 import { RocketTree } from '../core/RocketTree';
 import { currentMission, rocketCost } from '../game/missions';
 import { loadProgress, saveProgress, withGrant } from '../game/progress';
-import { PART_DEFINITIONS } from '../core/partDefinitions';
-import { PartType, PortDirection, RocketNode } from '../core/types';
+import { ENGINE_KINDS, FUEL_KINDS, PART_DEFINITIONS, PAYLOADS, partCost } from '../core/partDefinitions';
+import { EngineKind, FuelKind, PartType, PayloadKind, PortDirection, RocketNode } from '../core/types';
 import { ParticleManager } from '../particles';
 import { preloadGameAssets, getPartTextureKey, GAME_ASSETS } from '../core/assets';
 import { PX, drawPixelPanel, drawSparkle, pixelBody, pixelTitle } from '../ui/pixel';
@@ -15,7 +15,42 @@ interface PaletteBay {
   container: Phaser.GameObjects.Container;
   bgGfx: Phaser.GameObjects.Graphics;
   hotkeyNum: string;
+  icon: Phaser.GameObjects.Image;
+  name: Phaser.GameObjects.Text;
+  price: Phaser.GameObjects.Text;
+  chips?: Phaser.GameObjects.Graphics;
 }
+
+/** Parts with a picker of looks: fuel tanks (fuel type), engines (engine type) and the root slot (payload). */
+type VariantPart = 'FUEL_TANK' | 'ENGINE' | 'COCKPIT';
+type PartKind = FuelKind | EngineKind | PayloadKind;
+const VARIANTS: Record<VariantPart, Array<{ kind: PartKind; label: string; color: number; extraCost: number; description: string }>> = {
+  COCKPIT: (Object.keys(PAYLOADS) as PayloadKind[]).map(kind => ({
+    kind,
+    ...PAYLOADS[kind],
+    label: kind === 'CREW' ? 'COCKPIT' : PAYLOADS[kind].label
+  })),
+  FUEL_TANK: (Object.keys(FUEL_KINDS) as FuelKind[]).map(kind => ({ kind, ...FUEL_KINDS[kind] })),
+  ENGINE: (Object.keys(ENGINE_KINDS) as EngineKind[]).map(kind => ({
+    kind,
+    ...ENGINE_KINDS[kind],
+    label: kind === 'STANDARD' ? 'ENGINE' : kind === 'TWIN' ? 'TWIN ENG' : ENGINE_KINDS[kind].label
+  }))
+};
+const isVariantPart = (type: PartType): type is VariantPart => type in VARIANTS;
+/** Variant swatches on a slot, in slot-local coordinates (centre of the slot is 0,0). */
+const CHIP = 12;
+const CHIP_GAP = 4;
+const chipX = (i: number) => SLOT_W / 2 - 12 - (2 - i) * (CHIP + CHIP_GAP) - CHIP;
+const CHIP_Y = 2;
+/** Flyout of full-size variants that opens beside a fuel tank / engine slot on hover. */
+const CARD_W = 92;
+const CARD_H = 168;
+const CARD_GAP = 8;
+/** How far the hovered card rises out of the row. */
+const CARD_LIFT = 14;
+const FAN_W = CARD_W * 3 + CARD_GAP * 2;
+const cardX = (i: number) => i * (CARD_W + CARD_GAP);
 
 const SIDE_X = 20;
 const SIDE_W = 240;
@@ -32,15 +67,15 @@ export class BuilderScene extends Phaser.Scene {
   public static readonly GRID_ROWS = 13;
   public static readonly CELL_SIZE = 48;
   /** Overall opacity of the glass panes over the build bay. */
-  private static readonly GLASS_OPACITY = 0.4;
+  private static readonly GLASS_OPACITY = 1;
 
-  public readonly hudHeight = 300;
+  public readonly hudHeight = 222;
   public readonly hudY = PANEL_TOP;
 
   private rocketTree!: RocketTree;
   private sceneryGraphics!: Phaser.GameObjects.Graphics;
   private gridGraphics!: Phaser.GameObjects.Graphics;
-  private glassGraphics!: Phaser.GameObjects.Graphics;
+  private glassImage!: Phaser.GameObjects.Image;
   private blocksContainer!: Phaser.GameObjects.Container;
   private socketsContainer!: Phaser.GameObjects.Container;
   private ghostContainer!: Phaser.GameObjects.Container;
@@ -58,10 +93,16 @@ export class BuilderScene extends Phaser.Scene {
   public paletteBays: PaletteBay[] = [];
   public particleManager!: ParticleManager;
   private hoveredBay: PartType | null = null;
+  /** Current look for each variant part; COCKPIT is what sits in the root slot. */
+  private partKinds: Record<VariantPart, PartKind> = { COCKPIT: 'CREW', FUEL_TANK: 'STANDARD', ENGINE: 'STANDARD' };
+  private flyout!: Phaser.GameObjects.Container;
+  private flyoutFor: VariantPart | null = null;
+  private flyoutRect = new Phaser.Geom.Rectangle();
+  private flyCards: Array<{ kind: PartKind; card: Phaser.GameObjects.Container; frame: Phaser.GameObjects.Graphics }> = [];
+  private flyHoverKind: PartKind | null = null;
+  private payloadTag?: Phaser.GameObjects.Container;
 
   // HUD objects
-  private statusChipBg!: Phaser.GameObjects.Graphics;
-  private hudStatusText!: Phaser.GameObjects.Text;
   private statValues: Record<'mass' | 'thrust' | 'fuel' | 'twr', Phaser.GameObjects.Text> = {} as never;
   private gaugeNeedle!: Phaser.GameObjects.Image;
   private warningText!: Phaser.GameObjects.Text;
@@ -100,7 +141,7 @@ export class BuilderScene extends Phaser.Scene {
     this.sceneryGraphics = this.add.graphics();
     this.drawScenery();
     this.gridGraphics = this.add.graphics();
-    this.glassGraphics = this.add.graphics().setAlpha(BuilderScene.GLASS_OPACITY);
+    this.glassImage = this.add.image(0, 0, '__DEFAULT').setOrigin(0).setAlpha(BuilderScene.GLASS_OPACITY);
     this.blocksContainer = this.add.container(0, 0);
     this.socketsContainer = this.add.container(0, 0);
     this.ghostContainer = this.add.container(0, 0);
@@ -114,6 +155,7 @@ export class BuilderScene extends Phaser.Scene {
     this.refreshEconomy();
     this.renderRocket();
     this.setupInputHandlers();
+    this.selectPaletteItem('STRUCTURAL');
 
     // 4. Initial sync and global debug handle
     this.syncExportableState('[RocketBuilder] Initialized rocket:');
@@ -188,8 +230,7 @@ export class BuilderScene extends Phaser.Scene {
     // See-through bay so the planet shows behind the build area, with a hard pixel frame.
     g.fillStyle(0x0b0910, 0.22);
     g.fillRect(x0, y0, width, height);
-    this.glassGraphics.clear();
-    this.drawGlassPanes(this.glassGraphics, x0, y0);
+    this.drawGlass(x0, y0, width, height);
     g.fillStyle(0x01020a, 1);
     g.fillRect(x0 - 9, y0 - 6, 3, height + 12);
     g.fillRect(x0 + width + 6, y0 - 6, 3, height + 12);
@@ -205,36 +246,55 @@ export class BuilderScene extends Phaser.Scene {
 
   }
 
-  /** Every grid cell is a Minecraft-style glass pane: pale tint, light pixel rim and a diagonal glint. */
-  private drawGlassPanes(g: Phaser.GameObjects.Graphics, x0: number, y0: number): void {
-    const size = BuilderScene.CELL_SIZE;
-    const u = 3; // one glass "texel"
-    for (let col = 0; col < BuilderScene.GRID_COLS; col++) {
-      for (let row = 0; row < BuilderScene.GRID_ROWS; row++) {
-        const x = x0 + col * size;
-        const y = y0 + row * size;
-        g.fillStyle(0xbfe6f2, 0.12);
-        g.fillRect(x, y, size, size);
-        // Rim: bright top/left edge, softer bottom/right edge.
-        g.fillStyle(0xe6f8ff, 0.8);
-        g.fillRect(x, y, size, u);
-        g.fillRect(x, y, u, size);
-        g.fillStyle(0x9fcfe0, 0.6);
-        g.fillRect(x, y + size - u, size, u);
-        g.fillRect(x + size - u, y, u, size);
-        // Corner studs where the panes meet.
-        g.fillStyle(0xffffff, 1);
-        g.fillRect(x, y, u, u);
-        // Diagonal glint (a few texels), shifted per cell so the glass doesn't look tiled.
-        const shift = ((col * 7 + row * 3) % 4) * u;
-        g.fillStyle(0xffffff, 0.8);
-        for (let i = 0; i < 4; i++) g.fillRect(x + 9 + shift + i * u, y + 24 - i * u, u, u);
-        if ((col + row) % 3 === 0) {
-          g.fillStyle(0xffffff, 0.25);
-          for (let i = 0; i < 2; i++) g.fillRect(x + 27 + i * u, y + 33 - i * u, u, u);
-        }
+  /**
+   * One sheet of glass over the whole bay, painted once at 1/3 scale (3 px texels, like the rest of the art):
+   * a soft sheen from the top, two wide feathered reflection bands across the diagonal and a faint lit rim.
+   */
+  private drawGlass(x0: number, y0: number, w: number, h: number): void {
+    const u = 3;
+    const key = 'builder_glass';
+    const tw = Math.round(w / u);
+    const th = Math.round(h / u);
+    if (!this.textures.exists(key)) {
+      const tex = this.textures.createCanvas(key, tw, th);
+      const ctx = tex?.getContext();
+      if (tex && ctx) {
+        // Cool tint, slightly stronger near the top where the glass catches the sky.
+        const sheen = ctx.createLinearGradient(0, 0, 0, th);
+        sheen.addColorStop(0, 'rgba(214, 238, 255, 0.10)');
+        sheen.addColorStop(0.45, 'rgba(214, 238, 255, 0.03)');
+        sheen.addColorStop(1, 'rgba(214, 238, 255, 0.02)');
+        ctx.fillStyle = sheen;
+        ctx.fillRect(0, 0, tw, th);
+
+        // Reflection bands run perpendicular to the top-left → bottom-right diagonal.
+        const band = (from: number, to: number, peak: number) => {
+          const g = ctx.createLinearGradient(0, 0, tw, th);
+          const mid = (from + to) / 2;
+          g.addColorStop(0, 'rgba(255, 255, 255, 0)');
+          g.addColorStop(from, 'rgba(255, 255, 255, 0)');
+          g.addColorStop(mid, `rgba(255, 255, 255, ${peak})`);
+          g.addColorStop(to, 'rgba(255, 255, 255, 0)');
+          g.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          ctx.fillStyle = g;
+          ctx.fillRect(0, 0, tw, th);
+        };
+        band(0.14, 0.34, 0.09);
+        band(0.36, 0.42, 0.06);
+        band(0.7, 0.8, 0.035);
+
+        // Lit rim: top/left catch the light, bottom/right fall into shade.
+        ctx.fillStyle = 'rgba(235, 248, 255, 0.28)';
+        ctx.fillRect(0, 0, tw, 1);
+        ctx.fillRect(0, 0, 1, th);
+        ctx.fillStyle = 'rgba(160, 205, 225, 0.12)';
+        ctx.fillRect(0, th - 1, tw, 1);
+        ctx.fillRect(tw - 1, 0, 1, th);
+        tex.refresh();
+        tex.setFilter(Phaser.Textures.FilterMode.NEAREST);
       }
     }
+    this.glassImage.setTexture(key).setPosition(x0, y0).setDisplaySize(w, h);
   }
 
   private createTitle(): void {
@@ -257,10 +317,7 @@ export class BuilderScene extends Phaser.Scene {
     const panel = this.add.graphics();
     drawPixelPanel(panel, x, y, w, this.hudHeight);
     const title = pixelTitle(this, x + 16, y + 16, 'TELEMETRY', 12);
-
-    this.statusChipBg = this.add.graphics();
-    this.hudStatusText = pixelTitle(this, x + 36, y + 46, '', 10, PX.text.red);
-    this.hudContainer.add([panel, title, this.statusChipBg, this.hudStatusText]);
+    this.hudContainer.add([panel, title]);
 
     const rows: Array<[keyof BuilderScene['statValues'], string]> = [
       ['mass', 'MASS'],
@@ -268,7 +325,7 @@ export class BuilderScene extends Phaser.Scene {
       ['fuel', 'FUEL']
     ];
     rows.forEach(([key, label], i) => {
-      const ry = y + 76 + i * 28;
+      const ry = y + 42 + i * 28;
       const l = pixelBody(this, x + 16, ry, label, 24, PX.text.muted);
       const v = pixelBody(this, x + w - 16, ry, '', 24, PX.text.white).setOrigin(1, 0);
       this.statValues[key] = v;
@@ -277,32 +334,33 @@ export class BuilderScene extends Phaser.Scene {
 
     // Lift gauge: red = too heavy to leave the pad, green = plenty of push.
     const gaugeX = x + 84;
-    const gaugeBottom = y + 238;
+    const gaugeBottom = y + 206;
     const gauge = this.add.image(gaugeX, gaugeBottom, GAME_ASSETS.UI_FUEL_GAUGE.key).setScale(3).setOrigin(0.5, 1);
     this.gaugeNeedle = this.add.image(gaugeX, gaugeBottom - 9, GAME_ASSETS.UI_FUEL_NEEDLE.key).setScale(3).setOrigin(0.5, 0.85);
-    const liftLabel = pixelBody(this, x + w - 16, y + 172, 'LIFT', 22, PX.text.muted).setOrigin(1, 0);
-    const twrValue = pixelBody(this, x + w - 16, y + 194, '', 34, PX.text.white).setOrigin(1, 0);
+    // The LIFT label turns into the warning when the rocket can't leave the pad.
+    this.warningText = pixelBody(this, x + w - 16, y + 140, 'LIFT', 22, PX.text.muted).setOrigin(1, 0);
+    const twrValue = pixelBody(this, x + w - 16, y + 162, '', 34, PX.text.white).setOrigin(1, 0);
     this.statValues.twr = twrValue;
-    this.warningText = pixelBody(this, x + w / 2, y + 252, '', 20, PX.text.red).setOrigin(0.5, 0);
-    this.hudContainer.add([gauge, this.gaugeNeedle, liftLabel, twrValue, this.warningText]);
+    this.hudContainer.add([gauge, this.gaugeNeedle, this.warningText, twrValue]);
 
-    this.createLaunchButton(x, y + this.hudHeight + 14, w, 84);
-    this.createControlsPanel(x, y + this.hudHeight + 112, w, PANEL_BOTTOM - (y + this.hudHeight + 112));
+    const launchY = y + this.hudHeight + 12;
+    this.createLaunchButton(x, launchY, w, 84);
+    const bankY = launchY + 84 + 12;
+    this.createBankPanel(x, bankY, w, 72);
+    const controlsY = bankY + 72 + 12;
+    this.createControlsPanel(x, controlsY, w, PANEL_BOTTOM - controlsY);
   }
 
-  private drawStatusChip(ready: boolean): void {
-    const g = this.statusChipBg;
-    const x = SIDE_X + 14;
-    const y = PANEL_TOP + 38;
-    g.clear();
-    drawPixelPanel(g, x, y, SIDE_W - 28, 26, {
-      fill: ready ? 0x0b3320 : 0x330b14,
-      border: ready ? PX.green : PX.red,
-      highlight: ready ? PX.green : PX.red,
-      u: 2
-    });
-    g.fillStyle(ready ? PX.green : PX.red, 1);
-    g.fillRect(x + 10, y + 9, 8, 8);
+  /** Bank card with a pixel coin: what you have and what the rocket costs. */
+  private createBankPanel(x: number, y: number, w: number, h: number): void {
+    const panel = this.add.graphics();
+    drawPixelPanel(panel, x, y, w, h);
+    const coin = this.add.image(x + 30, y + h / 2, GAME_ASSETS.UI_COIN.key).setDisplaySize(32, 32);
+    const bankLabel = pixelBody(this, x + 54, y + 8, 'BANK', 22, PX.text.muted);
+    this.bankText = pixelBody(this, x + w - 16, y + 8, '', 22, PX.text.gold).setOrigin(1, 0);
+    const costLabel = pixelBody(this, x + 54, y + 38, 'ROCKET', 22, PX.text.muted);
+    this.costText = pixelBody(this, x + w - 16, y + 38, '', 22, PX.text.white).setOrigin(1, 0);
+    this.hudContainer.add([panel, coin, bankLabel, this.bankText, costLabel, this.costText]);
   }
 
   private setGauge(twr: number): void {
@@ -363,6 +421,7 @@ export class BuilderScene extends Phaser.Scene {
 
     const rows: Array<[string, string]> = [
       ['1-5', 'PICK PART'],
+      ['C', 'COCKPIT'],
       ['CLICK', 'PLACE'],
       ['R-CLICK', 'REMOVE'],
       ['ESC', 'CANCEL'],
@@ -370,7 +429,7 @@ export class BuilderScene extends Phaser.Scene {
     ];
     const keys = this.add.graphics();
     this.hudContainer.add(keys);
-    const rowGap = Math.min(30, (h - 52) / rows.length);
+    const rowGap = Math.min(30, (h - 48) / rows.length);
     rows.forEach(([key, action], i) => {
       const ry = y + 44 + i * rowGap;
       const keyText = pixelBody(this, x + 24, ry + 1, key, 20, PX.text.accent);
@@ -387,7 +446,7 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   // ---------------------------------------------------------------------------
-  // Right column: mission, bank, parts inventory
+  // Right column: mission, parts inventory
   // ---------------------------------------------------------------------------
 
   private createPartsPanel(): void {
@@ -404,26 +463,15 @@ export class BuilderScene extends Phaser.Scene {
     this.rewardText = pixelBody(this, x + 16, missionY + missionH - 34, '', 22, PX.text.gold);
     this.hudContainer.add([missionPanel, missionTitle, this.missionText, this.rewardText]);
 
-    // Bank card with a pixel coin
-    const bankY = missionY + missionH + 12;
-    const bankH = 76;
-    const bankPanel = this.add.graphics();
-    drawPixelPanel(bankPanel, x, bankY, w, bankH);
-    const coin = this.add.image(x + 30, bankY + 38, GAME_ASSETS.UI_COIN.key).setDisplaySize(32, 32);
-    const bankLabel = pixelBody(this, x + 54, bankY + 10, 'BANK', 22, PX.text.muted);
-    this.bankText = pixelBody(this, x + w - 16, bankY + 10, '', 22, PX.text.gold).setOrigin(1, 0);
-    const costLabel = pixelBody(this, x + 54, bankY + 40, 'ROCKET', 22, PX.text.muted);
-    this.costText = pixelBody(this, x + w - 16, bankY + 40, '', 22, PX.text.white).setOrigin(1, 0);
-    this.hudContainer.add([bankPanel, coin, bankLabel, this.bankText, costLabel, this.costText]);
-
     // Parts inventory
-    const partsY = bankY + bankH + 12;
+    const partsY = missionY + missionH + 12;
     const partsPanel = this.add.graphics();
     drawPixelPanel(partsPanel, x, partsY, w, PANEL_BOTTOM - partsY);
     const partsTitle = pixelTitle(this, x + 16, partsY + 14, 'PARTS', 12);
     this.hudContainer.add([partsPanel, partsTitle]);
 
     const bayConfigs: Array<{ type: PartType; label: string; hotkey: string; stat: string }> = [
+      { type: 'COCKPIT', label: 'COCKPIT', hotkey: 'C', stat: '' },
       { type: 'STRUCTURAL', label: 'BLOCK', hotkey: '1', stat: `${PART_DEFINITIONS.STRUCTURAL.mass} kg` },
       { type: 'NOSE_CONE', label: 'NOSE CONE', hotkey: '2', stat: 'less drag' },
       { type: 'ENGINE', label: 'ENGINE', hotkey: '3', stat: `${PART_DEFINITIONS.ENGINE.thrust} thrust` },
@@ -437,17 +485,25 @@ export class BuilderScene extends Phaser.Scene {
       const cy = partsY + 40 + idx * (SLOT_H + 6) + SLOT_H / 2;
       const bay = this.add.container(cx, cy);
       const bgGfx = this.add.graphics();
-      const icon = this.add.image(-SLOT_W / 2 + 64, 0, getPartTextureKey(cfg.type, 'LEFT')).setDisplaySize(48, 48);
+      const icon = this.add.image(-SLOT_W / 2 + 64, 0, this.partTexture(cfg.type, 'LEFT')).setDisplaySize(48, 48);
       const key = pixelBody(this, -SLOT_W / 2 + 19, 0, cfg.hotkey, 22, PX.text.accent).setOrigin(0.5);
       const name = pixelTitle(this, -SLOT_W / 2 + 98, -16, cfg.label, 10, PX.text.white);
       const price = pixelBody(this, -SLOT_W / 2 + 98, 0, `$${PART_DEFINITIONS[cfg.type].cost}`, 22, PX.text.gold);
-      const stat = pixelBody(this, SLOT_W / 2 - 10, 0, cfg.stat, 18, PX.text.muted).setOrigin(1, 0);
-      bay.add([bgGfx, icon, key, name, price, stat]);
+      bay.add([bgGfx, icon, key, name, price]);
+      // Variant parts trade the stat line for a row of colour chips (click one, or press the hotkey again).
+      let chips: Phaser.GameObjects.Graphics | undefined;
+      if (isVariantPart(cfg.type)) {
+        chips = this.add.graphics();
+        bay.add(chips);
+      } else {
+        bay.add(pixelBody(this, SLOT_W / 2 - 10, 0, cfg.stat, 18, PX.text.muted).setOrigin(1, 0));
+      }
       bay.setSize(SLOT_W, SLOT_H);
       bay.setInteractive(new Phaser.Geom.Rectangle(0, 0, SLOT_W, SLOT_H), Phaser.Geom.Rectangle.Contains);
 
       bay.on('pointerover', () => {
         if (this.game.canvas) this.game.canvas.style.cursor = 'pointer';
+        if (isVariantPart(cfg.type)) this.showFlyout(cfg.type);
         this.hoveredBay = cfg.type;
         this.updatePaletteSelectionUI();
       });
@@ -456,14 +512,19 @@ export class BuilderScene extends Phaser.Scene {
         this.updateCursorStyle(pointer);
         this.updatePaletteSelectionUI();
       });
-      bay.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-        if (pointer.button === 0) this.selectPaletteItem(cfg.type);
+      bay.on('pointerdown', (pointer: Phaser.Input.Pointer, localX: number, localY: number) => {
+        if (pointer.button !== 0) return;
+        const chip = isVariantPart(cfg.type) ? this.chipAt(localX - SLOT_W / 2, localY - SLOT_H / 2) : -1;
+        if (chip >= 0 && isVariantPart(cfg.type)) this.setPartKind(cfg.type, VARIANTS[cfg.type][chip].kind);
+        else this.selectPaletteItem(cfg.type);
       });
 
       this.hudContainer.add(bay);
-      this.paletteBays.push({ type: cfg.type, label: cfg.label, container: bay, bgGfx, hotkeyNum: cfg.hotkey });
+      this.paletteBays.push({ type: cfg.type, label: cfg.label, container: bay, bgGfx, hotkeyNum: cfg.hotkey, icon, name, price, chips });
     });
     this.updatePaletteSelectionUI();
+    this.refreshVariantBays();
+    this.flyout = this.add.container(0, 0).setDepth(40).setVisible(false);
   }
 
   private drawBayBg(gfx: Phaser.GameObjects.Graphics, isSelected: boolean, isHovered: boolean): void {
@@ -506,10 +567,6 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   private updateHud(telemetry: ReturnType<RocketTree['getTelemetry']>): void {
-    this.hudStatusText.setText(telemetry.valid ? 'FLIGHT READY' : 'INCOMPLETE');
-    this.hudStatusText.setColor(telemetry.valid ? PX.text.green : PX.text.red);
-    this.drawStatusChip(telemetry.valid);
-
     // TWR with the tanks full — what the rocket actually has to lift off the pad.
     const wetMass = telemetry.totalMass + telemetry.totalFuel;
     const wetTwr = wetMass > 0 ? telemetry.totalThrust / wetMass : 0;
@@ -518,9 +575,10 @@ export class BuilderScene extends Phaser.Scene {
     this.statValues.fuel.setText(`${telemetry.totalFuel} L`);
     this.statValues.twr.setText(wetTwr.toFixed(2)).setColor(wetTwr >= 1 ? PX.text.green : telemetry.totalThrust > 0 ? PX.text.red : PX.text.white);
     this.setGauge(wetTwr);
-    this.warningText.setText(wetTwr < 1 && telemetry.totalThrust > 0 ? 'TOO HEAVY TO LIFT OFF!' : '');
+    const tooHeavy = wetTwr < 1 && telemetry.totalThrust > 0;
+    this.warningText.setText(tooHeavy ? 'TOO HEAVY' : 'LIFT').setColor(tooHeavy ? PX.text.red : PX.text.muted);
 
-    const cost = rocketCost(this.rocketTree.getAllNodes().map(n => n.type));
+    const cost = rocketCost(this.rocketTree.getAllNodes());
     const affordable = cost <= this.money;
     this.bankText.setText(`$${this.money.toLocaleString()}`);
     this.costText.setText(`$${cost}`).setColor(affordable ? PX.text.white : PX.text.red);
@@ -539,8 +597,19 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   public selectPaletteItem(type: PartType): void {
+    // The root slot is never placed: its slot just swaps the payload.
+    if (type === 'COCKPIT') {
+      this.cyclePayload();
+      return;
+    }
     if (this.selectedPartType === type) {
-      this.deselectPart();
+      if (isVariantPart(type)) {
+        const list = VARIANTS[type];
+        const next = list[(list.findIndex(v => v.kind === this.partKinds[type]) + 1) % list.length];
+        this.setPartKind(type, next.kind);
+      } else {
+        this.deselectPart();
+      }
       return;
     }
 
@@ -548,6 +617,178 @@ export class BuilderScene extends Phaser.Scene {
     this.ghostContainer.setVisible(true);
     if (this.game.canvas) this.game.canvas.style.cursor = 'crosshair';
     this.updatePaletteSelectionUI();
+  }
+
+  /** Texture for a part in its current look; falls back to the plain sprite if that art isn't loaded. */
+  private partTexture(type: PartType, finOrientation?: 'LEFT' | 'RIGHT', kind?: FuelKind | EngineKind | PayloadKind): string {
+    const look = kind ?? (isVariantPart(type) ? this.partKinds[type] : undefined);
+    const key = getPartTextureKey(type, finOrientation, undefined, look);
+    return this.textures.exists(key) ? key : getPartTextureKey(type, finOrientation);
+  }
+
+  /** Price of a part type in a given look ($). */
+  private variantPrice(type: VariantPart, kind: PartKind): number {
+    if (type === 'COCKPIT') return partCost({ type, payload: kind as PayloadKind });
+    return partCost(type === 'FUEL_TANK' ? { type, fuelKind: kind as FuelKind } : { type, engineKind: kind as EngineKind });
+  }
+
+  /** Index of the variant chip under a slot-local point, or -1. */
+  private chipAt(x: number, y: number): number {
+    for (let i = 0; i < 3; i++) {
+      if (x >= chipX(i) - 2 && x <= chipX(i) + CHIP + 2 && y >= CHIP_Y - 2 && y <= CHIP_Y + CHIP + 2) return i;
+    }
+    return -1;
+  }
+
+  /** Pick a fuel / engine type (selects that part) or a payload (swaps the root slot), then refresh the slot. */
+  public setPartKind(type: VariantPart, kind: PartKind): void {
+    this.partKinds[type] = kind;
+    if (type === 'COCKPIT') this.applyPayload(kind as PayloadKind);
+    else if (this.selectedPartType !== type) this.selectPaletteItem(type);
+    this.refreshVariantBays();
+    if (this.flyoutFor === type) this.showFlyout(type);
+    this.updateGhostPreview(this.input.activePointer);
+  }
+
+  private refreshVariantBays(): void {
+    for (const bay of this.paletteBays) {
+      if (!isVariantPart(bay.type) || !bay.chips) continue;
+      const list = VARIANTS[bay.type];
+      const current = this.partKinds[bay.type];
+      bay.icon.setTexture(this.partTexture(bay.type, 'LEFT')).setDisplaySize(48, 48);
+      bay.name.setText(list.find(v => v.kind === current)?.label ?? bay.label);
+      bay.price.setText(`$${this.variantPrice(bay.type, current)}`);
+      const g = bay.chips;
+      g.clear();
+      list.forEach((v, i) => {
+        const x = chipX(i);
+        const on = v.kind === current;
+        g.fillStyle(0x01020a, 1);
+        g.fillRect(x - 2, CHIP_Y - 2, CHIP + 4, CHIP + 4);
+        g.fillStyle(on ? 0xffffff : PX.borderDim, 1);
+        g.fillRect(x - 1, CHIP_Y - 1, CHIP + 2, CHIP + 2);
+        g.fillStyle(v.color, on ? 1 : 0.55);
+        g.fillRect(x + 1, CHIP_Y + 1, CHIP - 2, CHIP - 2);
+      });
+    }
+  }
+
+  /** Fan out one card per look beside the slot (Slay the Spire style): art, name, one line and price. */
+  private showFlyout(type: VariantPart): void {
+    const bay = this.paletteBays.find(b => b.type === type);
+    if (!bay) return;
+    const keepHover = this.flyoutFor === type ? this.flyHoverKind : null;
+    this.flyoutFor = type;
+    const x = RIGHT_X + SIDE_W / 2 - SLOT_W / 2 - 18 - FAN_W;
+    const y = Math.round(Phaser.Math.Clamp(bay.container.y - CARD_H / 2, CARD_LIFT + 8, this.scale.height - CARD_H - 8));
+    this.flyoutRect.setTo(x, y - CARD_LIFT, FAN_W + 18, CARD_H + CARD_LIFT);
+    this.flyout.removeAll(true);
+    this.flyout.setPosition(x, y).setVisible(true);
+    this.flyCards = [];
+
+    VARIANTS[type].forEach((v, i) => {
+      const card = this.add.container(cardX(i), 0);
+      const frame = this.add.graphics();
+      const art = this.add.image(CARD_W / 2, 36, this.partTexture(type, 'LEFT', v.kind)).setDisplaySize(48, 48);
+      const name = pixelTitle(this, CARD_W / 2, 74, v.label, 8, Phaser.Display.Color.IntegerToColor(v.color).lighten(15).rgba).setOrigin(0.5, 0);
+      const about = pixelBody(this, CARD_W / 2, 88, v.description, 16, '#cfc6dd')
+        .setOrigin(0.5, 0)
+        .setAlign('center')
+        .setWordWrapWidth(CARD_W - 12)
+        .setLineSpacing(-5);
+      const price = pixelBody(this, CARD_W / 2 + 8, CARD_H - 26, `${this.variantPrice(type, v.kind)}`, 20, PX.text.gold).setOrigin(0.5, 0);
+      const coin = this.add.image(price.x - price.width / 2 - 9, CARD_H - 15, GAME_ASSETS.UI_COIN.key).setDisplaySize(12, 12);
+      card.add([frame, art, name, about, price, coin]);
+      this.flyout.add(card);
+      this.flyCards.push({ kind: v.kind, card, frame });
+    });
+    this.flyHoverKind = null;
+    this.setFlyoutHover(keepHover);
+  }
+
+  /** Lift the hovered card and light its border in its colour; the picked one wears a gold tag. */
+  private setFlyoutHover(kind: PartKind | null): void {
+    if (!this.flyoutFor) return;
+    this.flyHoverKind = kind;
+    const selected = this.partKinds[this.flyoutFor];
+    for (const { kind: k, card, frame } of this.flyCards) {
+      const v = VARIANTS[this.flyoutFor].find(e => e.kind === k)!;
+      const hovered = k === kind;
+      const g = frame;
+      g.clear();
+      // Drop shadow, hard black outline, then the border and card body.
+      g.fillStyle(0x000000, 0.35);
+      g.fillRect(4, 6, CARD_W, CARD_H);
+      g.fillStyle(0x000000, 1);
+      g.fillRect(-2, 0, CARD_W + 4, CARD_H);
+      g.fillRect(0, -2, CARD_W, CARD_H + 4);
+      g.fillStyle(hovered ? v.color : k === selected ? PX.gold : 0x3a3446, 1);
+      g.fillRect(0, 0, CARD_W, CARD_H);
+      g.fillStyle(0x1a1622, 1);
+      g.fillRect(3, 3, CARD_W - 6, CARD_H - 6);
+      // Art well, tinted faintly in the card's colour.
+      g.fillStyle(0x0b0a10, 1);
+      g.fillRect(8, 8, CARD_W - 16, 56);
+      g.fillStyle(v.color, hovered ? 0.16 : 0.07);
+      g.fillRect(8, 8, CARD_W - 16, 56);
+      // Price band.
+      g.fillStyle(0x0f0d15, 1);
+      g.fillRect(3, CARD_H - 32, CARD_W - 6, 29);
+      if (k === selected) {
+        g.fillStyle(PX.gold, 1);
+        g.fillRect(CARD_W - 22, -4, 18, 14);
+        g.fillStyle(0x3a2614, 1);
+        g.fillRect(CARD_W - 18, 3, 3, 3);
+        g.fillRect(CARD_W - 15, 5, 3, 3);
+        g.fillRect(CARD_W - 12, 2, 3, 3);
+        g.fillRect(CARD_W - 9, -1, 3, 3);
+      }
+      this.tweens.killTweensOf(card);
+      this.tweens.add({ targets: card, y: hovered ? -CARD_LIFT : 0, duration: 110, ease: 'Quad.easeOut' });
+    }
+  }
+
+  private hideFlyout(): void {
+    this.flyoutFor = null;
+    this.flyout.setVisible(false);
+  }
+
+  /** Card under the pointer in the open fan, or null (the hovered card counts at its lifted height). */
+  private flyoutKindAt(pointer: Phaser.Input.Pointer): PartKind | null {
+    if (!this.flyoutFor) return null;
+    const lx = pointer.worldX - this.flyout.x;
+    const ly = pointer.worldY - this.flyout.y;
+    for (const { kind, card } of this.flyCards) {
+      if (lx >= card.x && lx <= card.x + CARD_W && ly >= card.y && ly <= card.y + CARD_H + CARD_LIFT) return kind;
+    }
+    return null;
+  }
+
+  /** Swap what sits in the root slot: crew cockpit → satellite → rover. */
+  public cyclePayload(): void {
+    const list = VARIANTS.COCKPIT;
+    this.setPartKind('COCKPIT', list[(list.findIndex(v => v.kind === this.partKinds.COCKPIT) + 1) % list.length].kind);
+  }
+
+  private applyPayload(payload: PayloadKind): void {
+    const root = this.rocketTree.getRootNode();
+    this.rocketTree.setPayload(payload);
+    const block = this.blockDisplayMap.get(root.id);
+    const sprite = block?.list[0] as Phaser.GameObjects.Image | undefined;
+    sprite?.setTexture(this.partTexture('COCKPIT')).setDisplaySize(BuilderScene.CELL_SIZE, BuilderScene.CELL_SIZE);
+    if (block) {
+      block.setScale(1.15);
+      this.tweens.add({ targets: block, scaleX: 1, scaleY: 1, duration: 200, ease: 'Back.easeOut' });
+      const top = block.y - BuilderScene.CELL_SIZE / 2 - 6;
+      const v = VARIANTS.COCKPIT.find(e => e.kind === payload)!;
+      const name = pixelTitle(this, block.x, top - 20, `${v.label}  ${v.extraCost > 0 ? `+$${v.extraCost}` : 'FREE'}`, 10, PX.text.cream).setOrigin(0.5, 1);
+      const about = pixelBody(this, block.x, top, v.description, 18, PX.text.white).setOrigin(0.5, 1);
+      this.payloadTag?.destroy();
+      const tag = this.add.container(0, 0, [name, about]).setDepth(50);
+      this.payloadTag = tag;
+      this.tweens.add({ targets: tag, y: -18, alpha: 0, delay: 1600, duration: 500, onComplete: () => tag.destroy() });
+    }
+    this.syncExportableState();
   }
 
   public deselectPart(): void {
@@ -580,6 +821,7 @@ export class BuilderScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-THREE', () => this.selectPaletteItem('ENGINE'));
     this.input.keyboard?.on('keydown-FOUR', () => this.selectPaletteItem('FUEL_TANK'));
     this.input.keyboard?.on('keydown-FIVE', () => this.selectPaletteItem('FIN'));
+    this.input.keyboard?.on('keydown-C', () => this.cyclePayload());
 
     this.input.keyboard?.on('keydown-ESC', () => {
       this.deselectPart();
@@ -595,10 +837,28 @@ export class BuilderScene extends Phaser.Scene {
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (this.flyoutFor) {
+        const bay = this.paletteBays.find(b => b.type === this.flyoutFor);
+        const overBay = bay && Math.abs(pointer.worldX - bay.container.x) <= SLOT_W / 2 + 8 && Math.abs(pointer.worldY - bay.container.y) <= SLOT_H / 2;
+        if (!overBay && !this.flyoutRect.contains(pointer.worldX, pointer.worldY)) this.hideFlyout();
+        else {
+          const kind = this.flyoutKindAt(pointer);
+          if (kind !== this.flyHoverKind) this.setFlyoutHover(kind);
+        }
+      }
       this.updateGhostPreview(pointer);
     });
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      // The flyout sits over the build bay, so it gets the click first.
+      if (this.flyoutFor && this.flyoutRect.contains(pointer.worldX, pointer.worldY)) {
+        const kind = this.flyoutKindAt(pointer);
+        if (kind && pointer.button === 0) {
+          this.setPartKind(this.flyoutFor, kind);
+          this.setFlyoutHover(kind);
+        }
+        return;
+      }
       if (pointer.button === 2) {
         this.handleRightClick(pointer);
       } else if (pointer.button === 0) {
@@ -683,7 +943,9 @@ export class BuilderScene extends Phaser.Scene {
   private updateGhostPreview(pointer: Phaser.Input.Pointer): void {
     this.updateCursorStyle(pointer);
 
-    if (!this.selectedPartType || this.isOverSidePanels(pointer)) {
+    const overFlyout = this.flyoutFor !== null && this.flyoutRect.contains(pointer.worldX, pointer.worldY);
+    if (overFlyout && this.game.canvas) this.game.canvas.style.cursor = 'pointer';
+    if (!this.selectedPartType || this.isOverSidePanels(pointer) || overFlyout) {
       this.ghostContainer.setVisible(false);
       return;
     }
@@ -696,7 +958,7 @@ export class BuilderScene extends Phaser.Scene {
     this.ghostText.setText('');
     this.ghostSprite.setVisible(false);
     const showGhost = (finOrientation: 'LEFT' | 'RIGHT', alpha: number) =>
-      this.ghostSprite.setTexture(getPartTextureKey(type, finOrientation)).setDisplaySize(size, size).setAlpha(alpha).setVisible(true);
+      this.ghostSprite.setTexture(this.partTexture(type, finOrientation)).setDisplaySize(size, size).setAlpha(alpha).setVisible(true);
 
     if (inside) {
       this.ghostContainer.setPosition(this.gridOriginX + col * size + size / 2, this.gridOriginY + row * size + size / 2);
@@ -738,7 +1000,12 @@ export class BuilderScene extends Phaser.Scene {
 
   private handleLeftClick(pointer: Phaser.Input.Pointer): void {
     if (this.isOverSidePanels(pointer)) return; // Handled by the panels' own buttons
-    if (!this.selectedPartType) return;
+    if (!this.selectedPartType) {
+      // Clicking the cockpit with empty hands swaps the payload.
+      const { col, row, inside } = this.getGridCellAtPointer(pointer);
+      if (inside && this.rocketTree.getNodeAt(col, row)?.id === this.rocketTree.getRootNode().id) this.cyclePayload();
+      return;
+    }
 
     const { col, row, inside } = this.getGridCellAtPointer(pointer);
     if (!inside) {
@@ -746,7 +1013,8 @@ export class BuilderScene extends Phaser.Scene {
       return;
     }
 
-    const attachResult = this.rocketTree.attachPart(col, row, this.selectedPartType);
+    const type = this.selectedPartType;
+    const attachResult = this.rocketTree.attachPart(col, row, type, type === 'FUEL_TANK' || type === 'ENGINE' ? (this.partKinds[type] as FuelKind | EngineKind) : undefined);
     if (attachResult.success && attachResult.node) {
       this.renderRocket();
       this.updateGhostPreview(pointer);
@@ -858,7 +1126,7 @@ export class BuilderScene extends Phaser.Scene {
     const cy = this.gridOriginY + node.gridY * size + size / 2;
 
     const blockContainer = this.add.container(cx, cy);
-    const sprite = this.add.image(0, 0, getPartTextureKey(node.type, node.finOrientation)).setDisplaySize(size, size);
+    const sprite = this.add.image(0, 0, this.partTexture(node.type, node.finOrientation, node.fuelKind ?? node.engineKind ?? node.payload ?? 'STANDARD')).setDisplaySize(size, size);
     blockContainer.add(sprite);
     this.blocksContainer.add(blockContainer);
     this.blockDisplayMap.set(node.id, blockContainer);
