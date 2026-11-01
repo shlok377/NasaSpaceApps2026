@@ -4,7 +4,7 @@ import { ROCK_BELT } from '../physics/constants';
 import { VehicleReport } from '../physics/vehicle';
 import { currentMission, MISSIONS, newlyCompleted, rocketCost } from './missions';
 import { flightEarnings, GRANT_FLOOR, loadProgress, saveProgress, STARTING_MONEY, withGrant } from './progress';
-import { anchorBelt, BELT, checkBelt, Combo, generateBelt, generateLaneWaves, rockBlocks, rockX, RUNNER_CONFIG, RUNNER_LANES } from './rocks';
+import { anchorBelt, BELT, beltTimeAt, beltX, checkBelt, Combo, generateBelt, generateLaneWaves, laneThreats, rockBlocks, rockX, RUNNER_CONFIG, RUNNER_LANES } from './rocks';
 
 const stats: FlightStats = {
   maxAltitude: 0,
@@ -250,12 +250,77 @@ describe('rock belt', () => {
       }
     });
 
-    it('drifters wait for the belt clock: anchoring shifts them in time', () => {
+    it('drifters hold at their belt-entry x until the belt clock starts', () => {
       const rocks = generateLaneWaves(42, 'NIGHT');
       const d = rocks.find(r => r.vx !== 0)!;
-      const before = rockX(d, 5);
-      anchorBelt(rocks, 100);
-      expect(rockX(d, 105)).toBeCloseTo(before, 6);
+      expect(rockX(d, 0)).toBeCloseTo(beltX(d, 0), 6);
+      expect(rockX(d, 500)).toBeCloseTo(beltX(d, 0), 6);
+    });
+
+    it('anchoring at the belt bottom starts the clock there', () => {
+      const rocks = generateLaneWaves(42, 'NIGHT');
+      const d = rocks.find(r => r.vx !== 0)!;
+      anchorBelt(rocks, 100, ROCK_BELT.bottom);
+      expect(rockX(d, 105)).toBeCloseTo(beltX(d, 5), 6);
+    });
+
+    it('anchoring below the belt predicts the entry time at the cruise speed', () => {
+      const rocks = generateLaneWaves(42, 'NIGHT');
+      const d = rocks.find(r => r.vx !== 0)!;
+      anchorBelt(rocks, 100, ROCK_BELT.bottom - RUNNER_CONFIG.cruiseSpeed * 2);
+      expect(rockX(d, 102)).toBeCloseTo(beltX(d, 0), 6);
+      expect(rockX(d, 102 + beltTimeAt(d.y))).toBeCloseTo(beltX(d, beltTimeAt(d.y)), 6);
+    });
+
+    it('keeps drifters out of rows: no lane rock near the lanes it crosses at its height', () => {
+      const gap = RUNNER_LANES[1] - RUNNER_LANES[0];
+      for (const seed of SEEDS) {
+        const rocks = generateLaneWaves(seed, 'NIGHT');
+        const lane = rocks.filter(r => r.laneIndex !== undefined);
+        const drifters = rocks.filter(r => r.laneIndex === undefined);
+        for (const d of drifters) {
+          // Where the drifter is when the rocket is level with it.
+          const x = beltX(d, beltTimeAt(d.y));
+          for (const o of lane) {
+            if (Math.abs(RUNNER_LANES[o.laneIndex!] - x) <= gap) expect(Math.abs(o.y - d.y)).toBeGreaterThanOrEqual(RUNNER_CONFIG.rowTolerance);
+          }
+          for (const o of drifters) if (o !== d) expect(Math.abs(o.y - d.y)).toBeGreaterThanOrEqual(RUNNER_CONFIG.rowTolerance);
+        }
+      }
+    });
+
+    it('flags only the lanes a rock will cross within the look-ahead', () => {
+      const rock = (x0: number, y: number, vx = 0) => ({ id: 0, kind: 'ROCK' as const, x0, y, vx, radius: 2, seed: 0, spent: false, t0: 0 });
+      const y = ROCK_BELT.bottom;
+      const speed = RUNNER_CONFIG.cruiseSpeed;
+      const lookahead = 3;
+      const near = rock(RUNNER_LANES[1], y + speed * 1);
+      const far = rock(RUNNER_LANES[3], y + speed * (lookahead + 2));
+      // A drifter now in lane 0 that will sit in lane 4 when the rocket reaches it.
+      const eta = 2;
+      const drifter = rock(RUNNER_LANES[0], y + speed * eta, (RUNNER_LANES[4] - RUNNER_LANES[0]) / eta);
+      const threats = laneThreats([near, far, drifter], y, 0, lookahead);
+      expect(threats[1]).toBeCloseTo(1, 6);
+      expect(threats[3]).toBeNull();
+      expect(threats[0]).toBeNull();
+      expect(threats[4]).toBeCloseTo(eta, 6);
+      expect(threats[2]).toBeNull();
+    });
+
+    it('rarely flags every lane at once for rocks just off the top of the screen', () => {
+      const offScreen = RUNNER_CONFIG.rocketY / RUNNER_CONFIG.cameraScale;
+      let samples = 0;
+      let allFlagged = 0;
+      for (const seed of SEEDS) {
+        const rocks = generateLaneWaves(seed, 'NIGHT');
+        anchorBelt(rocks, 0, ROCK_BELT.bottom);
+        for (let y = ROCK_BELT.bottom; y < ROCK_BELT.top; y += 5) {
+          const threats = laneThreats(rocks, y, beltTimeAt(y), RUNNER_CONFIG.threatLookahead, offScreen);
+          samples++;
+          if (threats.every(t => t !== null)) allFlagged++;
+        }
+      }
+      expect(allFlagged / samples).toBeLessThan(0.02);
     });
   });
 });

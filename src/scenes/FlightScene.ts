@@ -52,11 +52,16 @@ type Keys = Record<
 /** Height where the Moon's pull takes over, straight below it: the end of the climb. */
 const SOI_ALTITUDE = moonSoiAltitude();
 /** Liftoff slide: the pre-flight card out, the flight columns in (ms). */
-const SLIDE_MS = 300;
+const SLIDE_MS = CONFIG.flightHud.slideMs;
 /** How far right the right column starts (px): past the screen edge from its widest part, the wrapped goal. */
 const RIGHT_SLIDE = 360;
 /** Big centre moments (phase titles, banners) stay up about this long (s). */
-const MOMENT_SECONDS = 1.5;
+const MOMENT_SECONDS = CONFIG.flightHud.momentSeconds;
+
+/** A HUD widget that slides in from (or out to) the screen edge at liftoff. */
+interface Slider {
+  setSlide(dx: number): void;
+}
 
 /** Climb milestones that pay a bonus, as a fraction of the climb to the Moon's pull. */
 const MILESTONES: Array<{ label: string; at: number }> = [
@@ -134,7 +139,12 @@ export class FlightScene extends Phaser.Scene {
   /** Money (bank + live award cash) last frame, to pop `+$` when it rises. */
   private lastCash: number | null = null;
   private preflight!: PreflightCard;
-  /** Scene time (ms) the liftoff slide began (countdown start), or null while on the pad. */
+  /**
+   * Liftoff slide: each widget with its off-screen offset (px); `leaves` widgets
+   * (the pre-flight card) slide out, the rest slide in.
+   */
+  private slides: Array<{ widget: Slider; offscreen: number; leaves?: boolean }> = [];
+  /** Scene time (ms) the liftoff slide began (at liftoff), or null before it. */
   private slideStart: number | null = null;
   /** Launch time picked on the pad (resets to DAWN every launch). */
   private timeOfDay: TimeOfDay = 'DAWN';
@@ -296,8 +306,16 @@ export class FlightScene extends Phaser.Scene {
       onLaunch: () => this.startCountdown()
     });
     this.setTimeOfDay(this.timeOfDay);
-    // Big centre moments: brief, one line each.
-    this.bannerText = this.add.text(640, 236, '', TEXT_STYLE(20, '#ffffff')).setOrigin(0.5, 0).setAlpha(0).setDepth(20).setAlign('center').setWordWrapWidth(1100).setMaxLines(1);
+    const leftOut = -(LEFT_COLUMN.x + LEFT_COLUMN.w + 16);
+    this.slides = [
+      { widget: this.preflight, offscreen: -(PREFLIGHT_CARD.x + PREFLIGHT_CARD.w + 16), leaves: true },
+      { widget: this.leftColumn, offscreen: leftOut },
+      { widget: this.phasePips, offscreen: RIGHT_SLIDE },
+      { widget: this.track, offscreen: RIGHT_SLIDE },
+      { widget: this.keyHints, offscreen: RIGHT_SLIDE }
+    ];
+    // Banners wrap to two lines at most; the big centre titles (phase title, countdown, debris prompt) keep to one.
+    this.bannerText = this.add.text(640, 236, '', TEXT_STYLE(20, '#ffffff')).setOrigin(0.5, 0).setAlpha(0).setDepth(20).setAlign('center').setWordWrapWidth(1100).setMaxLines(2);
     this.phaseTitle = this.add.text(640, 300, '', TITLE_STYLE(30, '#ffffff')).setOrigin(0.5).setAlpha(0).setDepth(30);
     this.phaseGoal = this.add.text(640, 344, '', TEXT_STYLE(16, UI.text)).setOrigin(0.5, 0).setAlpha(0).setDepth(30).setAlign('center').setWordWrapWidth(900).setMaxLines(1);
     this.countdownText = this.add.text(640, 320, '', TITLE_STYLE(72, '#ffffff')).setOrigin(0.5).setVisible(false).setDepth(30);
@@ -428,12 +446,11 @@ export class FlightScene extends Phaser.Scene {
       this.spacePressedThisFrame = false;
       this.laneSteerInput = 0;
 
-      if (ev.promptTriggered) {
-        this.showBanner(`DEBRIS FIELD AHEAD! [SPACE] EVASIVE RUNNER (${Math.ceil(this.runnerState.promptTimer)}s)`, '#38bdf8');
-      }
       if (ev.engaged) {
-        this.runnerEntryVy = Math.max(this.sim.state.vy, RUNNER_CONFIG.cruiseSpeed ?? 45);
+        this.runnerEntryVy = Math.max(this.sim.state.vy, RUNNER_CONFIG.cruiseSpeed);
         this.rocks = generateLaneWaves(Math.floor(Math.random() * 1e9), this.timeOfDay);
+        // Predict the belt clock from here (as if climbing at the cruise speed); it is re-anchored at the real entry.
+        anchorBelt(this.rocks, this.sim.state.time, this.sim.state.y);
         this.beltAnchored = false;
         const p = this.world.rocketScreen(this.sim);
         this.fx.ring(p.x, p.y, WORLD_COLORS.site, 180, 0.6);
@@ -453,17 +470,20 @@ export class FlightScene extends Phaser.Scene {
       this.sim.advance(gameDt, this.currentInput(t));
 
       if (this.runnerState.active) {
-        if (!this.beltAnchored && this.sim.state.y >= ROCK_BELT.bottom) {
+        const inBelt = this.sim.state.y >= ROCK_BELT.bottom;
+        if (!this.beltAnchored && inBelt) {
           this.beltAnchored = true;
-          anchorBelt(this.rocks, this.sim.state.time - (this.sim.state.y - ROCK_BELT.bottom) / RUNNER_CONFIG.cruiseSpeed);
+          anchorBelt(this.rocks, this.sim.state.time, this.sim.state.y);
         }
         this.sim.state.x = this.runnerState.currentX;
         this.sim.state.vx = 0;
         this.sim.state.omega = 0;
         this.sim.state.theta = Math.PI / 2 + this.runnerState.tilt;
-        // Govern vertical velocity to cruise speed so obstacle descent is humanly readable
-        const targetVy = RUNNER_CONFIG.cruiseSpeed ?? 45;
-        this.sim.state.vy += (targetVy - this.sim.state.vy) * (1 - Math.exp(-dt * 6));
+        // Govern the climb to the cruise speed so the rocks come down at a readable pace: eased on
+        // the approach, then held exactly inside the belt, where the reserved safe route assumes it.
+        const cruise = RUNNER_CONFIG.cruiseSpeed;
+        if (inBelt) this.sim.state.vy = cruise;
+        else this.sim.state.vy += (cruise - this.sim.state.vy) * (1 - Math.exp(-dt * 6));
       }
 
       if (this.launched) this.runner.update(this.sim, gameDt, { repairPressed: this.repairPressed, relightHeld: this.keys.E.isDown });
@@ -741,11 +761,13 @@ export class FlightScene extends Phaser.Scene {
       this.fx.burst(at.x, at.y, WORLD_COLORS.rock);
       this.sim.hitPart(hit.partId);
     }
-    for (const _ of r.nearMisses) {
+    // Each near miss grows the combo by one.
+    for (let i = 0; i < r.nearMisses.length; i++) {
       const n = this.combo.nearMiss(this.sim.state.time);
       this.celebrate({ id: 'NEAR_MISS', label: n > 1 ? `NEAR MISS ×${n}` : 'NEAR MISS', points: 100 * n });
     }
-    for (const _ of r.pickups) {
+    // One refuel per fuel can picked up.
+    for (let i = 0; i < r.pickups.length; i++) {
       const added = this.sim.refuel(this.vehicle.fuelCapacity * CONFIG.rockBelt.fuelCanRefill);
       this.celebrate({ id: 'PICKUP_FUEL', label: added > 0 ? `+${Math.round(added)} kg FUEL` : 'FUEL (full)', points: 50 });
     }
@@ -775,7 +797,8 @@ export class FlightScene extends Phaser.Scene {
     const mode = this.world.camera.mode;
     const r = this.runner;
     const best = Math.max(this.progress.bestHeight, this.sim.stats.maxAltitude);
-    const onPad = this.sim.phase === 'PRELAUNCH' && this.countdown === null;
+    // Before liftoff (on the pad and through the countdown) the flight columns are away.
+    const onPad = !this.launched;
 
     // Right column (hidden on the pad): phase pips + goal, money pop, Earth→Moon track, key caps.
     this.phasePips.setVisible(!onPad);
@@ -787,7 +810,8 @@ export class FlightScene extends Phaser.Scene {
     this.warpText.setY(this.phasePips.bottom + 10);
 
     const ascent = mode === 'ASCENT';
-    this.track.setVisible(ascent && !onPad);
+    // The Earth→Moon track stays up the whole flight (it sits right of the orbit map and the bottom card).
+    this.track.setVisible(!onPad);
     this.track.update(Math.max(0, t.earthAltitude), this.sim.stats.maxAltitude, best);
     this.keyHints.setVisible(!onPad);
     this.keyHints.update(flying && this.launched ? this.hintRows(t) : [], dt);
@@ -795,12 +819,7 @@ export class FlightScene extends Phaser.Scene {
     // Bottom-centre card: the problem card and, while orbiting, the orbit band.
     const problem = flying ? (r.problem as ActiveProblem | null) : null;
     const showOrbit = flying && mode === 'ORBIT' && (r.phase === 'ORBIT' || problem?.id === 'ORBIT_DECAY');
-    this.bottomCard.update(
-      problem,
-      showOrbit ? { elements: t.moonOrbit, hold: r.phase === 'ORBIT' ? r.stableFor / CONFIG.phases.orbit.holdSeconds : null } : undefined,
-      { periapsis: t.moonOrbit?.periapsisAltitude ?? null },
-      now
-    );
+    this.bottomCard.update(problem, { elements: t.moonOrbit, showBand: showOrbit, hold: r.phase === 'ORBIT' ? r.stableFor / CONFIG.phases.orbit.holdSeconds : null }, now);
     this.leftColumn.setVisible(!onPad);
     if (!onPad) {
       this.leftColumn.update(flightHudModel(this.sim, t, this.timeOfDay), {
@@ -813,19 +832,15 @@ export class FlightScene extends Phaser.Scene {
       });
     }
 
-    // Liftoff slide (starts with the countdown): the pre-flight card leaves left, the columns come in from the edges.
+    // Liftoff slide (at liftoff): the pre-flight card leaves left, the columns come in from the edges.
+    // Through the countdown the card stays put but takes no more clicks.
     if (onPad) this.slideStart = null;
     else if (this.slideStart === null) this.slideStart = now;
     const k = this.slideStart === null ? 0 : Phaser.Math.Clamp((now - this.slideStart) / SLIDE_MS, 0, 1);
     const ease = 1 - (1 - k) ** 3;
-    this.preflight.setSlide(-ease * (PREFLIGHT_CARD.x + PREFLIGHT_CARD.w + 16));
+    for (const s of this.slides) s.widget.setSlide(s.leaves ? ease * s.offscreen : (1 - ease) * s.offscreen);
+    this.preflight.setEnabled(this.sim.phase === 'PRELAUNCH' && this.countdown === null);
     this.preflight.update(now);
-    const leftOut = -(LEFT_COLUMN.x + LEFT_COLUMN.w + 16) * (1 - ease);
-    const rightOut = RIGHT_SLIDE * (1 - ease);
-    this.leftColumn.setSlide(leftOut);
-    this.phasePips.setSlide(rightOut);
-    this.track.setSlide(rightOut);
-    this.keyHints.setSlide(rightOut);
     this.endButton.setVisible(flying && this.launched);
     this.warpText.setText(this.timeScale > 1 && flying ? `▶▶ ×${this.timeScale}` : '');
 
@@ -854,12 +869,19 @@ export class FlightScene extends Phaser.Scene {
       this.phaseGoal.setAlpha(a);
     }
 
-    if (this.bannerTimer > 0) {
+    if (this.runnerState.promptActive) {
+      this.bannerText
+        .setMaxLines(1)
+        .setText(`DEBRIS FIELD AHEAD! [SPACE] EVASIVE RUNNER (${Math.ceil(this.runnerState.promptTimer)}s)`)
+        .setColor('#38bdf8')
+        .setAlpha(1);
+      this.bannerTimer = 0.4;
+    } else if (this.bannerTimer > 0) {
       this.bannerTimer -= dt;
       this.bannerText.setAlpha(Phaser.Math.Clamp(this.bannerTimer / 0.4, 0, 1));
     } else if (this.bannerQueue.length > 0) {
       const b = this.bannerQueue.shift()!;
-      this.bannerText.setText(b.text).setColor(b.color).setAlpha(1);
+      this.bannerText.setMaxLines(2).setText(b.text).setColor(b.color).setAlpha(1);
       this.bannerTimer = MOMENT_SECONDS;
     } else {
       this.bannerText.setAlpha(0);
@@ -885,25 +907,7 @@ export class FlightScene extends Phaser.Scene {
     const r = this.runner;
     const mode = this.world.camera.mode;
     if (this.sim.onGround) return [{ keys: ['ESC'], label: 'too heavy: back to the lab' }];
-    if (r.problem) {
-      switch (r.problem.id) {
-        case 'FLAMEOUT':
-          return [{ keys: ['E'], label: 'hold to relight' }];
-        case 'FUEL_LEAK':
-          return [{ keys: ['F'], label: 'patch in the green' }];
-        case 'STUCK_THRUSTER':
-          return [{ keys: ['A', 'D'], label: 'hold against the spin' }];
-        case 'ORBIT_DECAY':
-          return [{ keys: ['W'], label: 'burn along your motion' }];
-        case 'DEBRIS':
-          return [
-            { keys: ['A', 'D'], label: 'turn' },
-            { keys: ['W'], label: 'burn out of the ring' }
-          ];
-        default:
-          return [{ keys: [], label: PROBLEM_INFO[r.problem.id].howTo }];
-      }
-    }
+    if (r.problem) return PROBLEM_INFO[r.problem.id].hints;
     if (mode === 'ASCENT') {
       if (this.runnerState.promptActive) return [{ keys: ['SPACE'], label: 'evasive runner' }];
       if (this.runnerState.active) return [{ keys: ['A', 'D'], label: 'switch lane' }];

@@ -80,7 +80,6 @@
       "rocketY": 560,
       "lanes": [-20, -10, 0, 10, 20],
       "laneShiftDuration": 0.12,
-      "_note": "Rocks per 100 m ramp from rocksPer100mBottom at the belt's entry to rocksPer100mTop at its exit (times the launch time's rocks multiplier). Every rock gets its own height: rocks in neighbouring lanes are never within rowTolerance m of each other. Drifters cross lanes in the last third. A reachable path is reserved for a rocket of rocketHalfLength x rocketHalfWidth climbing at cruiseSpeed with laneShiftDuration shifts.",
       "rocksPer100mBottom": 3,
       "rocksPer100mTop": 8,
       "rowTolerance": 6,
@@ -91,7 +90,16 @@
       "rocketHalfLength": 5,
       "rocketHalfWidth": 2,
       "pathSegmentMin": 30,
-      "pathSegmentMax": 90
+      "pathSegmentMax": 90,
+      "pathMargin": 1.5,
+      "rockBand": 25,
+      "rockRadiusFactor": 0.65,
+      "rockAttempts": 12,
+      "drifterAttempts": 20,
+      "drifterEdge": 10,
+      "beltBottomGap": 20,
+      "beltTopGap": 5,
+      "threatLookahead": 1.5
     }
   },
   "airframe": {
@@ -146,6 +154,15 @@
     "descentViewBelow": 300,
     "touchdownViewBelow": 40,
     "orbitViewRadiusPx": 355
+  },
+  "flightHud": {
+    "tiltAmberDegrees": 20,
+    "tiltRedDegrees": 35,
+    "maxUngroupedTanks": 6,
+    "fullWindSpeed": 20,
+    "calmWindSpeed": 0.05,
+    "slideMs": 300,
+    "momentSeconds": 1.5
   },
   "economy": {
     "startingMoney": 100000000,

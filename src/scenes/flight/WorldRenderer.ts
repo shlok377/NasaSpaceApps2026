@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { CONFIG } from '../../config';
 import { PART_DEFINITIONS } from '../../core/partDefinitions';
 import { BOULDER_FIELD, ROVER_ZONE, RoverCapsule, SurfaceZone } from '../../game/phases';
-import { Rock, rockX } from '../../game/rocks';
+import { laneThreats, Rock, rockX } from '../../game/rocks';
 import { EvasiveRunnerState, RUNNER_CONFIG, RUNNER_LANES } from '../../game/evasiveRunner';
 import { gravityAt, insideMoonSoi, localUp, moonAltitude, moonSurfacePoint } from '../../physics/bodies';
 import { MOON, MOON_CENTER, ROCK_BELT, WORLD } from '../../physics/constants';
@@ -860,6 +860,8 @@ export class WorldRenderer {
     if (s.y > ROCK_BELT.bottom - CONFIG.rockBelt.warningDistance) {
       const time = s.time;
       const ahead = CONFIG.rockBelt.warningDistance;
+      const runner = runnerState?.active === true;
+      if (runner) this.drawLaneThreats(g, rocks, s.y, time);
       for (const r of rocks) {
         if (r.spent) continue;
         const dy = r.y - s.y;
@@ -869,7 +871,8 @@ export class WorldRenderer {
         const color = r.kind === 'ROCK' ? WORLD_COLORS.danger : WORLD_COLORS.fuel;
         if (p.y + pr < 0) {
           // Off the top of the screen: a chevron at the edge, brighter as it closes in.
-          if (p.x < -40 || p.x > 1320) continue;
+          // (In the evasive runner the per-lane look-ahead chevrons replace these.)
+          if (runner || p.x < -40 || p.x > 1320) continue;
           const closeness = 1 - Phaser.Math.Clamp((p.y + pr) / -(ahead * scale), 0, 1);
           const x = Phaser.Math.Clamp(p.x, 16, 1264);
           const size = 6 + Math.min(14, r.radius * 2.5) * (0.5 + closeness * 0.5);
@@ -897,6 +900,24 @@ export class WorldRenderer {
         }
       }
     }
+  }
+
+  /**
+   * Evasive runner: one red chevron at the top of each lane a rock will cross
+   * within the short look-ahead (drifters at their future x), brighter and
+   * bigger the sooner it arrives. Rocks already on screen speak for themselves.
+   */
+  private drawLaneThreats(g: Phaser.GameObjects.Graphics, rocks: readonly Rock[], y: number, time: number): void {
+    const offScreen = this.toScreen(0, y).y / this.camera.scale;
+    const lookahead = RUNNER_CONFIG.threatLookahead;
+    laneThreats(rocks, y, time, lookahead, offScreen).forEach((eta, i) => {
+      if (eta === null) return;
+      const closeness = 1 - Phaser.Math.Clamp((eta - offScreen / RUNNER_CONFIG.cruiseSpeed) / lookahead, 0, 1);
+      const x = this.toScreen(RUNNER_LANES[i], y).x;
+      const size = 9 + 7 * closeness;
+      g.fillStyle(WORLD_COLORS.danger, 0.45 + 0.5 * closeness);
+      g.fillTriangle(x - size, 8 + size * 0.2, x + size, 8 + size * 0.2, x, 8 + size * 1.2);
+    });
   }
 
   // ---------------------------------------------------------------------------

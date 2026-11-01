@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { rgb } from './backdrop';
 import { glassPanel, TEXT_STYLE, TITLE_STYLE, UI } from './theme';
 import { GAME_ASSETS } from '../core/assets';
 import { FUEL_KINDS } from '../core/partDefinitions';
@@ -57,8 +58,10 @@ interface Puff {
 
 /** Multiplies two 0xRRGGBB colours channel by channel. */
 function tint(color: number, by: number): number {
-  const ch = (s: number) => Math.round((((color >> s) & 255) * ((by >> s) & 255)) / 255) << s;
-  return ch(16) | ch(8) | ch(0);
+  const [r, g, b] = rgb(color);
+  const [tr, tg, tb] = rgb(by);
+  const ch = (c: number, t: number) => Math.round((c * t) / 255);
+  return (ch(r, tr) << 16) | (ch(g, tg) << 8) | ch(b, tb);
 }
 
 /**

@@ -23,8 +23,11 @@ export interface Rock {
   spent: boolean;
   /** Lane of a lane rock (drifters have none). */
   laneIndex?: number;
-  /** Time at which the rock is at x0 (default 0). */
-  t0?: number;
+  /**
+   * Time at which the rock is at x0 (default 0). `null` means its clock has
+   * not started yet (an evasive-runner rock before `anchorBelt`): it holds at x0.
+   */
+  t0?: number | null;
 }
 
 const RB = CONFIG.rockBelt;
@@ -110,6 +113,13 @@ export function beltTimeAt(y: number): number {
   return (y - ROCK_BELT.bottom) / RUNNER_CONFIG.cruiseSpeed;
 }
 
+/** Where `rock` is (m) at belt clock `beltTime` (s since its x0 moment), wrapped to the belt's width. */
+export function beltX(rock: Rock, beltTime: number): number {
+  const w = BELT.halfWidth * 2;
+  const x = rock.x0 + rock.vx * beltTime + BELT.halfWidth;
+  return (((x % w) + w) % w) - BELT.halfWidth;
+}
+
 /**
  * Does `rock` block a runner rocket centred on lane x `laneX` at height `y`? The
  * rocket climbs at the cruise speed, so the belt clock follows from `y`.
@@ -117,7 +127,7 @@ export function beltTimeAt(y: number): number {
 export function rockBlocks(rock: Rock, laneX: number, y: number): boolean {
   if (rock.kind !== 'ROCK') return false;
   if (Math.abs(rock.y - y) >= rock.radius + RUNNER_BODY.halfLength) return false;
-  return Math.abs(rockX(rock, beltTimeAt(y)) - laneX) < rock.radius + RUNNER_BODY.halfWidth;
+  return Math.abs(beltX(rock, beltTimeAt(y)) - laneX) < rock.radius + RUNNER_BODY.halfWidth;
 }
 
 /**
@@ -127,8 +137,10 @@ export function rockBlocks(rock: Rock, laneX: number, y: number): boolean {
  * at the cruise speed with the normal lane-shift time can always get through.
  * `time` is the launch time: dawn is sparsest, night densest.
  *
- * Drifters move on the belt clock (0 when the rocket enters the belt): call
- * `anchorBelt` once the rocket crosses the belt's bottom.
+ * Drifters move on the belt clock (0 when the rocket enters the belt). Until
+ * `anchorBelt` starts that clock they hold at their belt-entry position.
+ * The runner climbs at exactly the cruise speed inside the belt (the scene
+ * clamps it), which is what the reserved route assumes.
  */
 export function generateLaneWaves(seed = 2026, time: TimeOfDay = 'NOON'): Rock[] {
   const rand = mulberry32(seed);
@@ -136,7 +148,7 @@ export function generateLaneWaves(seed = 2026, time: TimeOfDay = 'NOON'): Rock[]
   const lanes = cfg.lanes;
   const mult = timeOfDayRocks(time);
   const span = ROCK_BELT.top - ROCK_BELT.bottom;
-  const margin = 1.5;
+  const margin = cfg.pathMargin;
 
   // 1. The reserved route: hold a lane for a while, then shift to a neighbour.
   const path: PathSpan[] = [];
@@ -155,7 +167,7 @@ export function generateLaneWaves(seed = 2026, time: TimeOfDay = 'NOON'): Rock[]
   const clearOfPath = (rock: Rock): boolean => {
     const reach = rock.radius + RUNNER_BODY.halfLength + margin;
     for (let h = rock.y - reach; h <= rock.y + reach; h += 0.5) {
-      const x = rockX(rock, beltTimeAt(h));
+      const x = beltX(rock, beltTimeAt(h));
       for (const l of pathLanesAt(h)) {
         if (Math.abs(x - lanes[l]) < rock.radius + RUNNER_BODY.halfWidth + margin) return false;
       }
@@ -164,7 +176,7 @@ export function generateLaneWaves(seed = 2026, time: TimeOfDay = 'NOON'): Rock[]
   };
 
   const items: Rock[] = [];
-  const radius = () => RB.rockRadiusMin + rand() * (RB.rockRadiusMax - RB.rockRadiusMin) * 0.65;
+  const radius = () => RB.rockRadiusMin + rand() * (RB.rockRadiusMax - RB.rockRadiusMin) * cfg.rockRadiusFactor;
   const fitsAmongRocks = (laneIdx: number, h: number): boolean =>
     items.every(o => {
       if (o.laneIndex === undefined) return true;
@@ -175,16 +187,17 @@ export function generateLaneWaves(seed = 2026, time: TimeOfDay = 'NOON'): Rock[]
     });
 
   // 2. Lane rocks, each at its own height, density ramping bottom to top.
-  const band = 25;
-  for (let b = ROCK_BELT.bottom + 20; b < ROCK_BELT.top - 5; b += band) {
+  const band = cfg.rockBand;
+  const highest = ROCK_BELT.top - cfg.beltTopGap;
+  for (let b = ROCK_BELT.bottom + cfg.beltBottomGap; b < highest; b += band) {
     const k = (b + band / 2 - ROCK_BELT.bottom) / span;
     const per100 = cfg.rocksPer100mBottom + (cfg.rocksPer100mTop - cfg.rocksPer100mBottom) * k;
     const count = Math.floor((per100 * mult * band) / 100 + rand());
     for (let i = 0; i < count; i++) {
-      for (let attempt = 0; attempt < 12; attempt++) {
+      for (let attempt = 0; attempt < cfg.rockAttempts; attempt++) {
         const laneIdx = Math.floor(rand() * lanes.length);
-        const h = Math.min(ROCK_BELT.top - 5, b + rand() * band);
-        const rock: Rock = { id: 0, kind: 'ROCK', x0: lanes[laneIdx], y: h, vx: 0, radius: radius(), seed: rand(), spent: false, laneIndex: laneIdx };
+        const h = Math.min(highest, b + rand() * band);
+        const rock: Rock = { id: 0, kind: 'ROCK', x0: lanes[laneIdx], y: h, vx: 0, radius: radius(), seed: rand(), spent: false, laneIndex: laneIdx, t0: null };
         if (fitsAmongRocks(laneIdx, h) && clearOfPath(rock)) {
           items.push(rock);
           break;
@@ -193,18 +206,29 @@ export function generateLaneWaves(seed = 2026, time: TimeOfDay = 'NOON'): Rock[]
     }
   }
 
-  // 3. Drifters in the last third, crossing the lanes as the rocket arrives.
+  // 3. Drifters in the last third, crossing the lanes as the rocket arrives. The
+  //    no-rows rule holds for them too: when the rocket is level with a drifter,
+  //    no lane rock in the lane it is crossing or a neighbouring one, and no other
+  //    drifter, sits within rowTolerance of its height.
+  const laneGap = lanes.length > 1 ? lanes[1] - lanes[0] : Infinity;
+  const drifterFits = (xAtArrival: number, h: number): boolean =>
+    items.every(o => {
+      if (Math.abs(o.y - h) >= cfg.rowTolerance) return true;
+      if (o.laneIndex === undefined) return false;
+      return Math.abs(lanes[o.laneIndex] - xAtArrival) > laneGap * 1.5;
+    });
   const drifters = Math.round(cfg.drifters * mult);
   const lastThird = ROCK_BELT.bottom + (span * 2) / 3;
   const laneSpan = lanes[lanes.length - 1] - lanes[0];
+  const edge = cfg.drifterEdge;
   for (let i = 0; i < drifters; i++) {
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const h = lastThird + 10 + rand() * (ROCK_BELT.top - lastThird - 20);
+    for (let attempt = 0; attempt < cfg.drifterAttempts; attempt++) {
+      const h = lastThird + edge + rand() * (ROCK_BELT.top - lastThird - 2 * edge);
       const speed = cfg.drifterSpeedMin + rand() * (cfg.drifterSpeedMax - cfg.drifterSpeedMin);
       const vx = rand() < 0.5 ? -speed : speed;
       const xAtArrival = lanes[0] + rand() * laneSpan;
-      const rock: Rock = { id: 0, kind: 'ROCK', x0: xAtArrival - vx * beltTimeAt(h), y: h, vx, radius: radius(), seed: rand(), spent: false };
-      if (clearOfPath(rock)) {
+      const rock: Rock = { id: 0, kind: 'ROCK', x0: xAtArrival - vx * beltTimeAt(h), y: h, vx, radius: radius(), seed: rand(), spent: false, t0: null };
+      if (drifterFits(xAtArrival, h) && clearOfPath(rock)) {
         items.push(rock);
         break;
       }
@@ -215,15 +239,43 @@ export function generateLaneWaves(seed = 2026, time: TimeOfDay = 'NOON'): Rock[]
   return items;
 }
 
-/** Start the belt clock: drifters are placed relative to the moment the rocket enters the belt. */
-export function anchorBelt(rocks: Rock[], time: number): void {
-  for (const r of rocks) r.t0 = time;
+/**
+ * Start the belt clock from the rocket at height `y` at sim time `simTime`: the
+ * clock reads 0 when a rocket climbing at the cruise speed is (or was) at the
+ * belt's bottom. Call it again at the real belt entry to correct a prediction.
+ */
+export function anchorBelt(rocks: Rock[], simTime: number, y: number): void {
+  const t0 = simTime - beltTimeAt(y);
+  for (const r of rocks) r.t0 = t0;
 }
 
+/** Where `rock` is (m) at sim time `time`. A rock whose clock hasn't started holds at x0. */
 export function rockX(rock: Rock, time: number): number {
-  const w = BELT.halfWidth * 2;
-  const x = rock.x0 + rock.vx * (time - (rock.t0 ?? 0)) + BELT.halfWidth;
-  return (((x % w) + w) % w) - BELT.halfWidth;
+  if (rock.t0 === null) return beltX(rock, 0);
+  return beltX(rock, time - (rock.t0 ?? 0));
+}
+
+/**
+ * Evasive-runner threat look-ahead: for each lane, the seconds until the rocket
+ * (at height `y`, sim time `time`, climbing at the cruise speed) would meet a
+ * rock in it, or null when nothing crosses that lane within `lookahead` s.
+ * Drifters count at their x when the rocket reaches their height. Only rocks
+ * more than `minAhead` m above the rocket count (rocks on screen show themselves).
+ */
+export function laneThreats(rocks: readonly Rock[], y: number, time: number, lookahead: number = RUNNER_CONFIG.threatLookahead, minAhead = 0): Array<number | null> {
+  const speed = RUNNER_CONFIG.cruiseSpeed;
+  return RUNNER_LANES.map(laneX => {
+    let soonest: number | null = null;
+    for (const r of rocks) {
+      if (r.spent || r.kind !== 'ROCK') continue;
+      const dy = r.y - y;
+      if (dy <= minAhead) continue;
+      const eta = dy / speed;
+      if (eta > lookahead || (soonest !== null && eta >= soonest)) continue;
+      if (Math.abs(rockX(r, time + eta) - laneX) < r.radius + RUNNER_BODY.halfWidth) soonest = eta;
+    }
+    return soonest;
+  });
 }
 
 export interface PartPoint {

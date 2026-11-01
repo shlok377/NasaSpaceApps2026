@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { rgb } from './backdrop';
 import { PX, drawPixelPanel } from './pixel';
 
 /**
@@ -110,11 +111,11 @@ export function glassTexture(scene: Phaser.Scene, w: number, h: number, opts: Gl
 
   // Lit rim: top/left catch the light, bottom/right fall into shade.
   const a = opts.accent;
-  const rgb = a !== undefined ? `${(a >> 16) & 255}, ${(a >> 8) & 255}, ${a & 255}` : null;
-  ctx.fillStyle = rgb ? `rgba(${rgb}, 0.85)` : 'rgba(235, 248, 255, 0.28)';
+  const rim = a !== undefined ? rgb(a).join(', ') : null;
+  ctx.fillStyle = rim ? `rgba(${rim}, 0.85)` : 'rgba(235, 248, 255, 0.28)';
   ctx.fillRect(0, 0, tw, 1);
   ctx.fillRect(0, 0, 1, th);
-  ctx.fillStyle = rgb ? `rgba(${rgb}, 0.45)` : 'rgba(160, 205, 225, 0.12)';
+  ctx.fillStyle = rim ? `rgba(${rim}, 0.45)` : 'rgba(160, 205, 225, 0.12)';
   ctx.fillRect(0, th - 1, tw, 1);
   ctx.fillRect(tw - 1, 0, 1, th);
   // Clipped corners for the pixel look.

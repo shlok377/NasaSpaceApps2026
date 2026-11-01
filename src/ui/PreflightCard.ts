@@ -26,6 +26,8 @@ const CELL_H = 54;
 const GRID_Y = Y + 168;
 const BTN_Y = Y + 446;
 const BTN_H = 58;
+/** Faint dark band behind each text row, so it reads over busy launch-site art through the glass. */
+const TEXT_BAND = { color: 0x07060b, alpha: 0.4, padX: 4, padY: 1 } as const;
 
 interface TimeCell {
   time: TimeOfDay;
@@ -49,6 +51,9 @@ export class PreflightCard {
   private readonly button: Phaser.GameObjects.Graphics;
   private readonly buttonLabel: Phaser.GameObjects.Text;
   private readonly zones: Phaser.GameObjects.Zone[] = [];
+  /** The card's own text rows (not the time cells or the button), each with a dark band behind it. */
+  private readonly rows: Phaser.GameObjects.Text[] = [];
+  private readonly bands: Phaser.GameObjects.Graphics;
   private readonly missionReward: number | null;
   private time: TimeOfDay = 'DAWN';
   private buttonHover = false;
@@ -59,32 +64,37 @@ export class PreflightCard {
     const dividers = scene.add.graphics();
     dividers.fillStyle(0xffffff, 0.08);
     for (const dy of [132, 300, 382]) dividers.fillRect(X + PAD, Y + dy, INNER, 2);
-    const items: Phaser.GameObjects.GameObject[] = [panel, dividers];
+    this.bands = scene.add.graphics();
+    const items: Phaser.GameObjects.GameObject[] = [panel, dividers, this.bands];
     const left = X + PAD;
+    const row = (text: Phaser.GameObjects.Text) => {
+      this.rows.push(text);
+      items.push(text);
+      return text;
+    };
 
     // MISSION
     this.missionReward = info.mission?.reward ?? null;
-    items.push(scene.add.text(left, Y + 14, 'MISSION', TITLE_STYLE(8, UI.textMuted)));
-    items.push(
+    row(scene.add.text(left, Y + 14, 'MISSION', TITLE_STYLE(8, UI.textMuted)));
+    row(
       scene.add
         .text(left, Y + 34, info.mission?.title ?? 'All missions done', TITLE_STYLE(10, UI.goldText))
         .setWordWrapWidth(INNER)
         .setMaxLines(2)
         .setLineSpacing(4)
     );
-    items.push(
+    row(
       scene.add
         .text(left, Y + 62, info.mission?.goal ?? 'Fly for the high score!', TEXT_STYLE(13))
         .setWordWrapWidth(INNER)
         .setMaxLines(2)
         .setLineSpacing(-4)
     );
-    this.reward = scene.add.text(left, Y + 102, '', TEXT_STYLE(14, UI.goldText));
-    items.push(this.reward);
+    this.reward = row(scene.add.text(left, Y + 102, '', TEXT_STYLE(14, UI.goldText)));
 
     // LAUNCH TIME
-    items.push(scene.add.text(left, Y + 146, 'LAUNCH TIME', TITLE_STYLE(8, UI.textMuted)));
-    items.push(scene.add.text(X + W - PAD, Y + 142, '← →', TEXT_STYLE(12, UI.textMuted)).setOrigin(1, 0));
+    row(scene.add.text(left, Y + 146, 'LAUNCH TIME', TITLE_STYLE(8, UI.textMuted)));
+    row(scene.add.text(X + W - PAD, Y + 142, '← →', TEXT_STYLE(12, UI.textMuted)).setOrigin(1, 0));
     this.cells = TIMES_OF_DAY.map((time, i) => {
       const cx = left + (i % 2) * (CELL_W + CELL_GAP);
       const cy = GRID_Y + Math.floor(i / 2) * (CELL_H + CELL_GAP);
@@ -103,22 +113,27 @@ export class PreflightCard {
     });
 
     // Verdict
-    items.push(scene.add.text(left, Y + 312, 'ROCKET', TITLE_STYLE(8, UI.textMuted)));
-    items.push(scene.add.text(left, Y + 328, info.verdict, TEXT_STYLE(13, info.verdictColor)).setWordWrapWidth(INNER).setMaxLines(3).setLineSpacing(-4));
+    row(scene.add.text(left, Y + 312, 'ROCKET', TITLE_STYLE(8, UI.textMuted)));
+    row(scene.add.text(left, Y + 328, info.verdict, TEXT_STYLE(13, info.verdictColor)).setWordWrapWidth(INNER).setMaxLines(3).setLineSpacing(-4));
 
     // Cost vs bank
     const affordable = info.bank >= info.cost;
-    items.push(scene.add.text(left, Y + 394, `COST $${info.cost}`, TEXT_STYLE(15, affordable ? UI.text : UI.redText)));
-    items.push(scene.add.text(X + W - PAD, Y + 394, `BANK $${info.bank}`, TEXT_STYLE(15, UI.goldText)).setOrigin(1, 0));
-    items.push(
-      scene.add
-        .text(left, Y + 420, affordable ? `$${info.bank - info.cost} left after launch` : 'Not enough: build a cheaper one (ESC)', TEXT_STYLE(11, affordable ? UI.textMuted : UI.redText))
+    row(scene.add.text(left, Y + 394, `COST $${info.cost.toLocaleString()}`, TEXT_STYLE(15, affordable ? UI.text : UI.redText)));
+    row(scene.add.text(X + W - PAD, Y + 394, `BANK $${info.bank.toLocaleString()}`, TEXT_STYLE(15, UI.goldText)).setOrigin(1, 0));
+    row(
+      scene.add.text(
+        left,
+        Y + 420,
+        affordable ? `$${(info.bank - info.cost).toLocaleString()} left after launch` : 'Not enough: build a cheaper one (ESC)',
+        TEXT_STYLE(11, affordable ? UI.textMuted : UI.redText)
+      )
     );
 
     // LAUNCH!
     this.button = scene.add.graphics();
     this.buttonLabel = scene.add.text(X + W / 2, BTN_Y + BTN_H / 2 - 2, 'LAUNCH!', TITLE_STYLE(18, '#ffffff')).setOrigin(0.5);
     const caption = scene.add.text(X + W / 2, BTN_Y + BTN_H + 8, 'or press SPACE', TEXT_STYLE(11, UI.textMuted)).setOrigin(0.5, 0);
+    this.rows.push(caption);
     const btnZone = scene.add.zone(X + W / 2, BTN_Y + BTN_H / 2, INNER, BTN_H).setInteractive({ useHandCursor: true });
     btnZone.on('pointerover', () => (this.buttonHover = true));
     btnZone.on('pointerout', () => (this.buttonHover = false));
@@ -128,27 +143,49 @@ export class PreflightCard {
 
     this.container = scene.add.container(0, 0, items).setDepth(15);
     this.drawCells();
+    this.drawBands();
+  }
+
+  /** A faint dark band behind each text row (the glass stays 30% smoke; the text gets its own backing). */
+  private drawBands(): void {
+    const g = this.bands;
+    g.clear();
+    g.fillStyle(TEXT_BAND.color, TEXT_BAND.alpha);
+    for (const t of this.rows) {
+      if (!t.text) continue;
+      const w = t.displayWidth;
+      const h = t.displayHeight;
+      g.fillRect(t.x - t.originX * w - TEXT_BAND.padX, t.y - t.originY * h - TEXT_BAND.padY, w + 2 * TEXT_BAND.padX, h + 2 * TEXT_BAND.padY);
+    }
   }
 
   /** The launch time changed: re-highlight the grid and rescale the reward. */
   public setTime(time: TimeOfDay): void {
     this.time = time;
-    this.reward.setText(this.missionReward === null ? '' : `Reward +$${Math.round(this.missionReward * timeOfDayReward(time))}`);
+    this.reward.setText(this.missionReward === null ? '' : `Reward +$${Math.round(this.missionReward * timeOfDayReward(time)).toLocaleString()}`);
     this.drawCells();
+    this.drawBands();
   }
 
-  /** Slide the card left by `dx` px (0 = in place); it stops taking clicks once it starts leaving. */
+  /** Slide the card left by `dx` px (0 = in place). */
   public setSlide(dx: number): void {
     this.container.x = dx;
     this.container.setVisible(dx > -(X + W));
-    const interactive = dx === 0;
+  }
+
+  /** Whether the card takes clicks (off from the countdown on, while it still shows). */
+  public setEnabled(interactive: boolean): void {
     if (interactive === this.interactive) return;
     this.interactive = interactive;
     for (const z of this.zones) {
       if (interactive) z.setInteractive({ useHandCursor: true });
       else z.disableInteractive();
     }
-    if (!interactive) this.buttonHover = false;
+    if (interactive) return;
+    // Disabled zones get no pointerout: drop any hover look now.
+    this.buttonHover = false;
+    for (const c of this.cells) c.hover = false;
+    this.drawCells();
   }
 
   public update(now: number): void {

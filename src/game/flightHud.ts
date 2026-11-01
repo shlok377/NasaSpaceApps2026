@@ -1,3 +1,4 @@
+import { CONFIG } from '../config';
 import { FuelKind } from '../core/types';
 import { FlightPart, TankFuel } from '../physics/vehicle';
 import { TimeOfDay } from './timeOfDay';
@@ -7,20 +8,26 @@ import { TimeOfDay } from './timeOfDay';
  * Pure (no drawing); the HUD widgets render it.
  */
 
+const HUD = CONFIG.flightHud;
 /** Tilt past this many degrees turns the attitude ball's rim amber. */
-export const TILT_AMBER_DEGREES = 20;
+export const TILT_AMBER_DEGREES = HUD.tiltAmberDegrees;
 /** Tilt past this many degrees turns it red. */
-export const TILT_RED_DEGREES = 35;
+export const TILT_RED_DEGREES = HUD.tiltRedDegrees;
 /** More tanks than this and repeated tanks are grouped as ×n. */
-export const MAX_UNGROUPED_TANKS = 6;
+export const MAX_UNGROUPED_TANKS = HUD.maxUngroupedTanks;
 /** Wind speed (m/s) drawn as a full-strength arrow. */
-export const FULL_WIND_SPEED = 20;
+export const FULL_WIND_SPEED = HUD.fullWindSpeed;
+/** Wind under this speed (m/s) counts as calm (no arrow). */
+export const CALM_WIND_SPEED = HUD.calmWindSpeed;
 
 export type TiltWarning = 'NORMAL' | 'AMBER' | 'RED';
 
 /** One mini tank in the fuel row (or a ×n group of identical tanks). */
 export interface HudTank {
-  /** Part id of the (first) tank; stable across frames, so widgets can key on it. */
+  /**
+   * Stable across frames, so widgets can key on it: the tank's part id, or for a
+   * ×n group an id from what the tanks share (it survives some of them dropping away).
+   */
   id: string;
   /** Every tank in this entry (one unless grouped). */
   partIds: string[];
@@ -82,7 +89,7 @@ export function tiltWarning(tiltDegrees: number): TiltWarning {
 }
 
 export function hudWind(speed: number): HudWind {
-  const calm = Math.abs(speed) < 0.05;
+  const calm = Math.abs(speed) < CALM_WIND_SPEED;
   return {
     direction: calm ? 0 : speed > 0 ? 1 : -1,
     strength: calm ? 0 : Math.min(1, Math.abs(speed) / FULL_WIND_SPEED),
@@ -135,14 +142,17 @@ export function flightHudModel(sim: HudSimView, telemetry: HudTelemetry, timeOfD
  * Repeated tanks (same fuel, size, distance from the cockpit and attached
  * state, e.g. a pair of side boosters) share one entry; they drain together,
  * so their fill is averaged. Order follows the first tank of each group.
+ * A group's id comes from what its tanks share, not from a member, so it
+ * stays the same when some of its tanks drop away.
  */
 function groupTanks(single: Array<{ part: FlightPart; tank: HudTank }>): HudTank[] {
   const groups = new Map<string, HudTank>();
   for (const { part, tank } of single) {
-    const key = `${tank.fuelKind}|${part.fuelCapacity}|${part.depth}|${tank.attached}`;
+    const shared = `${tank.fuelKind}|${part.fuelCapacity}|${part.depth}`;
+    const key = `group:${shared}${tank.attached ? '' : '|dropped'}`;
     const g = groups.get(key);
     if (!g) {
-      groups.set(key, { ...tank, partIds: [...tank.partIds] });
+      groups.set(key, { ...tank, id: key, partIds: [...tank.partIds] });
       continue;
     }
     g.fraction = (g.fraction * g.count + tank.fraction) / (g.count + 1);

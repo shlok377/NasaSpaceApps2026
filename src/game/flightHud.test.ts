@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { RocketTree } from '../core/RocketTree';
 import { FuelKind, PartType } from '../core/types';
 import { FlightSim } from '../physics/FlightSim';
-import { boosterStages, buildFlightVehicle } from '../physics/vehicle';
-import { flightHudModel, HudTelemetry } from './flightHud';
+import { boosterStages, buildFlightVehicle, FlightPart } from '../physics/vehicle';
+import { flightHudModel, HudSimView, HudTelemetry } from './flightHud';
 
 type Layout = Array<[number, number, PartType, FuelKind?]>;
 
@@ -94,6 +94,30 @@ describe('flight HUD model: fuel', () => {
     expect(model.tanks.some(t => t.count > 1)).toBe(true);
     for (const t of model.tanks) expect(t.partIds).toHaveLength(t.count);
     expect(model.tanks.filter(t => t.fuelKind === 'PURPLE').reduce((n, t) => n + t.count, 0)).toBe(4);
+  });
+
+  it('keeps a group’s id when some of its tanks drop away, so no puff plays for it', () => {
+    // Eight tanks: a core of four, two side pairs at different depths.
+    const part = (id: string, depth: number, fuelKind: FuelKind = 'STANDARD') => ({ id, depth, fuelKind, fuelCapacity: 400 }) as unknown as FlightPart;
+    const all = [part('c1', 1, 'PURPLE'), part('c2', 2, 'PURPLE'), part('c3', 3, 'PURPLE'), part('c4', 4, 'PURPLE'), part('l1', 1), part('r1', 1), part('l2', 2), part('r2', 2)];
+    const view = (attached: FlightPart[]): HudSimView => ({
+      initialVehicle: { parts: all },
+      vehicle: { parts: attached },
+      tanks: new Map(attached.map(p => [p.id, p.fuelCapacity]))
+    });
+    const shown = (attached: FlightPart[]) => flightHudModel(view(attached), CALM).tanks.filter(t => t.attached);
+
+    const before = shown(all);
+    // The first tank of the l1/r1 pair drops; its partner stays.
+    const after = shown(all.filter(p => p.id !== 'l1'));
+    expect(after.map(t => t.id)).toEqual(before.map(t => t.id));
+    const pair = after.find(t => t.partIds.includes('r1'))!;
+    expect(pair.count).toBe(1);
+    expect(before.find(t => t.id === pair.id)!.count).toBe(2);
+
+    // Both drop: only then does that group leave the row.
+    const gone = shown(all.filter(p => p.id !== 'r1' && p.id !== 'l1'));
+    expect(gone.map(t => t.id)).toEqual(before.map(t => t.id).filter(id => id !== pair.id));
   });
 
   it('does not group six tanks or fewer', () => {

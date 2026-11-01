@@ -194,7 +194,7 @@ class ProblemSection {
     this.container = scene.add.container(0, 0, [this.gfx, this.title, this.howTo, this.detail]);
   }
 
-  public update(p: ActiveProblem, extra: { periapsis: number | null }): void {
+  public update(p: ActiveProblem, orbit: OrbitElements | null): void {
     const info = PROBLEM_INFO[p.id];
     this.title.setText(`⚠ ${info.title}${p.timeLeft !== null ? `   ${Math.ceil(p.timeLeft)}s` : ''}`);
     this.howTo.setText(info.howTo);
@@ -234,7 +234,7 @@ class ProblemSection {
         break;
       }
       case 'ORBIT_DECAY': {
-        const pe = extra.periapsis ?? 0;
+        const pe = orbit?.periapsisAltitude ?? 0;
         const safe = CONFIG.phases.rover.problems.ORBIT_DECAY.safePeriapsis;
         g.fillStyle(UI.sky, 1);
         g.fillRect(barX, barY, barW * p.progress, 10);
@@ -283,16 +283,11 @@ export class BottomCard {
   }
 
   /**
-   * `problem` null hides the problem section; `orbit` undefined hides the band.
-   * The card hides itself when neither is shown.
+   * `problem` null hides the problem section; the orbit band shows when `orbit.showBand`
+   * (`hold` is the phase 1 hold progress, 0..1, or null). The card hides itself when neither is shown.
    */
-  public update(
-    problem: ActiveProblem | null,
-    orbit: { elements: OrbitElements | null; hold: number | null } | undefined,
-    extra: { periapsis: number | null },
-    time: number
-  ): void {
-    const showOrbit = orbit !== undefined;
+  public update(problem: ActiveProblem | null, orbit: { elements: OrbitElements | null; showBand: boolean; hold: number | null }, time: number): void {
+    const showOrbit = orbit.showBand;
     const showProblem = problem !== null;
     this.container.setVisible(showOrbit || showProblem);
     this.problem.container.setVisible(showProblem);
@@ -311,7 +306,7 @@ export class BottomCard {
     let y = top + CARD_PAD;
     if (showProblem) {
       this.problem.container.setPosition(this.x, y);
-      this.problem.update(problem, extra);
+      this.problem.update(problem, orbit.elements);
       y += ProblemSection.H + 8;
     }
     if (showOrbit) {
