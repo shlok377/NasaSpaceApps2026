@@ -12,6 +12,10 @@ interface Spark {
   color: number;
   fireball: boolean;
   size: number;
+  /** Downward pull (px/s²); defaults to a light 220. Water spray falls back hard. */
+  gravity?: number;
+  /** Drawn on a 4 px grid, like the pixel-art scenery. */
+  pixel?: boolean;
 }
 
 interface Ring {
@@ -21,6 +25,8 @@ interface Ring {
   life: number;
   maxRadius: number;
   color: number;
+  /** Height / width of the ring (1 = circle; ripples on water are flat ellipses). */
+  squash?: number;
 }
 
 const POPUP_LIFE = 1.6;
@@ -55,6 +61,26 @@ export class Effects {
       const v = 60 + Math.random() * 320;
       this.sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 40, age: 0, life: 0.6 + Math.random() * 1.4, color: Phaser.Utils.Array.GetRandom([0xffe066, 0xff7b1c, 0xef4444, 0xffffff, 0x64748b]), fireball: false, size: 3 + Math.random() * 5 });
     }
+  }
+
+  /** Rocket hits the sea: a tall spray column, droplets raining back down, foam and ripples on the water. */
+  public splash(x: number, y: number): void {
+    const water = [0xffffff, 0xe2f3fb, 0xb4dcef, 0x8cc6e6, 0x5197cb];
+    for (let i = 0; i < 34; i++) {
+      // The column: fast, nearly straight up.
+      this.sparks.push({ x: x + (Math.random() - 0.5) * 36, y, vx: (Math.random() - 0.5) * 70, vy: -(380 + Math.random() * 380), age: 0, life: 1.2 + Math.random() * 0.6, color: Phaser.Utils.Array.GetRandom(water.slice(0, 3)), fireball: false, size: 8 + Math.random() * 8, gravity: 760, pixel: true });
+    }
+    for (let i = 0; i < 90; i++) {
+      // Droplets thrown out in a wide crown.
+      const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2;
+      const v = 140 + Math.random() * 360;
+      this.sparks.push({ x: x + (Math.random() - 0.5) * 24, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, age: 0, life: 0.9 + Math.random() * 0.9, color: Phaser.Utils.Array.GetRandom(water), fireball: false, size: 4 + Math.random() * 4, gravity: 820, pixel: true });
+    }
+    for (let i = 0; i < 7; i++) {
+      // Foam boiling up where it went in.
+      this.sparks.push({ x: x + (i - 3) * 16, y: y - 6, vx: (i - 3) * 6, vy: -4, age: 0, life: 1.4 + Math.random() * 0.8, color: 0xffffff, fireball: true, size: 10 + Math.random() * 8 });
+    }
+    for (let i = 0; i < 4; i++) this.rings.push({ x, y, age: -i * 0.35, life: 1.6, maxRadius: 220 + i * 50, color: 0xe2f3fb, squash: 0.18 });
   }
 
   /** A little burst of coloured confetti (pickups). */
@@ -118,7 +144,7 @@ export class Effects {
     let writeSparks = 0;
     for (let i = 0; i < this.sparks.length; i++) {
       const sp = this.sparks[i];
-      if (!sp.fireball) sp.vy += 220 * realDt;
+      if (!sp.fireball) sp.vy += (sp.gravity ?? 220) * realDt;
       sp.x += sp.vx * realDt;
       sp.y += sp.vy * realDt;
       sp.age += realDt;
@@ -182,15 +208,23 @@ export class Effects {
     }
 
     for (const r of this.rings) {
+      if (r.age < 0) continue;
       const k = r.age / r.life;
       g.lineStyle(4 * (1 - k) + 1, r.color, 1 - k);
-      g.strokeCircle(r.x, r.y, 20 + r.maxRadius * k);
+      if (r.squash) {
+        const w = 20 + r.maxRadius * k;
+        g.strokeEllipse(r.x, r.y, w * 2, w * 2 * r.squash);
+      } else g.strokeCircle(r.x, r.y, 20 + r.maxRadius * k);
     }
     for (const sp of this.sparks) {
       const k = sp.age / sp.life;
       if (sp.fireball) {
         g.fillStyle(sp.color, 0.8 * (1 - k));
         g.fillCircle(sp.x, sp.y, sp.size * (1 + 2.5 * k));
+      } else if (sp.pixel) {
+        const size = Math.max(4, Math.round((sp.size * (1 - k * 0.6)) / 4) * 4);
+        g.fillStyle(sp.color, Math.min(1, 1.6 * (1 - k)));
+        g.fillRect(Math.round(sp.x / 4) * 4 - size / 2, Math.round(sp.y / 4) * 4 - size / 2, size, size);
       } else {
         const size = sp.size * (1 - k);
         g.fillStyle(sp.color, 1 - k);

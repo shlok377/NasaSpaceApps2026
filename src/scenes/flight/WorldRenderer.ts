@@ -11,14 +11,33 @@ import { FlightPart } from '../../physics/vehicle';
 import { computeScreenRetrograde, ScreenRetrogradeVector } from '../../physics/guidance';
 import { GAME_ASSETS, getPartTextureKey } from '../../core/assets';
 import { UI } from '../../ui/theme';
-import { COMPLEX, HORIZON_ROW, PAD_COLUMN, PIXEL, SITE_GROUND_ROW, SITE_FAR_KEY, SITE_KEY, SITE_SIZE, createDaySkyTexture, createLaunchSiteFarTexture, createLaunchSiteTexture, daySkyKey, isSeaColumn } from './LaunchSite';
+import {
+  COMPLEX,
+  HORIZON_ROW,
+  LAND_DEEP_KEY,
+  LAND_PERIOD,
+  LAND_TILE_KEY,
+  PIXEL,
+  SEA_DEEP_KEY,
+  SEA_FROM,
+  SEA_PERIOD,
+  SEA_TILE_KEY,
+  SITE_GROUND_ROW,
+  SITE_H,
+  SITE_KEY,
+  SITE_W,
+  createDaySkyTexture,
+  createLaunchSiteTexture,
+  createShoreTiles,
+  daySkyKey,
+  isSeaColumn
+} from './LaunchSite';
 import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay } from '../../game/timeOfDay';
 import { hash } from '../../ui/backdrop';
 
 export const SCREEN_CX = 640;
 export const SCREEN_CY = 400;
 /** How far the far mountain range scrolls relative to the ground (1 = rigid). */
-const FAR_PARALLAX = 0.85;
 
 /** Pixels per metre on the pad (one grid cell = one metre). */
 export const CELL_PX = CONFIG.camera.ascentScale;
@@ -141,9 +160,12 @@ export class WorldRenderer {
   private padRig: { left: number; top: number } | null = null;
   /** Launch time picked on the pad: sets the sky, light on the land and the gradient up to space. */
   private time: TimeOfDay = 'DAWN';
-  private readonly launchSite: Phaser.GameObjects.TileSprite;
-  private readonly launchSiteFar: Phaser.GameObjects.TileSprite;
-  private readonly siteGroundGfx: Phaser.GameObjects.Graphics;
+  /** Unique centre piece (pad, complex, cliff) plus endless strips: land west, sea east, and ground / deep water below. */
+  private readonly launchSite: Phaser.GameObjects.Image;
+  private readonly landStrip: Phaser.GameObjects.TileSprite;
+  private readonly seaStrip: Phaser.GameObjects.TileSprite;
+  private readonly landDeep: Phaser.GameObjects.TileSprite;
+  private readonly seaDeep: Phaser.GameObjects.TileSprite;
   private readonly worldGfx: Phaser.GameObjects.Graphics;
   private readonly rocketGfx: Phaser.GameObjects.Graphics;
   private readonly partSpritesContainer: Phaser.GameObjects.Container;
@@ -179,7 +201,6 @@ export class WorldRenderer {
     this.skyGfx?.setDepth?.(-3);
     for (const time of TIMES_OF_DAY) createDaySkyTexture(scene, time);
     createLaunchSiteTexture(scene);
-    createLaunchSiteFarTexture(scene);
     // A full-screen strip so the clouds can drift (the texture wraps sideways).
     this.daySky = scene.add.tileSprite?.(0, 0, 1280, 720, daySkyKey(this.time));
     this.daySky?.setOrigin?.(0);
@@ -202,14 +223,20 @@ export class WorldRenderer {
     this.landingFlagSprite?.setDepth?.(5);
     this.ensureSmokeTexture();
     this.smokeSpritesContainer = scene.add.container(0, 0);
-    this.siteGroundGfx = scene.add.graphics();
-    // Both layers tile sideways forever: full-screen strips whose texture offset follows the pad.
-    this.launchSiteFar = scene.add.tileSprite?.(0, 0, 1280, SITE_SIZE.height, SITE_FAR_KEY);
-    this.launchSiteFar?.setOrigin?.(0, 0);
-    this.launchSiteFar?.setTileScale?.(PIXEL, PIXEL);
-    this.launchSite = scene.add.tileSprite?.(0, 0, 1280, SITE_SIZE.height, SITE_KEY);
+    createShoreTiles(scene);
+    const strip = (key: string) => {
+      const t = scene.add.tileSprite?.(0, 0, PIXEL, PIXEL, key);
+      t?.setOrigin?.(0, 0);
+      t?.setTileScale?.(PIXEL, PIXEL);
+      return t;
+    };
+    this.landDeep = strip(LAND_DEEP_KEY);
+    this.seaDeep = strip(SEA_DEEP_KEY);
+    this.landStrip = strip(LAND_TILE_KEY);
+    this.seaStrip = strip(SEA_TILE_KEY);
+    this.launchSite = scene.add.image(0, 0, SITE_KEY);
     this.launchSite?.setOrigin?.(0, 0);
-    this.launchSite?.setTileScale?.(PIXEL, PIXEL);
+    this.launchSite?.setScale?.(PIXEL);
     this.siteFxGfx = scene.add.graphics();
     this.setTimeOfDay(this.time);
     this.worldGfx = scene.add.graphics();
@@ -221,8 +248,7 @@ export class WorldRenderer {
     this.time = time;
     const look = TIME_LOOKS[time];
     this.daySky?.setTexture?.(daySkyKey(time));
-    this.launchSite?.setTint?.(look.landTint);
-    this.launchSiteFar?.setTint?.(look.farTint);
+    for (const layer of [this.launchSite, this.landStrip, this.seaStrip, this.landDeep, this.seaDeep]) layer?.setTint?.(look.landTint);
     this.lastSkyAltitude = -Infinity;
   }
 
@@ -502,30 +528,23 @@ export class WorldRenderer {
     this.daySky?.setAlpha?.(Phaser.Math.Clamp((air - 0.55) / 0.4, 0, 1));
     if (this.daySky) this.daySky.tilePositionX = now / 400;
 
-    // Launch-site panorama pinned to the ground line, with plain dirt past its edges.
+    // The spaceport, pinned to the ground line with the pad (global column 0) under world x = 0.
     const ground = this.toScreen(0, 0);
     const siteTop = ground.y - SITE_GROUND_ROW * PIXEL;
     const siteVisible = this.camera.mode === 'ASCENT' && siteTop < 720;
-    this.launchSite?.setVisible?.(siteVisible);
-    this.launchSiteFar?.setVisible?.(siteVisible);
-    // Texture column under the screen's left edge so the panorama's centre (x = 320) sits on the pad.
-    // The far range scrolls slower (parallax about the screen centre) for depth.
-    const tileX = (screenX: number): number => Math.round(SITE_SIZE.width / PIXEL / 2 - screenX / PIXEL);
+    const padX = Math.round(ground.x);
     const siteY = Math.round(ground.y) - SITE_GROUND_ROW * PIXEL;
-    this.launchSite?.setPosition?.(0, siteY);
-    if (this.launchSite) this.launchSite.tilePositionX = tileX(ground.x);
-    this.launchSiteFar?.setPosition?.(0, siteY);
-    if (this.launchSiteFar) this.launchSiteFar.tilePositionX = tileX(640 + (ground.x - 640) * FAR_PARALLAX);
-    this.drawSiteLife(sim, ground.x, siteY, siteVisible, now);
-    const g = this.siteGroundGfx;
-    g?.clear?.();
-    if (siteVisible && ground.y < 720) {
-      const tint = TIME_LOOKS[this.time].landTint;
-      g?.fillStyle?.(multiplyColor(0x8a5d36, tint), 1);
-      g?.fillRect?.(0, ground.y, 1280, 720 - ground.y);
-      g?.fillStyle?.(multiplyColor(0x86c058, tint), 1);
-      g?.fillRect?.(0, ground.y, 1280, PIXEL);
-    }
+    const deepY = siteY + SITE_H * PIXEL;
+    const left = padX - (SITE_W / 2) * PIXEL;
+    const right = padX + (SITE_W / 2) * PIXEL;
+    const coast = padX + SEA_FROM * PIXEL;
+    this.launchSite?.setVisible?.(siteVisible && right > 0 && left < 1280 && deepY > 0);
+    this.launchSite?.setPosition?.(left, siteY);
+    this.placeStrip(this.landStrip, siteVisible, 0, Math.min(1280, left), siteY, SITE_H, left, -SITE_W / 2, LAND_PERIOD);
+    this.placeStrip(this.seaStrip, siteVisible, Math.max(0, right), 1280, siteY, SITE_H, right, SITE_W / 2, SEA_PERIOD);
+    this.placeStrip(this.landDeep, siteVisible, 0, Math.min(1280, coast), deepY, Math.ceil((720 - deepY) / PIXEL), coast, SEA_FROM, LAND_PERIOD);
+    this.placeStrip(this.seaDeep, siteVisible, Math.max(0, coast), 1280, deepY, Math.ceil((720 - deepY) / PIXEL), coast, SEA_FROM, SEA_PERIOD);
+    this.drawSiteLife(sim, padX, siteY, siteVisible, now);
 
     // During the climb the Moon hangs in the sky ahead and grows as you near it.
     if (this.camera.mode === 'ASCENT') {
@@ -544,6 +563,29 @@ export class WorldRenderer {
     }
   }
 
+  /** Is this spot on Earth's surface out over the sea (east of the cliff)? */
+  public isOverSea(worldX: number): boolean {
+    return this.camera.mode === 'ASCENT' && isSeaColumn((worldX * this.camera.scale) / PIXEL);
+  }
+
+  /**
+   * Stretch a repeating strip over screen x [from, to), rows `rows` tall from `y`, with its pattern locked
+   * to the world: global column `anchorCol` sits at screen x `anchorX`. Starts on a whole number of
+   * periods from the anchor so no pixel ever shifts, however far away the camera is.
+   */
+  private placeStrip(t: Phaser.GameObjects.TileSprite | undefined, show: boolean, from: number, to: number, y: number, rows: number, anchorX: number, anchorCol: number, period: number): void {
+    if (!t) return;
+    const visible = show && to > from && rows > 0 && y < 720 && y + rows * PIXEL > 0;
+    t.setVisible?.(visible);
+    if (!visible) return;
+    const span = period * PIXEL;
+    const start = anchorX - Math.ceil((anchorX - from) / span) * span;
+    t.setPosition?.(start, y);
+    t.setSize?.(Math.ceil((to - start) / PIXEL) * PIXEL, rows * PIXEL);
+    t.tilePositionX = anchorCol + (start - anchorX) / PIXEL;
+    t.tilePositionY = 0;
+  }
+
   /**
    * The subtle moving parts of the spaceport, drawn over the painted panorama in its own
    * pixel grid: flags flapping, glints on the sea, a few birds, steam at the pad and,
@@ -557,7 +599,7 @@ export class WorldRenderer {
     const tint = look.landTint;
     const dark = this.time === 'NIGHT' || this.time === 'DUSK';
     // Panorama pixel (column, row) → screen.
-    const sx = (col: number) => Math.round(groundX + (col - PAD_COLUMN) * PIXEL);
+    const sx = (col: number) => Math.round(groundX + col * PIXEL);
     const sy = (row: number) => siteY + row * PIXEL;
     const dot = (col: number, row: number, color: number, alpha = 1, w = 1, h = 1) => {
       g.fillStyle(color, alpha);
@@ -574,7 +616,7 @@ export class WorldRenderer {
     }
 
     // Glints on the sea: a few pixels that wink in and out (fewer and bluer at night).
-    const firstCol = PAD_COLUMN + Math.floor(-groundX / PIXEL);
+    const firstCol = Math.floor(-groundX / PIXEL);
     for (let k = 0; k < 40; k++) {
       const cycle = Math.floor(now / 900 + k * 0.37);
       const col = firstCol + Math.floor(hash(k, cycle) * (1280 / PIXEL));
@@ -605,7 +647,7 @@ export class WorldRenderer {
       for (let k = 0; k < 10; k++) {
         const life = (now / 2200 + k / 10) % 1;
         const side = k % 2 === 0 ? -1 : 1;
-        const col = PAD_COLUMN + side * (27 + life * 10 + hash(k) * 3);
+        const col = side * (27 + life * 10 + hash(k) * 3);
         const row = SITE_GROUND_ROW - 2 - life * 14;
         const size = 1 + Math.floor(life * 3);
         dot(Math.round(col), Math.round(row), multiplyColor(0xf4f6f8, lerpColor(tint, 0xffffff, 0.4)), 0.55 * (1 - life), size, size);
@@ -618,7 +660,7 @@ export class WorldRenderer {
       for (const f of COMPLEX.floods) {
         dot(f.x - 2, f.top + 1, 0xfff3c4, strength, 5, 1);
         g.fillStyle(0xfff3c4, 0.08 * strength);
-        g.fillTriangle(sx(f.x), sy(f.top + 2), sx(PAD_COLUMN - 26), sy(SITE_GROUND_ROW), sx(PAD_COLUMN + 26), sy(SITE_GROUND_ROW));
+        g.fillTriangle(sx(f.x), sy(f.top + 2), sx(-26), sy(SITE_GROUND_ROW), sx(26), sy(SITE_GROUND_ROW));
       }
       const beam = 0.5 + 0.5 * Math.sin(now / 700);
       const lh = COMPLEX.lighthouse;
