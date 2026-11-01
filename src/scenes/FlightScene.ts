@@ -24,12 +24,11 @@ import { ENGINE, FINS, G0, LIMITS, ROCK_BELT, WORLD } from '../physics/constants
 import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physics/FlightSim';
 import { evaluateMission, MAX_STARS, MissionResult } from '../physics/mission';
 import { analyzeVehicle, buildFlightVehicle, FlightVehicle, VehicleReport } from '../physics/vehicle';
-import { Altimeter } from '../ui/Altimeter';
-import { CoinCounter } from '../ui/CoinCounter';
 import { FuelTank } from '../ui/FuelTank';
-import { JourneyArc, Milestone } from '../ui/JourneyArc';
+import { HintRow, KeyHints } from '../ui/KeyHints';
 import { LaunchButton } from '../ui/LaunchButton';
-import { OrbitGauge, PhaseStrip, ProblemCard } from '../ui/PhaseHud';
+import { BottomCard, PhasePips, RIGHT_EDGE } from '../ui/PhaseHud';
+import { ProgressTrack } from '../ui/ProgressTrack';
 import { CLASSIC, CLASSIC_TEXT_STYLE, formatDistance, TEXT_STYLE, TITLE_STYLE, UI } from '../ui/theme';
 import { preloadGameAssets } from '../core/assets';
 import { Effects } from './flight/Effects';
@@ -52,7 +51,11 @@ type Keys = Record<
 
 /** Height where the Moon's pull takes over, straight below it: the end of the climb. */
 const SOI_ALTITUDE = moonSoiAltitude();
-const MILESTONES: Milestone[] = [
+/** Big centre moments (phase titles, banners) stay up about this long (s). */
+const MOMENT_SECONDS = 1.5;
+
+/** Climb milestones that pay a bonus, as a fraction of the climb to the Moon's pull. */
+const MILESTONES: Array<{ label: string; at: number }> = [
   { label: 'Clouds', at: 1_500 / SOI_ALTITUDE },
   { label: 'Space', at: WORLD.atmosphereTop / SOI_ALTITUDE }
 ];
@@ -119,20 +122,19 @@ export class FlightScene extends Phaser.Scene {
   private fx!: Effects;
 
   // HUD
-  private phaseStrip!: PhaseStrip;
-  private orbitGauge!: OrbitGauge;
-  private problemCard!: ProblemCard;
-  private journey!: JourneyArc;
-  private altimeter!: Altimeter;
+  private phasePips!: PhasePips;
+  private bottomCard!: BottomCard;
+  private track!: ProgressTrack;
+  private keyHints!: KeyHints;
   private fuelTank!: FuelTank;
-  private coins!: CoinCounter;
+  /** Money (bank + live award cash) last frame, to pop `+$` when it rises. */
+  private lastCash: number | null = null;
   private launchButton!: LaunchButton;
   private missionText!: Phaser.GameObjects.Text;
   /** Launch time picked on the pad (resets to DAWN every launch). */
   private timeOfDay: TimeOfDay = 'DAWN';
   private timePicker!: Phaser.GameObjects.Container;
   private timeCards: Array<{ time: TimeOfDay; gfx: Phaser.GameObjects.Graphics; hover: boolean }> = [];
-  private hintText!: Phaser.GameObjects.Text;
   private bannerText!: Phaser.GameObjects.Text;
   private phaseTitle!: Phaser.GameObjects.Text;
   private phaseGoal!: Phaser.GameObjects.Text;
@@ -227,6 +229,7 @@ export class FlightScene extends Phaser.Scene {
     this.impactMarker = null;
     this.markerAt = -Infinity;
     this.timeOfDay = 'DAWN';
+    this.lastCash = null;
   }
 
   preload(): void {
@@ -263,25 +266,18 @@ export class FlightScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
 
   private createHud(): void {
-    this.phaseStrip = new PhaseStrip(this);
-    this.journey = new JourneyArc(this, 690, MILESTONES);
-    this.orbitGauge = new OrbitGauge(this);
-    this.problemCard = new ProblemCard(this);
-    this.altimeter = new Altimeter(
-      this,
-      1230,
-      150,
-      380,
-      SOI_ALTITUDE,
-      [
-        { label: 'Clouds', height: 1_500 },
-        { label: 'SPACE', height: WORLD.atmosphereTop },
-        { label: 'MOON', height: SOI_ALTITUDE }
-      ],
-      { from: ROCK_BELT.bottom, to: ROCK_BELT.top, label: 'rocks' }
-    );
+    // Right column: phase pips + goal (+ money pop), the Earth→Moon track, key caps.
+    this.phasePips = new PhasePips(this);
+    this.track = new ProgressTrack(this, 1236, 186, 548, SOI_ALTITUDE, [
+      { label: 'Clouds', height: 1_500 },
+      { label: 'Space', height: WORLD.atmosphereTop },
+      { label: 'Rocks', height: ROCK_BELT.bottom, to: ROCK_BELT.top },
+      { label: 'Moon', height: SOI_ALTITUDE }
+    ]);
+    this.keyHints = new KeyHints(this, 682);
+    // Bottom centre: the problem card and the orbit band.
+    this.bottomCard = new BottomCard(this);
     this.fuelTank = new FuelTank(this, 38, 560);
-    this.coins = new CoinCounter(this, 1264, 34);
 
     const [verdict, color] = this.verdict();
     const affordable = this.progress.money >= this.cost;
@@ -290,15 +286,15 @@ export class FlightScene extends Phaser.Scene {
     );
     this.missionText = this.add.text(640, 168, '', TEXT_STYLE(15, UI.goldText)).setOrigin(0.5);
     this.createTimePicker();
-    this.hintText = this.add.text(640, 694, '', TEXT_STYLE(14)).setOrigin(0.5).setDepth(20);
-    this.bannerText = this.add.text(640, 236, '', TEXT_STYLE(20, '#ffffff')).setOrigin(0.5, 0).setAlpha(0).setDepth(20);
+    // Big centre moments: brief, one line each.
+    this.bannerText = this.add.text(640, 236, '', TEXT_STYLE(20, '#ffffff')).setOrigin(0.5, 0).setAlpha(0).setDepth(20).setAlign('center').setWordWrapWidth(1100).setMaxLines(1);
     this.phaseTitle = this.add.text(640, 300, '', TITLE_STYLE(30, '#ffffff')).setOrigin(0.5).setAlpha(0).setDepth(30);
-    this.phaseGoal = this.add.text(640, 344, '', TEXT_STYLE(16, UI.text)).setOrigin(0.5, 0).setAlpha(0).setDepth(30).setAlign('center').setWordWrapWidth(640);
+    this.phaseGoal = this.add.text(640, 344, '', TEXT_STYLE(16, UI.text)).setOrigin(0.5, 0).setAlpha(0).setDepth(30).setAlign('center').setWordWrapWidth(900).setMaxLines(1);
     this.countdownText = this.add.text(640, 320, '', TITLE_STYLE(72, '#ffffff')).setOrigin(0.5).setVisible(false).setDepth(30);
     this.readoutText = this.add.text(0, 0, '', TEXT_STYLE(15)).setOrigin(0, 0.5).setVisible(false).setDepth(10);
     this.comboText = this.add.text(640, 128, '', TEXT_STYLE(18, '#f0abfc')).setOrigin(0.5).setVisible(false);
-    this.warpText = this.add.text(1250, 80, '', TEXT_STYLE(14, '#93c5fd')).setOrigin(1, 0.5).setDepth(20);
-    this.endButton = this.add.text(1250, 694, '■ End flight', TEXT_STYLE(13, UI.textMuted)).setOrigin(1, 0.5).setInteractive({ useHandCursor: true }).setVisible(false);
+    this.warpText = this.add.text(RIGHT_EDGE, 120, '', TEXT_STYLE(14, '#93c5fd')).setOrigin(1, 0.5).setDepth(20);
+    this.endButton = this.add.text(RIGHT_EDGE, 700, '■ End flight', TEXT_STYLE(13, UI.textMuted)).setOrigin(1, 0.5).setInteractive({ useHandCursor: true }).setVisible(false);
     this.endButton.on('pointerdown', () => {
       if (!this.result && this.launched) this.finishMission();
     });
@@ -472,7 +468,7 @@ export class FlightScene extends Phaser.Scene {
       this.laneSteerInput = 0;
 
       if (ev.promptTriggered) {
-        this.showBanner(`DEBRIS FIELD AHEAD: PRESS [SPACE] TO ENGAGE EVASIVE RUNNER (${Math.ceil(this.runnerState.promptTimer)}s)`, '#38bdf8');
+        this.showBanner(`DEBRIS FIELD AHEAD! [SPACE] EVASIVE RUNNER (${Math.ceil(this.runnerState.promptTimer)}s)`, '#38bdf8');
       }
       if (ev.engaged) {
         this.runnerEntryVy = Math.max(this.sim.state.vy, RUNNER_CONFIG.cruiseSpeed ?? 45);
@@ -616,8 +612,8 @@ export class FlightScene extends Phaser.Scene {
     }
     this.countdown = null;
     this.launched = true;
-    this.countdownText.setText('GO!');
-    this.tweens.add({ targets: this.countdownText, alpha: 0, delay: 500, duration: 400, onComplete: () => this.countdownText.setVisible(false) });
+    this.countdownText.setText('LIFTOFF!');
+    this.tweens.add({ targets: this.countdownText, alpha: 0, delay: MOMENT_SECONDS * 1000 - 400, duration: 400, onComplete: () => this.countdownText.setVisible(false) });
     this.sim.launch();
     this.time.delayedCall(1000, () => this.showPhaseTitle('ORBIT'));
   }
@@ -686,7 +682,7 @@ export class FlightScene extends Phaser.Scene {
           break;
         case 'SITE_MOVED':
           this.cameras.main.shake(300, 0.008);
-          this.showBanner(`⚠ ${PROBLEM_INFO.BOULDERS.title}: ${PROBLEM_INFO.BOULDERS.howTo}`, '#fca5a5');
+          this.showBanner(`⚠ ${PROBLEM_INFO.BOULDERS.title}: fly to the new green site`, '#fca5a5');
           break;
         case 'COMPLETE':
           if (e.onSite) this.celebrate({ id: 'BULLSEYE', label: 'ON THE SITE', points: 1_000 });
@@ -761,7 +757,7 @@ export class FlightScene extends Phaser.Scene {
     const info = PHASE_INFO[phase];
     this.phaseTitle.setText(`PHASE ${info.number} · ${info.title}`).setAlpha(1);
     this.phaseGoal.setText(info.goal).setAlpha(1);
-    this.titleTimer = 3.2;
+    this.titleTimer = MOMENT_SECONDS;
   }
 
   private checkMilestones(t: FlightTelemetry): void {
@@ -820,29 +816,31 @@ export class FlightScene extends Phaser.Scene {
     const best = Math.max(this.progress.bestHeight, this.sim.stats.maxAltitude);
     const onPad = this.sim.phase === 'PRELAUNCH' && this.countdown === null;
 
-    this.phaseStrip.setVisible(!onPad);
-    this.phaseStrip.update(r.phase, r.phasesDone, this.objective(t), now);
+    // Right column (hidden on the pad): phase pips + goal, money pop, Earth→Moon track, key caps.
+    this.phasePips.setVisible(!onPad);
+    // Money is hidden in flight; it only pops `+$n` under the goal when it comes in.
+    const cash = this.progress.money + (this.result ? 0 : cashFromAwards(this.stunts.awards));
+    if (this.lastCash !== null && cash > this.lastCash && !onPad && !this.result) this.phasePips.earn(cash - this.lastCash);
+    this.lastCash = cash;
+    this.phasePips.update(r.phase, r.phasesDone, this.objective(t), now, dt);
+    this.warpText.setY(this.phasePips.bottom + 10);
 
     const ascent = mode === 'ASCENT';
-    this.journey.setVisible(ascent && !onPad);
-    this.journey.update(
-      {
-        fraction: Phaser.Math.Clamp(t.earthAltitude / SOI_ALTITUDE, 0, 1),
-        travelled: Math.max(0, Math.min(SOI_ALTITUDE, t.earthAltitude)),
-        total: SOI_ALTITUDE,
-        outbound: t.verticalSpeed >= 0,
-        onCourse: this.coastApex !== null && this.coastApex >= SOI_ALTITUDE,
-        passed: this.passed
-      },
+    this.track.setVisible(ascent && !onPad);
+    this.track.update(Math.max(0, t.earthAltitude), this.sim.stats.maxAltitude, best);
+    this.keyHints.setVisible(!onPad);
+    this.keyHints.update(flying && this.launched ? this.hintRows(t) : [], dt);
+
+    // Bottom-centre card: the problem card and, while orbiting, the orbit band.
+    const problem = flying ? (r.problem as ActiveProblem | null) : null;
+    const showOrbit = flying && mode === 'ORBIT' && (r.phase === 'ORBIT' || problem?.id === 'ORBIT_DECAY');
+    this.bottomCard.update(
+      problem,
+      showOrbit ? { elements: t.moonOrbit, hold: r.phase === 'ORBIT' ? r.stableFor / CONFIG.phases.orbit.holdSeconds : null } : undefined,
+      { periapsis: t.moonOrbit?.periapsisAltitude ?? null },
       now
     );
-    this.altimeter.setVisible(ascent);
-    this.altimeter.update(Math.max(0, t.earthAltitude), best, this.coastApex);
-    this.orbitGauge.setVisible(mode === 'ORBIT' && !this.result);
-    this.orbitGauge.update(t.moonOrbit, r.phase === 'ORBIT' ? r.stableFor / CONFIG.phases.orbit.holdSeconds : null, now);
-    this.problemCard.update(flying ? (r.problem as ActiveProblem | null) : null, { periapsis: t.moonOrbit?.periapsisAltitude ?? null }, now);
     this.fuelTank.update(t.fuelFraction, t.mass, this.vehicle.wetMass, t.twr, t.throttle > 0, now, dt);
-    this.coins.update(this.progress.money + (this.result ? 0 : cashFromAwards(this.stunts.awards)), dt);
 
     this.launchButton.setVisible(onPad);
     this.timePicker.setVisible(onPad);
@@ -853,8 +851,6 @@ export class FlightScene extends Phaser.Scene {
 
     const comboOn = this.combo.active(this.sim.state.time) && this.combo.count > 1;
     this.comboText.setVisible(comboOn && flying && ascent).setText(`COMBO ×${this.combo.count}`);
-
-    this.hintText.setText(flying && this.launched ? this.hint(t) : '');
 
     // Speed + height next to the rocket, only when landing matters.
     const landing = flying && (mode === 'DESCENT' || mode === 'TOUCHDOWN' || (ascent && t.verticalSpeed < -5 && t.earthAltitude < 400 && this.launched));
@@ -873,7 +869,7 @@ export class FlightScene extends Phaser.Scene {
 
     if (this.titleTimer > 0) {
       this.titleTimer -= dt;
-      const a = Phaser.Math.Clamp(this.titleTimer / 0.6, 0, 1);
+      const a = Phaser.Math.Clamp(this.titleTimer / 0.4, 0, 1);
       this.phaseTitle.setAlpha(a);
       this.phaseGoal.setAlpha(a);
     }
@@ -884,48 +880,84 @@ export class FlightScene extends Phaser.Scene {
     } else if (this.bannerQueue.length > 0) {
       const b = this.bannerQueue.shift()!;
       this.bannerText.setText(b.text).setColor(b.color).setAlpha(1);
-      this.bannerTimer = 2.8;
+      this.bannerTimer = MOMENT_SECONDS;
     } else {
       this.bannerText.setAlpha(0);
     }
   }
 
-  /** The current goal in a few words, under the phase strip. */
+  /** The current goal in a few words, under the phase pips. */
   private objective(t: FlightTelemetry): string {
     const r = this.runner;
     if (r.complete) return 'Mission complete!';
-    if (r.phase === 'ORBIT') return t.moonOrbit ? 'Get the LOW and HIGH points into the green band' : 'Fly to the Moon, leaning a little to pass beside it';
+    if (r.phase === 'ORBIT') return t.moonOrbit ? 'Get LOW and HIGH into the green band' : 'Fly to the Moon, passing just beside it';
     if (r.phase === 'ROVER') {
       if (r.problem) return 'Deal with the problem!';
       if (r.rover && !r.rover.landed) return 'Rover falling…';
-      if (r.dropReady) return `Drop the rover in the green zone  ·  spares: ${r.sparesLeft}`;
+      if (r.dropReady) return `Drop the rover in the green zone (spares: ${r.sparesLeft})`;
       return 'Orbiting… stay alert';
     }
-    return onImpactCourse(t) ? 'Land upright, under 10 m/s, on the blue site' : 'Burn backwards to drop out of orbit: aim the white ✕ at the blue site';
+    return onImpactCourse(t) ? 'Land upright, under 10 m/s, on the blue site' : 'Drop out of orbit: aim the white ✕ at the blue site';
   }
 
-  /** One plain-language hint for right now. */
-  private hint(t: FlightTelemetry): string {
+  /** Key-cap hints for right now (shown bottom right, faded out after a few seconds). */
+  private hintRows(t: FlightTelemetry): HintRow[] {
     const r = this.runner;
     const mode = this.world.camera.mode;
-    if (this.sim.onGround) return 'Too heavy to climb: go back (ESC) and add engines';
-    if (r.problem?.id === 'FLAMEOUT') return 'ENGINE OUT: HOLD E to relight!';
-    if (r.problem) return PROBLEM_INFO[r.problem.id].howTo;
+    if (this.sim.onGround) return [{ keys: ['ESC'], label: 'too heavy: back to the lab' }];
+    if (r.problem) {
+      switch (r.problem.id) {
+        case 'FLAMEOUT':
+          return [{ keys: ['E'], label: 'hold to relight' }];
+        case 'FUEL_LEAK':
+          return [{ keys: ['F'], label: 'patch in the green' }];
+        case 'STUCK_THRUSTER':
+          return [{ keys: ['A', 'D'], label: 'hold against the spin' }];
+        case 'ORBIT_DECAY':
+          return [{ keys: ['W'], label: 'burn along your motion' }];
+        case 'DEBRIS':
+          return [
+            { keys: ['A', 'D'], label: 'turn' },
+            { keys: ['W'], label: 'burn out of the ring' }
+          ];
+        default:
+          return [{ keys: [], label: PROBLEM_INFO[r.problem.id].howTo }];
+      }
+    }
     if (mode === 'ASCENT') {
-      if (t.earthAltitude > ROCK_BELT.bottom - 300 && t.earthAltitude < ROCK_BELT.top) return 'ROCK BELT: red arrows show rocks coming  ·  A / D dodge  ·  near misses build a combo';
-      if (this.coastApex !== null && this.coastApex >= SOI_ALTITUDE && t.thrust > 0) return 'You’ll coast to the Moon now: X cuts the engines to save fuel';
-      if (this.coastApex !== null && this.coastApex >= SOI_ALTITUDE) return 'Coasting to the Moon: save fuel for the orbit burn';
-      if (t.fuelFraction <= 0) return 'Out of fuel: coasting';
-      return 'A / D steer (lean a little so you pass beside the Moon)  ·  W / S throttle  ·  X cut engines';
+      if (this.runnerState.promptActive) return [{ keys: ['SPACE'], label: 'evasive runner' }];
+      if (this.runnerState.active) return [{ keys: ['A', 'D'], label: 'switch lane' }];
+      if (t.earthAltitude > ROCK_BELT.bottom - 300 && t.earthAltitude < ROCK_BELT.top) return [{ keys: ['A', 'D'], label: 'dodge the rocks' }];
+      if (this.coastApex !== null && this.coastApex >= SOI_ALTITUDE && t.thrust > 0) return [{ keys: ['X'], label: 'cut engines: you’ll coast there' }];
+      if (this.coastApex !== null && this.coastApex >= SOI_ALTITUDE) return [{ keys: [], label: 'coasting to the Moon' }];
+      if (t.fuelFraction <= 0) return [{ keys: [], label: 'out of fuel: coasting' }];
+      return [
+        { keys: ['A', 'D'], label: 'steer' },
+        { keys: ['W', 'S'], label: 'throttle' },
+        { keys: ['X'], label: 'cut engines' }
+      ];
     }
-    if (r.phase === 'ORBIT') return 'A / D turn  ·  W burn  ·  X stop burning  ·  the arrow shows which way you’re moving';
+    if (r.phase === 'ORBIT') {
+      return [
+        { keys: ['A', 'D'], label: 'turn' },
+        { keys: ['W'], label: 'burn' },
+        { keys: ['X'], label: 'stop burning' }
+      ];
+    }
     if (r.phase === 'ROVER') {
-      if (r.dropReady && !r.rover) return 'SPACE: drop the rover when the yellow ✕ is in the green zone';
-      if (r.rover && !r.rover.landed) return 'Rover falling… watch where it lands';
-      return 'Stay in orbit: problems can happen any moment';
+      if (r.dropReady && !r.rover) return [{ keys: ['SPACE'], label: 'drop the rover on the ✕' }];
+      return [];
     }
-    if (onImpactCourse(t)) return 'Point along dashed arrow and burn W to slow down  ·  land upright (< 10 m/s)';
-    return 'Turn to face backwards (against the arrow), then burn W to drop out of orbit';
+    if (onImpactCourse(t)) {
+      return [
+        { keys: ['A', 'D'], label: 'point along the arrow' },
+        { keys: ['W'], label: 'burn to slow down' }
+      ];
+    }
+    return [
+      { keys: ['A', 'D'], label: 'face backwards' },
+      { keys: ['W'], label: 'burn to drop' }
+    ];
   }
 
   // ---------------------------------------------------------------------------
