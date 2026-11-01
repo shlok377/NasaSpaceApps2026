@@ -553,10 +553,10 @@ export class WorldRenderer {
       const r = 30 + 206 * k * k;
       const cx = 1090 - Phaser.Math.Clamp(sim.state.x * 0.08, -200, 200) - 390 * k;
       const cy = 118 - 8 * k;
-      const daylight = this.time === 'NIGHT' ? 0 : this.time === 'DUSK' ? 0.4 : 1;
+      // Fully opaque in every time of day: a solid Moon, never a ghost.
       this.skyMoonSprite?.setPosition?.(cx, cy);
       this.skyMoonSprite?.setDisplaySize?.(r * 2, r * 2);
-      this.skyMoonSprite?.setAlpha?.(Phaser.Math.Clamp(1 - air * daylight * 0.55, 0.4, 1));
+      this.skyMoonSprite?.setAlpha?.(1);
       this.skyMoonSprite?.setVisible?.(true);
     } else {
       this.skyMoonSprite?.setVisible?.(false);
