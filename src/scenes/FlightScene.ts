@@ -357,7 +357,7 @@ export class FlightScene extends Phaser.Scene {
     this.keys.R.on('down', () => {
       if (!this.result) return;
       if (this.canRetryPhase) this.retryFromCheckpoint();
-      else this.scene.restart({ tree: this.tree });
+      else this.scene.restart({ tree: this.tree, window: this.launchWindow.id });
     });
   }
 
@@ -980,7 +980,7 @@ export class FlightScene extends Phaser.Scene {
     items.push(
       ...this.makeButton(x + w / 2 - 150, y + h - 40, retry, () => {
         if (this.canRetryPhase) this.retryFromCheckpoint();
-        else this.scene.restart({ tree: this.tree });
+        else this.scene.restart({ tree: this.tree, window: this.launchWindow.id });
       })
     );
     items.push(...this.makeButton(x + w / 2 + 150, y + h - 40, 'B  ·  BUILDER', () => this.returnToBuilder()));
