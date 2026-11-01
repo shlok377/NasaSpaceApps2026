@@ -24,7 +24,8 @@ import { ENGINE, FINS, G0, LIMITS, ROCK_BELT, WORLD } from '../physics/constants
 import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physics/FlightSim';
 import { evaluateMission, MAX_STARS, MissionResult } from '../physics/mission';
 import { analyzeVehicle, buildFlightVehicle, FlightVehicle, VehicleReport } from '../physics/vehicle';
-import { FuelTank } from '../ui/FuelTank';
+import { LeftColumn } from '../ui/LeftColumn';
+import { flightHudModel } from '../game/flightHud';
 import { HintRow, KeyHints } from '../ui/KeyHints';
 import { LaunchButton } from '../ui/LaunchButton';
 import { BottomCard, PhasePips, RIGHT_EDGE } from '../ui/PhaseHud';
@@ -126,7 +127,7 @@ export class FlightScene extends Phaser.Scene {
   private bottomCard!: BottomCard;
   private track!: ProgressTrack;
   private keyHints!: KeyHints;
-  private fuelTank!: FuelTank;
+  private leftColumn!: LeftColumn;
   /** Money (bank + live award cash) last frame, to pop `+$` when it rises. */
   private lastCash: number | null = null;
   private launchButton!: LaunchButton;
@@ -277,7 +278,8 @@ export class FlightScene extends Phaser.Scene {
     this.keyHints = new KeyHints(this, 682);
     // Bottom centre: the problem card and the orbit band.
     this.bottomCard = new BottomCard(this);
-    this.fuelTank = new FuelTank(this, 38, 560);
+    // Left column (hidden on the pad): attitude ball, fuel mini tanks, TWR dial, mass.
+    this.leftColumn = new LeftColumn(this);
 
     const [verdict, color] = this.verdict();
     const affordable = this.progress.money >= this.cost;
@@ -840,7 +842,17 @@ export class FlightScene extends Phaser.Scene {
       { periapsis: t.moonOrbit?.periapsisAltitude ?? null },
       now
     );
-    this.fuelTank.update(t.fuelFraction, t.mass, this.vehicle.wetMass, t.twr, t.throttle > 0, now, dt);
+    this.leftColumn.setVisible(!onPad);
+    if (!onPad) {
+      this.leftColumn.update(flightHudModel(this.sim, t, this.timeOfDay), {
+        mass: t.mass,
+        wetMass: this.vehicle.wetMass,
+        twr: t.twr,
+        throttleActive: t.throttle > 0,
+        time: now,
+        dt
+      });
+    }
 
     this.launchButton.setVisible(onPad);
     this.timePicker.setVisible(onPad);
