@@ -14,6 +14,7 @@ import {
   PROBLEM_INFO
 } from '../game/phases';
 import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, PlayerProgress, saveProgress } from '../game/progress';
+import { DEFAULT_WINDOW, LAUNCH_WINDOWS, LaunchWindow, LaunchWindowId, launchPrice, withWindowBonus } from '../game/launchWindows';
 import { checkBelt, Combo, generateBelt, generateLaneWaves, Rock } from '../game/rocks';
 import { createEvasiveRunnerState, EvasiveRunnerState, updateEvasiveRunner, RUNNER_CONFIG } from '../game/evasiveRunner';
 import { Award, StuntTracker } from '../game/stunts';
@@ -35,6 +36,8 @@ import { CameraMode, MissionOverlay, WorldRenderer, WORLD_COLORS } from './fligh
 
 export interface FlightSceneData {
   tree: HierarchicalRocketNode;
+  /** Time of day picked in the launch-window picker (Sunset when missing). */
+  window?: LaunchWindowId;
 }
 
 const GAME_SPEED = CONFIG.gameSpeed;
@@ -113,6 +116,7 @@ export class FlightScene extends Phaser.Scene {
   private runner!: PhaseRunner;
   private keys!: Keys;
   private cost = 0;
+  private launchWindow: LaunchWindow = LAUNCH_WINDOWS[DEFAULT_WINDOW];
 
   private world!: WorldRenderer;
   private fx!: Effects;
@@ -182,8 +186,14 @@ export class FlightScene extends Phaser.Scene {
     super('FlightScene');
   }
 
+  /** The rocket plus the launch window's fee. */
+  private get launchPrice(): number {
+    return launchPrice(this.cost, this.launchWindow.id);
+  }
+
   init(data: FlightSceneData): void {
     this.tree = data.tree;
+    this.launchWindow = LAUNCH_WINDOWS[data.window ?? DEFAULT_WINDOW];
     this.throttle = 1;
     this.countdown = null;
     this.launched = false;
@@ -229,7 +239,7 @@ export class FlightScene extends Phaser.Scene {
   create(): void {
     this.vehicle = buildFlightVehicle(this.tree);
     this.report = analyzeVehicle(this.vehicle);
-    this.sim = new FlightSim(this.vehicle);
+    this.sim = new FlightSim(this.vehicle, this.launchWindow.conditions);
     this.runner = new PhaseRunner();
     this.runner.drainEvents();
     this.cost = rocketCost(flattenTypes(this.tree));
@@ -237,6 +247,7 @@ export class FlightScene extends Phaser.Scene {
     if (this.game.canvas) this.game.canvas.style.cursor = 'default';
 
     this.world = new WorldRenderer(this);
+    this.world.rockVisibility = this.launchWindow.rockVisibility;
     this.world.updateCamera(this.sim, this.sim.getTelemetry(), 0, 'ASCENT');
     this.fx = new Effects(this);
     this.createHud();
@@ -276,8 +287,10 @@ export class FlightScene extends Phaser.Scene {
     this.coins = new CoinCounter(this, 1264, 34);
 
     const [verdict, color] = this.verdict();
-    const affordable = this.progress.money >= this.cost;
-    this.launchButton = new LaunchButton(this, 640, 600, verdict, color, affordable ? `Launch cost $${this.cost}  ·  SPACE` : `Costs $${this.cost}, you have $${this.progress.money}`, () =>
+    const price = this.launchPrice;
+    const affordable = this.progress.money >= price;
+    const priceLine = this.launchWindow.fee > 0 ? `$${this.cost} + $${this.launchWindow.fee} ${this.launchWindow.name.toLowerCase()} fee` : `$${price}`;
+    this.launchButton = new LaunchButton(this, 640, 600, verdict, color, affordable ? `Launch cost ${priceLine}  ·  SPACE` : `Costs $${price}, you have $${this.progress.money}`, () =>
       this.startCountdown()
     );
     this.missionText = this.add
@@ -350,12 +363,13 @@ export class FlightScene extends Phaser.Scene {
 
   private startCountdown(): void {
     if (this.sim.phase !== 'PRELAUNCH' || this.countdown !== null) return;
-    if (this.progress.money < this.cost) {
-      this.showBanner(`Not enough money: this rocket costs $${this.cost}. Build a cheaper one (ESC).`, '#fca5a5');
+    const price = this.launchPrice;
+    if (this.progress.money < price) {
+      this.showBanner(`Not enough money: this launch costs $${price}. Build a cheaper one (ESC).`, '#fca5a5');
       return;
     }
-    // Pay for the rocket.
-    this.progress = { ...this.progress, money: this.progress.money - this.cost };
+    // Pay for the rocket and the launch window.
+    this.progress = { ...this.progress, money: this.progress.money - price };
     saveProgress(this.progress);
     this.countdown = COUNTDOWN_SECONDS;
     this.countdownText.setVisible(true);
@@ -562,7 +576,7 @@ export class FlightScene extends Phaser.Scene {
           this.showPhaseTitle(e.phase);
           break;
         case 'PHASE_DONE': {
-          const reward = CONFIG.economy.phaseRewards[e.phase];
+          const reward = withWindowBonus(CONFIG.economy.phaseRewards[e.phase], this.launchWindow.id);
           this.progress = { ...this.progress, money: this.progress.money + reward };
           this.phasePaid += reward;
           saveProgress(this.progress);
@@ -876,7 +890,7 @@ export class FlightScene extends Phaser.Scene {
     };
     this.completedNow = newlyCompleted(ctx, this.progress.completedMissions);
     const missionReward = this.completedNow.reduce((s, m) => s + m.reward, 0);
-    this.earnings = flightEarnings(this.result.outcome, this.stunts.awards, missionReward, this.cost, st.landedOn === 'EARTH' && st.reachedSpace, this.phasePaid);
+    this.earnings = flightEarnings(this.result.outcome, this.stunts.awards, missionReward, this.cost, st.landedOn === 'EARTH' && st.reachedSpace, this.phasePaid, this.launchWindow.earningsBonus);
 
     this.progress = {
       ...this.progress,
@@ -949,7 +963,8 @@ export class FlightScene extends Phaser.Scene {
       e.outcome > 0 ? `flight $${e.outcome}` : '',
       e.mission > 0 ? `missions $${e.mission}` : '',
       e.awards > 0 ? `bonuses $${e.awards}` : '',
-      e.recovery > 0 ? `rocket recovered $${e.recovery}` : ''
+      e.recovery > 0 ? `rocket recovered $${e.recovery}` : '',
+      e.windowBonus > 0 ? `${this.launchWindow.name.toLowerCase()} bonus $${e.windowBonus}` : ''
     ].filter(Boolean);
     items.push(this.add.text(640, y + 226, parts.join('  ·  '), TEXT_STYLE(12, UI.textMuted)).setOrigin(0.5, 0));
 

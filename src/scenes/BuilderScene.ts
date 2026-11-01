@@ -8,6 +8,7 @@ import { ParticleManager } from '../particles';
 import { preloadGameAssets, getPartTextureKey, GAME_ASSETS } from '../core/assets';
 import { PX, drawPixelPanel, drawSparkle, pixelBody, pixelTitle } from '../ui/pixel';
 import { BACKDROP_SCALE, createBackdropTexture } from '../ui/backdrop';
+import { LaunchWindowPicker } from '../ui/LaunchWindowPicker';
 
 interface PaletteBay {
   type: PartType;
@@ -71,6 +72,7 @@ export class BuilderScene extends Phaser.Scene {
   private launchSubText!: Phaser.GameObjects.Text;
   private launchPulse?: Phaser.Tweens.Tween;
   private launchReady = false;
+  private windowPicker!: LaunchWindowPicker;
   private launchBlockedReason = '';
   private bankText!: Phaser.GameObjects.Text;
   private costText!: Phaser.GameObjects.Text;
@@ -496,13 +498,17 @@ export class BuilderScene extends Phaser.Scene {
   /** Hand the assembled rocket to the flight simulator; the builder sleeps so the design is kept. */
   public launchFlight(): void {
     const telemetry = this.rocketTree.getTelemetry();
+    if (this.windowPicker.isOpen) return;
     if (!this.launchReady) {
       this.cameras.main.shake(120, 0.004);
       return;
     }
     this.deselectPart();
-    this.scene.launch('FlightScene', { tree: telemetry.tree });
-    this.scene.sleep();
+    const cost = rocketCost(this.rocketTree.getAllNodes().map(n => n.type));
+    this.windowPicker.open(cost, this.money, window => {
+      this.scene.launch('FlightScene', { tree: telemetry.tree, window });
+      this.scene.sleep();
+    });
   }
 
   private updateHud(telemetry: ReturnType<RocketTree['getTelemetry']>): void {
@@ -573,13 +579,14 @@ export class BuilderScene extends Phaser.Scene {
 
   private setupInputHandlers(): void {
     this.input.mouse?.disableContextMenu();
+    this.windowPicker = new LaunchWindowPicker(this);
 
     // Hotkeys 1 - 5 for instant selection
-    this.input.keyboard?.on('keydown-ONE', () => this.selectPaletteItem('STRUCTURAL'));
-    this.input.keyboard?.on('keydown-TWO', () => this.selectPaletteItem('NOSE_CONE'));
-    this.input.keyboard?.on('keydown-THREE', () => this.selectPaletteItem('ENGINE'));
-    this.input.keyboard?.on('keydown-FOUR', () => this.selectPaletteItem('FUEL_TANK'));
-    this.input.keyboard?.on('keydown-FIVE', () => this.selectPaletteItem('FIN'));
+    this.input.keyboard?.on('keydown-ONE', () => !this.windowPicker.isOpen && this.selectPaletteItem('STRUCTURAL'));
+    this.input.keyboard?.on('keydown-TWO', () => !this.windowPicker.isOpen && this.selectPaletteItem('NOSE_CONE'));
+    this.input.keyboard?.on('keydown-THREE', () => !this.windowPicker.isOpen && this.selectPaletteItem('ENGINE'));
+    this.input.keyboard?.on('keydown-FOUR', () => !this.windowPicker.isOpen && this.selectPaletteItem('FUEL_TANK'));
+    this.input.keyboard?.on('keydown-FIVE', () => !this.windowPicker.isOpen && this.selectPaletteItem('FIN'));
 
     this.input.keyboard?.on('keydown-ESC', () => {
       this.deselectPart();
@@ -595,10 +602,12 @@ export class BuilderScene extends Phaser.Scene {
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (this.windowPicker.isOpen) return;
       this.updateGhostPreview(pointer);
     });
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (this.windowPicker.isOpen) return;
       if (pointer.button === 2) {
         this.handleRightClick(pointer);
       } else if (pointer.button === 0) {

@@ -80,18 +80,24 @@ export interface FlightEarnings {
   mission: number;
   /** Half the rocket's price back for landing it intact back home (reusable rockets!). */
   recovery: number;
+  /** The launch window's bonus on the flight, mission and stunt money (not on the recovery refund). */
+  windowBonus: number;
   total: number;
 }
 
-/** `phasePaid`: phase rewards already paid out during the flight (so they aren't paid twice). */
-export function flightEarnings(outcome: MissionOutcome, awards: readonly Award[], missionReward: number, rocketCost: number, landedHome: boolean, phasePaid = 0): FlightEarnings {
+/**
+ * `phasePaid`: phase rewards already paid out during the flight (so they aren't paid twice).
+ * `bonusRate`: the launch window's earnings bonus (0.2 = +20%).
+ */
+export function flightEarnings(outcome: MissionOutcome, awards: readonly Award[], missionReward: number, rocketCost: number, landedHome: boolean, phasePaid = 0, bonusRate = 0): FlightEarnings {
   const e = {
     outcome: Math.max(0, OUTCOME_PAYOUT[outcome] - phasePaid),
     awards: cashFromAwards(awards),
     mission: missionReward,
     recovery: landedHome ? Math.round(rocketCost * CONFIG.economy.recoveryRefund) : 0
   };
-  return { ...e, total: e.outcome + e.awards + e.mission + e.recovery };
+  const windowBonus = Math.round((e.outcome + e.awards + e.mission) * bonusRate);
+  return { ...e, windowBonus, total: e.outcome + e.awards + e.mission + e.recovery + windowBonus };
 }
 
 /** Never let the player get stuck unable to afford a rocket. */

@@ -115,6 +115,8 @@ function partShape(p: FlightPart, h: number): number[] {
 }
 
 export class WorldRenderer {
+  /** How visible debris-belt rocks are (the Night launch window darkens them). */
+  public rockVisibility = 1;
   public camera: Camera = { x: 0, y: 0, upAngle: Math.PI / 2, scale: CELL_PX, rocketScale: CELL_PX, mode: 'ASCENT' };
   private readonly skyGfx: Phaser.GameObjects.Graphics;
   private readonly skyMoonSprite: Phaser.GameObjects.Image;
@@ -656,9 +658,9 @@ export class WorldRenderer {
             const rr = pr * (0.78 + 0.22 * Math.sin(r.seed * 50 + i * 2.1));
             pts.push(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr);
           }
-          g.fillStyle(WORLD_COLORS.rock, 1);
+          g.fillStyle(WORLD_COLORS.rock, this.rockVisibility);
           polygon(g, pts, true);
-          g.lineStyle(2, WORLD_COLORS.rockEdge, 1);
+          g.lineStyle(2, WORLD_COLORS.rockEdge, this.rockVisibility);
           polygon(g, pts, false);
         } else if (r.kind === 'SHIELD') {
           g.lineStyle(3, WORLD_COLORS.shield, 0.95);

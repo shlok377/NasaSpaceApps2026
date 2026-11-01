@@ -15,6 +15,7 @@ import {
   totalFuel
 } from './vehicle';
 import { windAt } from './wind';
+import { FlightConditions, NEUTRAL_CONDITIONS } from '../game/launchWindows';
 
 /** Fixed physics timestep. */
 export const PHYSICS_DT = 1 / 120;
@@ -129,6 +130,7 @@ export interface FlightSnapshot {
   stats: FlightStats;
   startFuel: number;
   initialVehicle: FlightVehicle;
+  conditions: FlightConditions;
 }
 
 export interface FlightState {
@@ -199,7 +201,7 @@ export class FlightSim {
   private readonly startFuel: number;
 
   /** The rocket starts standing on the pad at x = 0, pointing straight up. */
-  constructor(vehicle: FlightVehicle) {
+  constructor(vehicle: FlightVehicle, public readonly conditions: FlightConditions = NEUTRAL_CONDITIONS) {
     this.vehicle = vehicle;
     this.initialVehicle = vehicle;
     this.tanks = fullTanks(vehicle);
@@ -317,7 +319,7 @@ export class FlightSim {
     const d = this.disturbance;
     if (d.leakRate > 0) this.drawFuel(d.leakRate * dt);
     if (fuel > 0 && s.throttle > 0 && v.engineCount > 0 && !d.engineOut) {
-      const want = v.maxMassFlow * s.throttle * dt;
+      const want = (v.maxMassFlow / this.conditions.fuelEfficiency) * s.throttle * dt;
       const burned = this.drawFuel(want);
       thrust = v.thrust * s.throttle * (burned / want);
       if (this.fuel <= 1e-9 && !this.mecoAnnounced) {
@@ -329,7 +331,7 @@ export class FlightSim {
 
     // --- Aerodynamics ---------------------------------------------------------
     const rho = airDensity(s.y);
-    const wind = rho > 0 ? windAt(s.y, s.time) : 0;
+    const wind = rho > 0 ? windAt(s.y, s.time) * this.conditions.windScale : 0;
     const airVx = s.vx - wind;
     const airVy = s.vy;
     const speed = Math.hypot(airVx, airVy);
@@ -478,7 +480,7 @@ export class FlightSim {
       const aeroLoad = q * v.referenceArea * p.normalForceCoeff * sinA;
       const spinLoad = p.dryMass * s.omega * s.omega * r;
       const tooFast = Math.abs(s.omega) > LIMITS.maxSpin;
-      if (aeroLoad + spinLoad > LIMITS.jointStrength || tooFast) {
+      if (aeroLoad + spinLoad > LIMITS.jointStrength * this.conditions.jointStrengthScale || tooFast) {
         this.detach(new Set([p.id]), 1);
         this.stats.partsLost++;
         this.emit('PART_LOST', `${p.type === 'FIN' ? 'A fin' : p.type === 'NOSE_CONE' ? 'The nose cone' : 'A part'} snapped off!`);
@@ -715,8 +717,9 @@ export class FlightSim {
       const mass = v.dryMass + (coastOnly ? this.fuel : fuel);
       let thrust = 0;
       if (fuel > 0 && this.state.throttle > 0 && v.engineCount > 0) {
-        const burn = Math.min(fuel, v.maxMassFlow * this.state.throttle * dt);
-        thrust = (v.thrust * this.state.throttle * burn) / (v.maxMassFlow * this.state.throttle * dt);
+        const flow = (v.maxMassFlow / this.conditions.fuelEfficiency) * this.state.throttle * dt;
+        const burn = Math.min(fuel, flow);
+        thrust = (v.thrust * this.state.throttle * burn) / flow;
         fuel -= burn;
       }
       const sp = Math.hypot(vx, vy);
@@ -766,12 +769,13 @@ export class FlightSim {
       hasLeftGround: this.hasLeftGround,
       stats: { ...this.stats },
       startFuel: this.startFuel,
-      initialVehicle: this.initialVehicle
+      initialVehicle: this.initialVehicle,
+      conditions: this.conditions
     };
   }
 
   public static restore(snap: FlightSnapshot): FlightSim {
-    const sim = new FlightSim(snap.initialVehicle);
+    const sim = new FlightSim(snap.initialVehicle, snap.conditions);
     sim.vehicle = buildVehicle(snap.parts.map(p => ({ ...p })), snap.rootGridX, snap.rootGridY);
     sim.state = { ...snap.state };
     sim.tanks = new Map(snap.tanks);
@@ -813,7 +817,7 @@ export class FlightSim {
       mach: rho > 0 ? speed / WORLD.speedOfSound : 0,
       dynamicPressure: this.lastQ,
       airDensity: rho,
-      wind: rho > 0 ? windAt(s.y, s.time) : 0,
+      wind: rho > 0 ? windAt(s.y, s.time) * this.conditions.windScale : 0,
       pitchFromVertical: wrapAngle(s.theta - upAngle),
       progradeFromVertical: speed > 0.5 ? wrapAngle(Math.atan2(s.vy, s.vx) - upAngle) : 0,
       angleOfAttack: speed > 0.5 ? wrapAngle(s.theta - Math.atan2(s.vy, s.vx)) : 0,
