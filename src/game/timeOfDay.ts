@@ -85,3 +85,5 @@ export const TIME_LOOKS: Record<TimeOfDay, TimeOfDayLook> = {
 
 export const timeOfDayWind = (t: TimeOfDay): number => CONFIG.timeOfDay[t].wind;
 export const timeOfDayReward = (t: TimeOfDay): number => CONFIG.timeOfDay[t].reward;
+/** Rock belt density multiplier: dawn sparsest, night densest (more drifters too). */
+export const timeOfDayRocks = (t: TimeOfDay): number => CONFIG.timeOfDay[t].rocks;

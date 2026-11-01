@@ -55,7 +55,6 @@ export const WORLD_COLORS = {
   pad: 0xf59e0b,
   rock: 0x6b6259,
   rockEdge: 0x3f3a35,
-  shield: 0x67e8f9,
   fuel: 0x22c55e,
   zone: 0x22c55e,
   site: 0x38bdf8,
@@ -465,7 +464,7 @@ export class WorldRenderer {
     }
   }
 
-  public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, shield: boolean, overlay: MissionOverlay, runnerState?: EvasiveRunnerState): void {
+  public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, overlay: MissionOverlay, runnerState?: EvasiveRunnerState): void {
     this.labelIndex = 0;
     this.drawSky(sim, t);
     const g = this.worldGfx;
@@ -484,7 +483,7 @@ export class WorldRenderer {
       this.drawMoonCloseUp(sim, overlay);
       this.drawRetrogradeArrow(sim);
     }
-    this.drawRocketAndDebris(sim, t, alive, shield);
+    this.drawRocketAndDebris(sim, t, alive);
     for (let i = this.labelIndex; i < this.labels.length; i++) this.labels[i].setVisible(false);
   }
 
@@ -857,7 +856,7 @@ export class WorldRenderer {
       this.smokeSpritesPool[i].setVisible(false);
     }
 
-    // Rocks, shields and fuel in the belt, with warning chevrons for what's coming.
+    // Rocks and fuel in the belt, with warning chevrons for what's coming.
     if (s.y > ROCK_BELT.bottom - CONFIG.rockBelt.warningDistance) {
       const time = s.time;
       const ahead = CONFIG.rockBelt.warningDistance;
@@ -867,7 +866,7 @@ export class WorldRenderer {
         if (dy < -halfH - 10 || dy > ahead) continue;
         const p = this.toScreen(rockX(r, time), r.y);
         const pr = r.radius * scale;
-        const color = r.kind === 'ROCK' ? WORLD_COLORS.danger : r.kind === 'SHIELD' ? WORLD_COLORS.shield : WORLD_COLORS.fuel;
+        const color = r.kind === 'ROCK' ? WORLD_COLORS.danger : WORLD_COLORS.fuel;
         if (p.y + pr < 0) {
           // Off the top of the screen: a chevron at the edge, brighter as it closes in.
           if (p.x < -40 || p.x > 1320) continue;
@@ -890,11 +889,6 @@ export class WorldRenderer {
           polygon(g, pts, true);
           g.lineStyle(2, WORLD_COLORS.rockEdge, 1);
           polygon(g, pts, false);
-        } else if (r.kind === 'SHIELD') {
-          g.lineStyle(3, WORLD_COLORS.shield, 0.95);
-          g.strokeCircle(p.x, p.y, pr);
-          g.fillStyle(WORLD_COLORS.shield, 0.25);
-          g.fillCircle(p.x, p.y, pr);
         } else {
           g.fillStyle(WORLD_COLORS.fuel, 1);
           g.fillRoundedRect(p.x - pr * 0.6, p.y - pr, pr * 1.2, pr * 2, 4);
@@ -1310,7 +1304,7 @@ export class WorldRenderer {
     img.setVisible(true);
   }
 
-  private drawRocketAndDebris(sim: FlightSim, t: FlightTelemetry, alive: boolean, shield: boolean): void {
+  private drawRocketAndDebris(sim: FlightSim, t: FlightTelemetry, alive: boolean): void {
     const g = this.rocketGfx;
     g.clear();
     const cellPx = this.camera.rocketScale;
@@ -1396,15 +1390,6 @@ export class WorldRenderer {
     // Hide any unused pooled sprites
     for (let i = this.activeSpriteCount; i < this.partSpritesPool.length; i++) {
       this.partSpritesPool[i].setVisible(false);
-    }
-
-    if (shield) {
-      const c = this.toScreen(s.x, s.y);
-      const r = cellPx * (sim.vehicle.length / 2 + 1);
-      g.lineStyle(3, WORLD_COLORS.shield, 0.6 + 0.3 * Math.sin(this.scene.time.now / 120));
-      g.strokeCircle(c.x, c.y, r);
-      g.fillStyle(WORLD_COLORS.shield, 0.08);
-      g.fillCircle(c.x, c.y, r);
     }
   }
 
