@@ -16,6 +16,8 @@ export interface TimeOfDayLook {
   sky: number[];
   /** Cloud body, rim and shaded underside. */
   cloud: [number, number, number];
+  /** Which of the sky's clouds to paint (all when unset); night keeps just a couple. */
+  clouds?: number[];
   /** Multiplied over the launch-site panorama (0xffffff = as painted). */
   landTint: number;
   /** The far range is further away, so it takes more of the sky colour. */
@@ -70,7 +72,8 @@ export const TIME_LOOKS: Record<TimeOfDay, TimeOfDayLook> = {
     label: 'NIGHT',
     blurb: 'Stormy',
     sky: [0x05081a, 0x080d24, 0x0c132e, 0x101a38, 0x142142, 0x19294c, 0x1f3156, 0x263a60],
-    cloud: [0x3a4668, 0x2c3656, 0x1e2640],
+    cloud: [0x222b4a, 0x4f6094, 0x18203c],
+    clouds: [0, 3],
     landTint: 0x4a5684,
     farTint: 0x3c4874,
     horizon: 0x263a60,

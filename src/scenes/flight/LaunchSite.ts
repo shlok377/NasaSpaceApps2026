@@ -64,8 +64,9 @@ const CLOUDS = [
   { x: 160, y: 70, w: 14 }
 ];
 
-function cloudAt(x: number, y: number, [body, rim, under]: [number, number, number]): number | null {
-  for (const c of CLOUDS) {
+function cloudAt(x: number, y: number, [body, rim, under]: [number, number, number], only?: number[]): number | null {
+  for (const [ci, c] of CLOUDS.entries()) {
+    if (only && !only.includes(ci)) continue;
     const lobes = [
       { dx: 0, dy: 0, r: c.w * 0.32 },
       { dx: -c.w * 0.3, dy: c.w * 0.08, r: c.w * 0.22 },
@@ -84,17 +85,51 @@ function cloudAt(x: number, y: number, [body, rim, under]: [number, number, numb
   return null;
 }
 
+/** A handful of bright stars, each drawn as a small pixel cross. */
+const BRIGHT_STARS = [
+  { x: 34, y: 18 },
+  { x: 96, y: 42 },
+  { x: 150, y: 14 },
+  { x: 214, y: 30 },
+  { x: 252, y: 58 },
+  { x: 300, y: 12 }
+];
+
+/**
+ * Night: a calm sky rather than a starfield. A faint Milky Way haze sweeps across it,
+ * dim stars are sparse (denser inside the band) and fade out towards the horizon, and
+ * only a few bright stars stand out.
+ */
+function nightSkyAt(x: number, y: number, base: number): number {
+  for (const s of BRIGHT_STARS) {
+    const dx = Math.abs(x - s.x);
+    const dy = Math.abs(y - s.y);
+    if (dx === 0 && dy === 0) return 0xffffff;
+    if (dx + dy === 1) return 0x8ea0d4;
+  }
+  const fade = y / SKY_H; // 0 at the top, 1 at the horizon
+  // Milky Way: a soft diagonal band, dithered so it reads as haze, not a stripe.
+  const band = Math.abs(y - (8 + x * 0.32)) / 16;
+  const haze = Math.max(0, 1 - band) * (1 - fade);
+  let c = base;
+  if (haze > 0.25 && dither(x, y) < haze * 0.5) c = 0x18224a;
+  const n = hash(x * 7, y * 11);
+  const density = 0.0025 + haze * 0.012;
+  if (n > 1 - density * (1 - fade * 0.9)) c = hash(x, y) > 0.8 ? 0xc4d0f0 : 0x5d6c9c;
+  return c;
+}
+
 export function createDaySkyTexture(scene: Phaser.Scene, time: TimeOfDay): void {
   const look = TIME_LOOKS[time];
   const sky = look.sky;
   paint(scene, daySkyKey(time), SKY_W, SKY_H, (x, y) => {
-    const cloud = cloudAt(x, y, look.cloud);
+    const cloud = cloudAt(x, y, look.cloud, look.clouds);
     if (cloud !== null) return cloud;
-    // Night: sparse stars, a few of them bright, thinning towards the horizon.
-    if (look.stars && hash(x * 7, y * 11) > 0.985 + (y / SKY_H) * 0.012) return hash(x, y) > 0.7 ? 0xffffff : 0x9fb0d8;
     const t = (y / SKY_H) * (sky.length - 1);
     const i = Math.min(Math.floor(t), sky.length - 2);
-    return t - i > dither(x, y) ? sky[i + 1] : sky[i];
+    const base = t - i > dither(x, y) ? sky[i + 1] : sky[i];
+    if (!look.stars) return base;
+    return nightSkyAt(x, y, base);
   });
 }
 
@@ -338,6 +373,7 @@ function flagpole(cx: number, h: number): Prop {
 /** Launch-complex props (global columns); WorldRenderer reuses these spots for the live touches. */
 export const COMPLEX = {
   lighthouse: { x: 78, top: G - 38 },
+  bunker: { x: -124, w: 40 },
   flags: [
     { x: -74, top: G - 26, color: 0x3b6fd8 },
     { x: -68, top: G - 22, color: 0xff8a3d }
@@ -357,7 +393,7 @@ const PROPS: Prop[] = [
   fuelSphere(48, 6, 0xd8432f),
   fuelSphere(34, 4, 0x3b6fd8),
   waterTower(-56),
-  bunker(-124, 40)
+  bunker(COMPLEX.bunker.x, COMPLEX.bunker.w)
 ];
 
 /** The centre piece: land on the west edge matching the land tile, sea on the east edge matching the sea tile. */

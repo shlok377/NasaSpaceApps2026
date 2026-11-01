@@ -617,7 +617,8 @@ export class WorldRenderer {
 
     // Glints on the sea: a few pixels that wink in and out (fewer and bluer at night).
     const firstCol = Math.floor(-groundX / PIXEL);
-    for (let k = 0; k < 40; k++) {
+    // (At night the moonlight path below takes over from scattered glints.)
+    for (let k = 0; k < (this.time === 'NIGHT' ? 0 : 40); k++) {
       const cycle = Math.floor(now / 900 + k * 0.37);
       const col = firstCol + Math.floor(hash(k, cycle) * (1280 / PIXEL));
       if (!isSeaColumn(col)) continue;
@@ -667,6 +668,30 @@ export class WorldRenderer {
       dot(lh.x - 1, lh.top + 3, 0xffe9a0, 0.6 + 0.4 * beam, 3, 2);
       g.fillStyle(0xffe9a0, 0.1 * strength * beam);
       g.fillTriangle(sx(lh.x + 1), sy(lh.top + 4), sx(lh.x + 90), sy(lh.top - 6), sx(lh.x + 90), sy(lh.top + 12));
+
+      // Warm lights in the control bunker's windows (a couple left dark).
+      for (let i = 0; i < 8; i++) {
+        if (hash(i, 5) < 0.25) continue;
+        dot(COMPLEX.bunker.x + i * 5 + 1, SITE_GROUND_ROW - 5, 0xffd27a, 0.85 * strength, 3, 2);
+      }
+    }
+
+    // Night: the Moon lays a shimmering path of light across the sea, widening towards the shore.
+    if (this.time === 'NIGHT') {
+      const moonCol = Math.round(((this.skyMoonSprite?.x ?? 1090) - groundX) / PIXEL);
+      const rows = Math.ceil((720 - sy(HORIZON_ROW)) / PIXEL);
+      for (let d = 1; d < rows; d++) {
+        const row = HORIZON_ROW + d;
+        const half = 2 + d * 0.3;
+        const cycle = Math.floor(now / 420 + d * 0.17);
+        const alpha = Math.max(0.12, 0.55 - d * 0.006);
+        for (let k = 0; k < 3; k++) {
+          if (hash(d * 3 + k, cycle) < 0.35) continue;
+          const col = Math.round(moonCol + (hash(cycle, d * 7 + k) * 2 - 1) * half);
+          if (!isSeaColumn(col)) continue;
+          dot(col, row, k === 0 ? 0xf2f6ff : 0xb8c8f0, alpha, 1 + Math.floor(hash(k, d) * 3), 1);
+        }
+      }
     }
   }
 

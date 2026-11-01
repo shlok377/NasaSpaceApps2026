@@ -30,7 +30,7 @@ import { FuelTank } from '../ui/FuelTank';
 import { JourneyArc, Milestone } from '../ui/JourneyArc';
 import { LaunchButton } from '../ui/LaunchButton';
 import { OrbitGauge, PhaseStrip, ProblemCard } from '../ui/PhaseHud';
-import { formatDistance, hudWell, TEXT_STYLE, TITLE_STYLE, UI } from '../ui/theme';
+import { CLASSIC, CLASSIC_TEXT_STYLE, formatDistance, TEXT_STYLE, TITLE_STYLE, UI } from '../ui/theme';
 import { preloadGameAssets } from '../core/assets';
 import { Effects } from './flight/Effects';
 import { CameraMode, MissionOverlay, WorldRenderer, WORLD_COLORS } from './flight/WorldRenderer';
@@ -988,63 +988,50 @@ export class FlightScene extends Phaser.Scene {
 
   private showResultPanel(result: MissionResult): void {
     const w = 660;
-    const h = 450;
+    const h = 520;
     const x = (1280 - w) / 2;
     const y = (720 - h) / 2;
     const items: Phaser.GameObjects.GameObject[] = [];
     const bg = this.add.graphics();
-    bg.fillStyle(0x07060b, 0.6);
+    bg.fillStyle(0x000000, 0.55);
     bg.fillRect(0, 0, 1280, 720);
+    bg.fillStyle(0x0b1020, 0.96);
+    bg.fillRoundedRect(x, y, w, h, 18);
+    bg.lineStyle(2, 0x334155, 1);
+    bg.strokeRoundedRect(x, y, w, h, 18);
     items.push(bg);
 
     const titleColor: Record<MissionResult['outcome'], string> = {
-      CREW_LANDED: UI.goldText,
-      ROVER_DEPLOYED: UI.greenText,
-      IN_ORBIT: UI.greenText,
+      CREW_LANDED: CLASSIC.goldText,
+      ROVER_DEPLOYED: CLASSIC.greenText,
+      IN_ORBIT: CLASSIC.greenText,
       MOON_SOI: '#a3e635',
       SPACE: '#7dd3fc',
       SKY: '#fbbf24',
       FAILED: '#f87171'
     };
-    const accent = Phaser.Display.Color.HexStringToColor(titleColor[result.outcome]).color;
-    drawPixelPanel(bg, x, y, w, h, { fill: PX.panel, fillAlpha: 0.97, border: accent, highlight: accent, u: 4 });
-    // Title band.
-    bg.fillStyle(accent, 0.12);
-    bg.fillRect(x + 12, y + 12, w - 24, 76);
-    items.push(this.add.text(640, y + 26, result.title, TITLE_STYLE(22, titleColor[result.outcome])).setOrigin(0.5, 0));
-    // Stars as pixel blocks: lit gold or dim outline.
-    for (let i = 0; i < MAX_STARS; i++) {
-      const sx = 640 + (i - (MAX_STARS - 1) / 2) * 30;
-      const lit = i < result.stars;
-      bg.fillStyle(lit ? UI.gold : 0x3a3446, 1);
-      for (const [dx, dy, ww, hh] of [[-2, -10, 4, 20], [-10, -2, 20, 4], [-6, -6, 12, 12]] as const) bg.fillRect(sx + dx, y + 70 + dy, ww, hh);
-      if (lit) {
-        bg.fillStyle(0xffffff, 0.8);
-        bg.fillRect(sx - 4, y + 64, 4, 4);
-      }
-    }
+    items.push(this.add.text(640, y + 20, result.title, CLASSIC_TEXT_STYLE(28, titleColor[result.outcome])).setOrigin(0.5, 0));
+    items.push(this.add.text(640, y + 58, '★'.repeat(result.stars) + '☆'.repeat(MAX_STARS - result.stars), CLASSIC_TEXT_STYLE(24, CLASSIC.goldText)).setOrigin(0.5, 0));
 
     // The three phases, ticked off.
     const done = this.runner.phasesDone;
     const phaseLine = (['ORBIT', 'ROVER', 'LANDING'] as PhaseId[])
       .map((p, i) => `${i < done ? '✓' : i === done && this.runner.failure ? '✗' : '·'} ${PHASE_INFO[p].title}`)
       .join('     ');
-    items.push(this.add.text(640, y + 92, phaseLine, TEXT_STYLE(14, done >= 3 ? UI.greenText : UI.text)).setOrigin(0.5, 0));
-    items.push(this.add.text(640, y + 118, result.summary, TEXT_STYLE(14)).setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w - 60));
+    items.push(this.add.text(640, y + 92, phaseLine, CLASSIC_TEXT_STYLE(14, done >= 3 ? CLASSIC.greenText : CLASSIC.text)).setOrigin(0.5, 0));
+    items.push(this.add.text(640, y + 118, result.summary, CLASSIC_TEXT_STYLE(14)).setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w - 60));
 
     const e = this.earnings!;
     const cells: Array<[string, string, string]> = [
-      ['EARNED', `+$${e.total + this.phasePaid}`, UI.greenText],
+      ['EARNED', `+$${e.total + this.phasePaid}`, CLASSIC.greenText],
       ['SCORE', result.score.toLocaleString(), '#ffffff'],
       ['PROBLEMS FIXED', `${this.runner.solved}`, '#7dd3fc'],
-      ['BANK', `$${this.progress.money.toLocaleString()}`, UI.goldText]
+      ['BANK', `$${this.progress.money}`, CLASSIC.goldText]
     ];
     cells.forEach(([label, value, color], i) => {
-      const cw = 142;
-      const cx = x + 30 + cw / 2 + i * (cw + 8);
-      hudWell(bg, cx - cw / 2, y + 164, cw, 56);
-      items.push(this.add.text(cx, y + 172, label, TITLE_STYLE(7, UI.textMuted)).setOrigin(0.5, 0));
-      items.push(this.add.text(cx, y + 186, value, TEXT_STYLE(19, color)).setOrigin(0.5, 0));
+      const cx = x + 85 + i * 163;
+      items.push(this.add.text(cx, y + 172, label, CLASSIC_TEXT_STYLE(11, CLASSIC.textMuted)).setOrigin(0.5, 0));
+      items.push(this.add.text(cx, y + 190, value, CLASSIC_TEXT_STYLE(22, color)).setOrigin(0.5, 0));
     });
     const parts = [
       this.phasePaid > 0 ? `phases $${this.phasePaid}` : '',
@@ -1053,15 +1040,15 @@ export class FlightScene extends Phaser.Scene {
       e.awards > 0 ? `bonuses $${e.awards}` : '',
       e.recovery > 0 ? `rocket recovered $${e.recovery}` : ''
     ].filter(Boolean);
-    items.push(this.add.text(640, y + 228, parts.join('  ·  '), TEXT_STYLE(12, UI.textMuted)).setOrigin(0.5, 0));
+    items.push(this.add.text(640, y + 226, parts.join('  ·  '), CLASSIC_TEXT_STYLE(12, CLASSIC.textMuted)).setOrigin(0.5, 0));
 
     const missionLines = this.completedNow.length > 0 ? this.completedNow.map(m => `✓ ${m.title} (+$${m.reward})`).join('   ') : this.mission ? `✗ ${this.mission.title}: ${this.mission.goal}` : '';
-    const missions = this.add.text(640, y + 254, missionLines, TEXT_STYLE(14, this.completedNow.length > 0 ? UI.greenText : '#fca5a5')).setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w - 60);
+    const missions = this.add.text(640, y + 254, missionLines, CLASSIC_TEXT_STYLE(14, this.completedNow.length > 0 ? CLASSIC.greenText : '#fca5a5')).setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w - 60);
     items.push(missions);
 
     const tipCount = missions.height > 40 ? 1 : 2;
     const tips = result.insights.slice(0, tipCount).map(s => `•  ${s}`).join('\n');
-    items.push(this.add.text(x + 36, missions.y + missions.height + 14, tips, TEXT_STYLE(13)).setWordWrapWidth(w - 72).setLineSpacing(4));
+    items.push(this.add.text(x + 36, missions.y + missions.height + 14, tips, CLASSIC_TEXT_STYLE(13)).setWordWrapWidth(w - 72).setLineSpacing(4));
 
     const retry = this.canRetryPhase ? `R  ·  RETRY PHASE ${PHASE_INFO[this.checkpoint!.phase].number}` : 'R  ·  FLY AGAIN';
     items.push(
@@ -1071,28 +1058,24 @@ export class FlightScene extends Phaser.Scene {
       })
     );
     items.push(...this.makeButton(x + w / 2 + 150, y + h - 40, 'B  ·  BUILDER', () => this.returnToBuilder()));
-    if (this.canRetryPhase) items.push(this.add.text(640, y + h - 12, 'Retrying a phase is free: you keep what you’ve earned so far', TEXT_STYLE(11, UI.textMuted)).setOrigin(0.5, 1).setY(y + h - 6));
+    if (this.canRetryPhase) items.push(this.add.text(640, y + h - 12, 'Retrying a phase is free: you keep what you’ve earned so far', CLASSIC_TEXT_STYLE(11, CLASSIC.textMuted)).setOrigin(0.5, 1).setY(y + h - 6));
     this.resultPanel = this.add.container(0, 0, items).setAlpha(0).setDepth(100);
     this.tweens.add({ targets: this.resultPanel, alpha: 1, duration: 350 });
   }
 
   private makeButton(cx: number, cy: number, label: string, onClick: () => void): Phaser.GameObjects.GameObject[] {
     const w = 260;
-    const h = 44;
+    const h = 42;
     const bg = this.add.graphics();
-    const text = this.add.text(cx, cy, label, TITLE_STYLE(10, '#ffffff')).setOrigin(0.5);
     const draw = (hover: boolean) => {
       bg.clear();
-      drawPixelPanel(bg, cx - w / 2, cy - h / 2 + (hover ? 2 : 0), w, h, {
-        fill: hover ? 0x3a2614 : PX.panelDeep,
-        fillAlpha: 1,
-        border: hover ? PX.accent : PX.border,
-        highlight: hover ? 0xffe0b0 : PX.glow,
-        u: 3
-      });
-      text.setY(cy + (hover ? 2 : 0)).setColor(hover ? PX.text.cream : '#ffffff');
+      bg.fillStyle(hover ? 0x1e293b : 0x111827, 1);
+      bg.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, 21);
+      bg.lineStyle(2, hover ? 0x60a5fa : 0x334155, 1);
+      bg.strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, 21);
     };
     draw(false);
+    const text = this.add.text(cx, cy, label, CLASSIC_TEXT_STYLE(15, '#ffffff')).setOrigin(0.5);
     const zone = this.add.zone(cx, cy, w, h).setInteractive({ useHandCursor: true });
     zone.on('pointerover', () => draw(true));
     zone.on('pointerout', () => draw(false));

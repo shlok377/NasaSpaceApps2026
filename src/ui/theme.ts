@@ -66,6 +66,24 @@ export function hudWell(g: Phaser.GameObjects.Graphics, x: number, y: number, w:
   g.fillRect(x, y + h - 2, w, 2);
 }
 
+/** The original smooth HUD look, kept for the mission result panel. */
+export const CLASSIC = {
+  font: "'Mozilla Headline', system-ui, sans-serif",
+  text: '#e5e7eb',
+  textMuted: '#9ca3af',
+  goldText: '#facc15',
+  greenText: '#4ade80'
+} as const;
+
+export const CLASSIC_TEXT_STYLE = (size: number, color: string = CLASSIC.text) => ({
+  fontSize: `${size}px`,
+  color,
+  fontStyle: 'bold',
+  fontFamily: CLASSIC.font,
+  stroke: '#000000',
+  strokeThickness: 3
+});
+
 export function formatDistance(m: number): string {
   if (!Number.isFinite(m)) return '∞';
   if (Math.abs(m) < 1000) return `${Math.round(m)} m`;
