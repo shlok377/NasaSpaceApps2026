@@ -17,17 +17,16 @@ import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, PlayerPro
 import { anchorBelt, checkBelt, Combo, generateBelt, generateLaneWaves, Rock } from '../game/rocks';
 import { createEvasiveRunnerState, EvasiveRunnerState, updateEvasiveRunner, RUNNER_CONFIG } from '../game/evasiveRunner';
 import { Award, StuntTracker } from '../game/stunts';
-import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay, timeOfDayReward, timeOfDayWind } from '../game/timeOfDay';
-import { PX, drawPixelPanel, pixelBody, pixelTitle } from '../ui/pixel';
+import { TIMES_OF_DAY, TimeOfDay, timeOfDayReward, timeOfDayWind } from '../game/timeOfDay';
 import { moonSoiAltitude } from '../physics/bodies';
 import { ENGINE, FINS, G0, LIMITS, ROCK_BELT, WORLD } from '../physics/constants';
 import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physics/FlightSim';
 import { evaluateMission, MAX_STARS, MissionResult } from '../physics/mission';
 import { analyzeVehicle, buildFlightVehicle, FlightVehicle, VehicleReport } from '../physics/vehicle';
-import { LeftColumn } from '../ui/LeftColumn';
+import { LEFT_COLUMN, LeftColumn } from '../ui/LeftColumn';
 import { flightHudModel } from '../game/flightHud';
 import { HintRow, KeyHints } from '../ui/KeyHints';
-import { LaunchButton } from '../ui/LaunchButton';
+import { PREFLIGHT_CARD, PreflightCard } from '../ui/PreflightCard';
 import { BottomCard, PhasePips, RIGHT_EDGE } from '../ui/PhaseHud';
 import { ProgressTrack } from '../ui/ProgressTrack';
 import { CLASSIC, CLASSIC_TEXT_STYLE, formatDistance, TEXT_STYLE, TITLE_STYLE, UI } from '../ui/theme';
@@ -52,6 +51,10 @@ type Keys = Record<
 
 /** Height where the Moon's pull takes over, straight below it: the end of the climb. */
 const SOI_ALTITUDE = moonSoiAltitude();
+/** Liftoff slide: the pre-flight card out, the flight columns in (ms). */
+const SLIDE_MS = 300;
+/** How far right the right column starts (px): past the screen edge from its widest part, the wrapped goal. */
+const RIGHT_SLIDE = 360;
 /** Big centre moments (phase titles, banners) stay up about this long (s). */
 const MOMENT_SECONDS = 1.5;
 
@@ -130,12 +133,11 @@ export class FlightScene extends Phaser.Scene {
   private leftColumn!: LeftColumn;
   /** Money (bank + live award cash) last frame, to pop `+$` when it rises. */
   private lastCash: number | null = null;
-  private launchButton!: LaunchButton;
-  private missionText!: Phaser.GameObjects.Text;
+  private preflight!: PreflightCard;
+  /** Scene time (ms) the liftoff slide began (countdown start), or null while on the pad. */
+  private slideStart: number | null = null;
   /** Launch time picked on the pad (resets to DAWN every launch). */
   private timeOfDay: TimeOfDay = 'DAWN';
-  private timePicker!: Phaser.GameObjects.Container;
-  private timeCards: Array<{ time: TimeOfDay; gfx: Phaser.GameObjects.Graphics; hover: boolean }> = [];
   private bannerText!: Phaser.GameObjects.Text;
   private phaseTitle!: Phaser.GameObjects.Text;
   private phaseGoal!: Phaser.GameObjects.Text;
@@ -231,6 +233,7 @@ export class FlightScene extends Phaser.Scene {
     this.markerAt = -Infinity;
     this.timeOfDay = 'DAWN';
     this.lastCash = null;
+    this.slideStart = null;
   }
 
   preload(): void {
@@ -281,13 +284,18 @@ export class FlightScene extends Phaser.Scene {
     // Left column (hidden on the pad): attitude ball, fuel mini tanks, TWR dial, mass.
     this.leftColumn = new LeftColumn(this);
 
-    const [verdict, color] = this.verdict();
-    const affordable = this.progress.money >= this.cost;
-    this.launchButton = new LaunchButton(this, 640, 600, verdict, color, affordable ? `Launch cost $${this.cost}  ·  SPACE` : `Costs $${this.cost}, you have $${this.progress.money}`, () =>
-      this.startCountdown()
-    );
-    this.missionText = this.add.text(640, 168, '', TEXT_STYLE(15, UI.goldText)).setOrigin(0.5);
-    this.createTimePicker();
+    // Pad: the pre-flight card on the left (mission, launch time, verdict, cost vs bank, LAUNCH!).
+    const [verdict, verdictColor] = this.verdict();
+    this.preflight = new PreflightCard(this, {
+      mission: this.mission,
+      verdict,
+      verdictColor,
+      cost: this.cost,
+      bank: this.progress.money,
+      onPickTime: time => this.setTimeOfDay(time),
+      onLaunch: () => this.startCountdown()
+    });
+    this.setTimeOfDay(this.timeOfDay);
     // Big centre moments: brief, one line each.
     this.bannerText = this.add.text(640, 236, '', TEXT_STYLE(20, '#ffffff')).setOrigin(0.5, 0).setAlpha(0).setDepth(20).setAlign('center').setWordWrapWidth(1100).setMaxLines(1);
     this.phaseTitle = this.add.text(640, 300, '', TITLE_STYLE(30, '#ffffff')).setOrigin(0.5).setAlpha(0).setDepth(30);
@@ -303,65 +311,16 @@ export class FlightScene extends Phaser.Scene {
   }
 
   // ---------------------------------------------------------------------------
-  // Launch time picker (on the pad only)
+  // Launch time (picked on the pre-flight card)
   // ---------------------------------------------------------------------------
 
-  private static readonly TIME_CARD_W = 120;
-  private static readonly TIME_CARD_H = 56;
-
-  /** DAWN → NIGHT strip under the mission line: later is windier and pays more. */
-  private createTimePicker(): void {
-    const w = FlightScene.TIME_CARD_W;
-    const h = FlightScene.TIME_CARD_H;
-    this.timePicker = this.add.container(0, 0).setDepth(15);
-    this.timeCards = TIMES_OF_DAY.map((time, i) => {
-      const x = 640 + (i - 1.5) * (w + 10) - w / 2;
-      const y = 196;
-      const look = TIME_LOOKS[time];
-      const gfx = this.add.graphics();
-      const label = pixelTitle(this, x + w / 2, y + 10, look.label, 10, PX.text.white).setOrigin(0.5, 0);
-      const pay = timeOfDayReward(time);
-      const sub = pixelBody(this, x + w / 2, y + 28, `${look.blurb} · $×${pay}`, 18, PX.text.muted).setOrigin(0.5, 0);
-      const zone = this.add.zone(x + w / 2, y + h / 2, w, h).setInteractive({ useHandCursor: true });
-      const card = { time, gfx, hover: false };
-      zone.on('pointerover', () => ((card.hover = true), this.drawTimePicker()));
-      zone.on('pointerout', () => ((card.hover = false), this.drawTimePicker()));
-      zone.on('pointerdown', () => this.setTimeOfDay(time));
-      this.timePicker.add([gfx, label, sub, zone]);
-      return card;
-    });
-    this.setTimeOfDay(this.timeOfDay);
-  }
-
-  private drawTimePicker(): void {
-    const w = FlightScene.TIME_CARD_W;
-    const h = FlightScene.TIME_CARD_H;
-    this.timeCards.forEach(({ time, gfx, hover }, i) => {
-      const x = 640 + (i - 1.5) * (w + 10) - w / 2;
-      const on = time === this.timeOfDay;
-      const accent = TIME_LOOKS[time].accent;
-      gfx.clear();
-      drawPixelPanel(gfx, x, 196, w, h, {
-        fill: on ? 0x2a2236 : PX.panelDeep,
-        fillAlpha: 0.92,
-        border: on ? accent : hover ? PX.border : PX.borderDim,
-        highlight: on ? 0xffffff : PX.glow,
-        u: on ? 3 : 2
-      });
-      // Swatch of the sky in the corner.
-      gfx.fillStyle(accent, on ? 1 : 0.5);
-      gfx.fillRect(x + 8, 196 + 8, 8, 8);
-    });
-  }
-
+  /** Later is windier and pays more; the scene re-lights live and the card's reward rescales. */
   private setTimeOfDay(time: TimeOfDay): void {
     if (this.sim.phase !== 'PRELAUNCH' || this.countdown !== null) return;
     this.timeOfDay = time;
     this.sim.windScale = timeOfDayWind(time);
     this.world.setTimeOfDay(time);
-    const reward = this.mission ? Math.round(this.mission.reward * timeOfDayReward(time)) : 0;
-    this.missionText.setText(this.mission ? `MISSION: ${this.mission.title}: ${this.mission.goal}  (+$${reward})` : 'All missions done: fly for the high score!');
-    this.drawTimePicker();
+    this.preflight.setTime(time);
   }
 
   private stepTimeOfDay(dir: number): void {
@@ -854,10 +813,19 @@ export class FlightScene extends Phaser.Scene {
       });
     }
 
-    this.launchButton.setVisible(onPad);
-    this.timePicker.setVisible(onPad);
-    this.launchButton.update(now);
-    this.missionText.setVisible(onPad);
+    // Liftoff slide (starts with the countdown): the pre-flight card leaves left, the columns come in from the edges.
+    if (onPad) this.slideStart = null;
+    else if (this.slideStart === null) this.slideStart = now;
+    const k = this.slideStart === null ? 0 : Phaser.Math.Clamp((now - this.slideStart) / SLIDE_MS, 0, 1);
+    const ease = 1 - (1 - k) ** 3;
+    this.preflight.setSlide(-ease * (PREFLIGHT_CARD.x + PREFLIGHT_CARD.w + 16));
+    this.preflight.update(now);
+    const leftOut = -(LEFT_COLUMN.x + LEFT_COLUMN.w + 16) * (1 - ease);
+    const rightOut = RIGHT_SLIDE * (1 - ease);
+    this.leftColumn.setSlide(leftOut);
+    this.phasePips.setSlide(rightOut);
+    this.track.setSlide(rightOut);
+    this.keyHints.setSlide(rightOut);
     this.endButton.setVisible(flying && this.launched);
     this.warpText.setText(this.timeScale > 1 && flying ? `▶▶ ×${this.timeScale}` : '');
 

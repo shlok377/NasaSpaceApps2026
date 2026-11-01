@@ -143,6 +143,11 @@ export class LeftColumn {
     this.container.setVisible(visible);
   }
 
+  /** Horizontal offset (px) for the liftoff slide-in; 0 = in place. */
+  public setSlide(dx: number): void {
+    this.container.x = dx;
+  }
+
   public getNeedleAngle(): number {
     return this.needleAngle;
   }

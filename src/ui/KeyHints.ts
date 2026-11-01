@@ -31,6 +31,11 @@ export class KeyHints {
     this.container.setVisible(v);
   }
 
+  /** Horizontal offset (px) for the liftoff slide-in; 0 = in place. */
+  public setSlide(dx: number): void {
+    this.container.x = dx;
+  }
+
   /** Call every frame with the hints for right now; they are rebuilt and re-shown only when they change. */
   public update(rows: HintRow[], dt: number): void {
     const signature = rows.map(r => `${r.keys.join('+')}:${r.label}`).join('|');

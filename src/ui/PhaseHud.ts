@@ -37,6 +37,11 @@ export class PhasePips {
     this.container.setVisible(v);
   }
 
+  /** Horizontal offset (px) for the liftoff slide-in; 0 = in place. */
+  public setSlide(dx: number): void {
+    this.container.x = dx;
+  }
+
   /** Money just came in: pop `+$n` under the goal (amounts close together add up). */
   public earn(amount: number): void {
     if (amount <= 0) return;

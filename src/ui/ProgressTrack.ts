@@ -68,6 +68,11 @@ export class ProgressTrack {
     this.container.setVisible(visible);
   }
 
+  /** Horizontal offset (px) for the liftoff slide-in; 0 = in place. */
+  public setSlide(dx: number): void {
+    this.container.x = dx;
+  }
+
   private drawTicks(passed: boolean[]): void {
     const g = this.ticks;
     g.clear();
