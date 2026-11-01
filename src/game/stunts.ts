@@ -2,7 +2,7 @@ import { FlightEvent, FlightSim, FlightTelemetry } from '../physics/FlightSim';
 
 /** Something the player earned points (and sometimes cash) for. */
 export interface Award {
-  id: 'FLIP' | 'BUTTER_LANDING' | 'BOUNCE' | 'NEAR_MISS' | 'PICKUP_FUEL' | 'SHIELD' | 'MILESTONE' | 'STAGE' | 'BULLSEYE' | 'MISSION';
+  id: 'FLIP' | 'BUTTER_LANDING' | 'BOUNCE' | 'NEAR_MISS' | 'PICKUP_FUEL' | 'MILESTONE' | 'STAGE' | 'BULLSEYE' | 'MISSION';
   label: string;
   points: number;
 }

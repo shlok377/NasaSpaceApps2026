@@ -176,7 +176,7 @@ describe('Surface Flags & Moon Big Sprite in WorldRenderer', () => {
       impactMarker: null
     };
 
-    renderer.render(sim, sim.getTelemetry(), [], true, false, overlay);
+    renderer.render(sim, sim.getTelemetry(), [], true, overlay);
 
     const greenFlag = images.find(img => img.key === GAME_ASSETS.FLAG_GREEN.key)!;
     expect(greenFlag.visible).toBe(true);
@@ -229,7 +229,7 @@ describe('Surface Flags & Moon Big Sprite in WorldRenderer', () => {
       impactMarker: null
     };
 
-    renderer.render(sim, sim.getTelemetry(), [], true, false, overlay);
+    renderer.render(sim, sim.getTelemetry(), [], true, overlay);
 
     const greenFlag = images.find(img => img.key === GAME_ASSETS.FLAG_GREEN.key)!;
     const blueFlag = images.find(img => img.key === GAME_ASSETS.FLAG_BLUE.key)!;

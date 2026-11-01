@@ -4,7 +4,7 @@ import { ROCK_BELT } from '../physics/constants';
 import { VehicleReport } from '../physics/vehicle';
 import { currentMission, MISSIONS, newlyCompleted, rocketCost } from './missions';
 import { flightEarnings, GRANT_FLOOR, loadProgress, saveProgress, STARTING_MONEY, withGrant } from './progress';
-import { BELT, checkBelt, Combo, generateBelt, generateLaneWaves, rockX, RUNNER_LANES } from './rocks';
+import { anchorBelt, BELT, checkBelt, Combo, generateBelt, generateLaneWaves, rockBlocks, rockX, RUNNER_CONFIG, RUNNER_LANES } from './rocks';
 
 const stats: FlightStats = {
   maxAltitude: 0,
@@ -129,13 +129,13 @@ describe('rock belt', () => {
   it('reports hits, near misses and pickups once each', () => {
     const rock = { id: 1, kind: 'ROCK' as const, x0: 0, y: 4_000, vx: 0, radius: 8, seed: 0, spent: false };
     const close = { ...rock, id: 2, x0: 12 };
-    const shield = { ...rock, id: 3, kind: 'SHIELD' as const, x0: -1, y: 4_001 };
+    const fuel = { ...rock, id: 3, kind: 'FUEL' as const, x0: -1, y: 4_001 };
     const parts = [{ id: 'fin', x: 0, y: 4_000 }];
-    const r = checkBelt([rock, close, shield], parts, 0, 0.7);
+    const r = checkBelt([rock, close, fuel], parts, 0, 0.7);
     expect(r.hits.map(h => h.partId)).toEqual(['fin']);
     expect(r.nearMisses.map(n => n.id)).toEqual([2]);
-    expect(r.pickups.map(p => p.kind)).toEqual(['SHIELD']);
-    expect(checkBelt([rock, close, shield], parts, 0, 0.7).hits).toHaveLength(0);
+    expect(r.pickups.map(p => p.kind)).toEqual(['FUEL']);
+    expect(checkBelt([rock, close, fuel], parts, 0, 0.7).hits).toHaveLength(0);
   });
 
   it('near misses in a row build a combo that lapses', () => {
@@ -145,56 +145,117 @@ describe('rock belt', () => {
     expect(combo.nearMiss(2 + BELT.comboWindow + 1)).toBe(1);
   });
 
-  describe('evasive runner lane waves', () => {
+  describe('evasive runner belt', () => {
     it('defines 5 discrete lanes from config', () => {
       expect(RUNNER_LANES).toEqual([-20, -10, 0, 10, 20]);
     });
 
-    it('generates waves within the rock belt altitude range', () => {
+    it('keeps every rock within the rock belt altitude range', () => {
       const items = generateLaneWaves(12345);
       const rocks = items.filter(r => r.kind === 'ROCK');
       expect(rocks.length).toBeGreaterThan(0);
       expect(rocks.every(r => r.y >= ROCK_BELT.bottom && r.y <= ROCK_BELT.top)).toBe(true);
     });
 
-    it('aligns all obstacles to discrete lanes with zero horizontal drift', () => {
-      const items = generateLaneWaves(12345);
-      for (const item of items) {
-        expect(RUNNER_LANES).toContain(item.x0);
-        expect(item.vx).toBe(0);
+    const SEEDS = Array.from({ length: 40 }, (_, i) => 1 + i * 7919);
+    const span = ROCK_BELT.top - ROCK_BELT.bottom;
+    const lastThird = ROCK_BELT.bottom + (span * 2) / 3;
+
+    it('puts every rock at its own height: no rows across neighbouring lanes', () => {
+      for (const seed of SEEDS) {
+        const lane = generateLaneWaves(seed, 'NIGHT').filter(r => r.laneIndex !== undefined);
+        for (const a of lane) {
+          for (const b of lane) {
+            if (Math.abs(a.laneIndex! - b.laneIndex!) === 1) expect(Math.abs(a.y - b.y)).toBeGreaterThanOrEqual(3);
+          }
+        }
       }
     });
 
-    it('guarantees 1 to 2 safe open lanes in every wave', () => {
-      const items = generateLaneWaves(12345);
-      // Group items by wave altitude (within 10m tolerance)
-      const waveMap = new Map<number, typeof items>();
-      for (const item of items) {
-        const waveKey = Math.round(item.y / 70) * 70;
-        const list = waveMap.get(waveKey) ?? [];
-        list.push(item);
-        waveMap.set(waveKey, list);
-      }
-
-      for (const [, waveItems] of waveMap) {
-        const rockLanes = new Set(waveItems.filter(r => r.kind === 'ROCK').map(r => r.x0));
-        const safeLanes = RUNNER_LANES.filter(lane => !rockLanes.has(lane));
-        expect(safeLanes.length).toBeGreaterThanOrEqual(1);
-        expect(safeLanes.length).toBeLessThanOrEqual(2);
+    it('gets denser from the bottom third to the top third', () => {
+      for (const seed of SEEDS) {
+        const rocks = generateLaneWaves(seed);
+        const bottom = rocks.filter(r => r.y < ROCK_BELT.bottom + span / 3).length;
+        const top = rocks.filter(r => r.y >= lastThird).length;
+        expect(top).toBeGreaterThan(bottom);
       }
     });
 
-    it('spawns only SHIELD pickups in open safe lanes (no FUEL pickups)', () => {
-      const items = generateLaneWaves(12345);
-      const shields = items.filter(r => r.kind === 'SHIELD');
-      const fuels = items.filter(r => r.kind === 'FUEL');
-      expect(shields.length).toBeGreaterThan(0);
-      expect(fuels.length).toBe(0);
-      for (const p of shields) {
-        // Ensure no rock shares the same lane at the same altitude wave
-        const waveRocks = items.filter(r => r.kind === 'ROCK' && Math.abs(r.y - p.y) < 15);
-        expect(waveRocks.some(r => r.x0 === p.x0)).toBe(false);
+    it('only drifts rocks sideways in the last third, and some do', () => {
+      for (const seed of SEEDS) {
+        const rocks = generateLaneWaves(seed);
+        const drifters = rocks.filter(r => r.vx !== 0);
+        expect(drifters.length).toBeGreaterThan(0);
+        for (const r of drifters) {
+          expect(r.y).toBeGreaterThanOrEqual(lastThird);
+          expect(r.laneIndex).toBeUndefined();
+        }
+        for (const r of rocks.filter(r => r.vx === 0)) expect(RUNNER_LANES).toContain(r.x0);
       }
+    });
+
+    it('has no SHIELD pickups (nor any other pickups), only rocks', () => {
+      for (const seed of SEEDS) expect(generateLaneWaves(seed).every(r => r.kind === 'ROCK')).toBe(true);
+    });
+
+    it('brings more rocks at night than at dawn for the same seed', () => {
+      for (const seed of SEEDS) {
+        const dawn = generateLaneWaves(seed, 'DAWN');
+        const night = generateLaneWaves(seed, 'NIGHT');
+        expect(night.length).toBeGreaterThan(dawn.length);
+        expect(night.filter(r => r.vx !== 0).length).toBeGreaterThan(dawn.filter(r => r.vx !== 0).length);
+      }
+    });
+
+    /**
+     * A lane-switching player climbing at the runner's cruise speed: can it get
+     * from the belt's bottom to its top without touching a rock? A lane shift
+     * takes the lane-shift time, during which the rocket covers both lanes.
+     */
+    function reachable(rocks: ReturnType<typeof generateLaneWaves>): boolean {
+      const step = 0.5;
+      const shiftSteps = Math.ceil((RUNNER_CONFIG.cruiseSpeed * RUNNER_CONFIG.laneShiftDuration) / step);
+      const clear = (lane: number, y: number) => !rocks.some(r => rockBlocks(r, RUNNER_LANES[lane], y));
+      const n = RUNNER_LANES.length;
+      const ys: number[] = [];
+      for (let y = ROCK_BELT.bottom; y <= ROCK_BELT.top; y += step) ys.push(y);
+      const free = ys.map(y => RUNNER_LANES.map((_, l) => clear(l, y)));
+      const reach: boolean[][] = [free[0].slice()];
+      for (let i = 1; i < ys.length; i++) {
+        const row: boolean[] = [];
+        for (let l = 0; l < n; l++) {
+          if (!free[i][l]) {
+            row.push(false);
+            continue;
+          }
+          let ok = reach[i - 1][l];
+          for (const from of [l - 1, l + 1]) {
+            if (ok || from < 0 || from >= n) continue;
+            const s0 = i - shiftSteps;
+            if (s0 < 0 || !reach[s0][from]) continue;
+            let bothClear = true;
+            for (let k = s0; k <= i; k++) if (!free[k][from] || !free[k][l]) bothClear = false;
+            ok = bothClear;
+          }
+          row.push(ok);
+        }
+        reach.push(row);
+      }
+      return reach[reach.length - 1].some(Boolean);
+    }
+
+    it('always leaves a reachable path at the cruise climb speed and lane-shift time', () => {
+      for (const time of ['DAWN', 'NIGHT'] as const) {
+        for (const seed of SEEDS) expect(reachable(generateLaneWaves(seed, time))).toBe(true);
+      }
+    });
+
+    it('drifters wait for the belt clock: anchoring shifts them in time', () => {
+      const rocks = generateLaneWaves(42, 'NIGHT');
+      const d = rocks.find(r => r.vx !== 0)!;
+      const before = rockX(d, 5);
+      anchorBelt(rocks, 100);
+      expect(rockX(d, 105)).toBeCloseTo(before, 6);
     });
   });
 });

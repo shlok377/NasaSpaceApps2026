@@ -67,7 +67,6 @@
     "densityTop": 3.5,
     "nearMissMargin": 6,
     "comboWindow": 10,
-    "shields": 2,
     "fuelCans": 3,
     "fuelCanRefill": 0.12,
     "rockRadiusMin": 1.5,
@@ -81,9 +80,18 @@
       "rocketY": 560,
       "lanes": [-20, -10, 0, 10, 20],
       "laneShiftDuration": 0.12,
-      "waveInterval": 75,
-      "minSafeLanes": 1,
-      "maxSafeLanes": 2
+      "_note": "Rocks per 100 m ramp from rocksPer100mBottom at the belt's entry to rocksPer100mTop at its exit (times the launch time's rocks multiplier). Every rock gets its own height: rocks in neighbouring lanes are never within rowTolerance m of each other. Drifters cross lanes in the last third. A reachable path is reserved for a rocket of rocketHalfLength x rocketHalfWidth climbing at cruiseSpeed with laneShiftDuration shifts.",
+      "rocksPer100mBottom": 3,
+      "rocksPer100mTop": 8,
+      "rowTolerance": 6,
+      "sameLaneSpacing": 10,
+      "drifters": 4,
+      "drifterSpeedMin": 6,
+      "drifterSpeedMax": 12,
+      "rocketHalfLength": 5,
+      "rocketHalfWidth": 2,
+      "pathSegmentMin": 30,
+      "pathSegmentMax": 90
     }
   },
   "airframe": {
@@ -106,10 +114,10 @@
     "asymmetryMoment": 0.3
   },
   "timeOfDay": {
-    "DAWN": { "wind": 1, "reward": 1 },
-    "NOON": { "wind": 1.4, "reward": 1.25 },
-    "DUSK": { "wind": 1.8, "reward": 1.5 },
-    "NIGHT": { "wind": 2.2, "reward": 2 }
+    "DAWN": { "wind": 1, "reward": 1, "rocks": 0.7 },
+    "NOON": { "wind": 1.4, "reward": 1.25, "rocks": 1 },
+    "DUSK": { "wind": 1.8, "reward": 1.5, "rocks": 1.3 },
+    "NIGHT": { "wind": 2.2, "reward": 2, "rocks": 1.6 }
   },
   "wind": {
     "ceiling": 2400,
