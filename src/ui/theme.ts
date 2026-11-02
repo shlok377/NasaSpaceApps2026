@@ -1,5 +1,4 @@
 import Phaser from 'phaser';
-import { rgb } from './backdrop';
 import { PX, drawPixelPanel } from './pixel';
 
 /**
@@ -55,88 +54,6 @@ export const TITLE_STYLE = (size: number, color: string = PX.text.cream) => ({
 /** Standard HUD panel: the lab's stepped pixel frame, slightly see-through. */
 export function hudPanel(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number, accent?: number): void {
   drawPixelPanel(g, x, y, w, h, { fill: PX.panel, fillAlpha: UI.backdropAlpha, border: accent ?? PX.border, highlight: accent ?? PX.glow, u: 3 });
-}
-
-export interface GlassOptions {
-  /** Strength of the dark smoke behind the glass, 0..1 (default 0.3). */
-  tint?: number;
-  /** Colour for the lit rim instead of the lab's cool white (e.g. red for an alarm card). */
-  accent?: number;
-}
-
-/** Glass is painted at 1/3 scale, so its texels match the 3 px pixel art. */
-const GLASS_U = 3;
-
-/**
- * Builds (once per size and look) the smoked Rocket Lab glass texture and returns its key:
- * the lab's sheen gradient, three feathered diagonal bands and lit rim, over a dark smoked tint
- * so text stays readable over a bright sky. Returns the key even when the scene can't paint canvases (tests).
- */
-export function glassTexture(scene: Phaser.Scene, w: number, h: number, opts: GlassOptions = {}): string {
-  const tint = opts.tint ?? 0.3;
-  const tw = Math.max(3, Math.round(w / GLASS_U));
-  const th = Math.max(3, Math.round(h / GLASS_U));
-  const key = `hud_glass_${tw}x${th}_${Math.round(tint * 100)}_${opts.accent ?? 'lab'}`;
-  const textures = scene.textures as Phaser.Textures.TextureManager | undefined;
-  if (typeof textures?.createCanvas !== 'function' || textures.exists(key)) return key;
-  const tex = textures.createCanvas(key, tw, th);
-  const ctx = tex?.getContext();
-  if (!tex || !ctx) return key;
-
-  // Smoke first, so the sheen and bands sit on top of it.
-  ctx.fillStyle = `rgba(7, 6, 11, ${tint})`;
-  ctx.fillRect(0, 0, tw, th);
-
-  const sheen = ctx.createLinearGradient(0, 0, 0, th);
-  sheen.addColorStop(0, 'rgba(214, 238, 255, 0.10)');
-  sheen.addColorStop(0.45, 'rgba(214, 238, 255, 0.03)');
-  sheen.addColorStop(1, 'rgba(214, 238, 255, 0.02)');
-  ctx.fillStyle = sheen;
-  ctx.fillRect(0, 0, tw, th);
-
-  // Reflection bands run perpendicular to the top-left → bottom-right diagonal.
-  const band = (from: number, to: number, peak: number) => {
-    const g = ctx.createLinearGradient(0, 0, tw, th);
-    g.addColorStop(0, 'rgba(255, 255, 255, 0)');
-    g.addColorStop(from, 'rgba(255, 255, 255, 0)');
-    g.addColorStop((from + to) / 2, `rgba(255, 255, 255, ${peak})`);
-    g.addColorStop(to, 'rgba(255, 255, 255, 0)');
-    g.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, tw, th);
-  };
-  band(0.14, 0.34, 0.09);
-  band(0.36, 0.42, 0.06);
-  band(0.7, 0.8, 0.035);
-
-  // Lit rim: top/left catch the light, bottom/right fall into shade.
-  const a = opts.accent;
-  const rim = a !== undefined ? rgb(a).join(', ') : null;
-  ctx.fillStyle = rim ? `rgba(${rim}, 0.85)` : 'rgba(235, 248, 255, 0.28)';
-  ctx.fillRect(0, 0, tw, 1);
-  ctx.fillRect(0, 0, 1, th);
-  ctx.fillStyle = rim ? `rgba(${rim}, 0.45)` : 'rgba(160, 205, 225, 0.12)';
-  ctx.fillRect(0, th - 1, tw, 1);
-  ctx.fillRect(tw - 1, 0, 1, th);
-  // Clipped corners for the pixel look.
-  for (const [cx, cy] of [[0, 0], [tw - 1, 0], [0, th - 1], [tw - 1, th - 1]]) ctx.clearRect(cx, cy, 1, 1);
-
-  tex.refresh();
-  tex.setFilter(Phaser.Textures.FilterMode.NEAREST);
-  return key;
-}
-
-/**
- * Smoked Rocket Lab glass panel with its top-left corner at (x, y), sized w × h.
- * Shared by every flight HUD panel, card and key cap: add the image to a container like any other.
- */
-export function glassPanel(scene: Phaser.Scene, x: number, y: number, w: number, h: number, opts: GlassOptions = {}): Phaser.GameObjects.Image {
-  return scene.add.image(x, y, glassTexture(scene, w, h, opts)).setOrigin(0, 0).setDisplaySize(w, h);
-}
-
-/** Re-shapes an existing glass panel (for cards whose size follows their content). */
-export function resizeGlass(img: Phaser.GameObjects.Image, x: number, y: number, w: number, h: number, opts: GlassOptions = {}): void {
-  img.setTexture(glassTexture(img.scene, w, h, opts)).setPosition(x, y).setDisplaySize(w, h);
 }
 
 /** A recessed well inside a panel (for bars, tanks and tracks). */

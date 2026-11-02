@@ -155,15 +155,6 @@
     "touchdownViewBelow": 40,
     "orbitViewRadiusPx": 355
   },
-  "flightHud": {
-    "tiltAmberDegrees": 20,
-    "tiltRedDegrees": 35,
-    "maxUngroupedTanks": 6,
-    "fullWindSpeed": 20,
-    "calmWindSpeed": 0.05,
-    "slideMs": 300,
-    "momentSeconds": 1.5
-  },
   "economy": {
     "startingMoney": 100000000,
     "grantFloor": 50,

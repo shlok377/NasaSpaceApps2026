@@ -2,126 +2,97 @@ import Phaser from 'phaser';
 import { CONFIG } from '../config';
 import { ActiveProblem, PHASE_INFO, PHASES, PhaseId, PROBLEM_INFO } from '../game/phases';
 import { OrbitElements } from '../physics/orbit';
-import { formatDistance, glassPanel, GlassOptions, hudWell, resizeGlass, TEXT_STYLE, TITLE_STYLE, UI } from './theme';
+import { drawPixelPanel } from './pixel';
+import { formatDistance, hudPanel, hudWell, TEXT_STYLE, UI } from './theme';
 
-/** Right edge of the right-hand HUD column. */
-export const RIGHT_EDGE = 1262;
+/** Stepped-corner pill used for the phase tabs. */
+function pixelPill(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number, fill: number, fillAlpha: number, border: number | null): void {
+  if (border !== null) {
+    g.fillStyle(border, 1);
+    g.fillRect(x + 3, y, w - 6, h);
+    g.fillRect(x, y + 3, w, h - 6);
+  }
+  g.fillStyle(fill, fillAlpha);
+  g.fillRect(x + 3, y + 2, w - 6, h - 4);
+  g.fillRect(x + 2, y + 3, w - 4, h - 6);
+}
 
 /**
- * Top-right of the right column: three phase pips with the current phase's
- * name, the short goal under them (plain outlined text, no panel) and a
- * `+$` pop under the goal whenever money comes in.
+ * Three linked capsules, top left: the mission's phases. Done ones are
+ * filled, the current one glows, later ones wait in outline.
  */
-export class PhasePips {
+export class PhaseStrip {
   private readonly gfx: Phaser.GameObjects.Graphics;
-  private readonly title: Phaser.GameObjects.Text;
+  private readonly names: Phaser.GameObjects.Text[];
   private readonly goal: Phaser.GameObjects.Text;
-  private readonly money: Phaser.GameObjects.Text;
   private readonly container: Phaser.GameObjects.Container;
-  private readonly y = 16;
-  private static readonly PIP = 14;
-  private static readonly GAP = 6;
-  private popAmount = 0;
-  private popTimer = 0;
+  private readonly x = 20;
+  private readonly y = 18;
+  private readonly w = 92;
+  private readonly gap = 9;
 
   constructor(scene: Phaser.Scene) {
-    const pipsW = 3 * PhasePips.PIP + 2 * PhasePips.GAP;
+    const bg = scene.add.graphics();
+    hudPanel(bg, this.x - 10, this.y - 6, 3 * this.w + 2 * this.gap + 20, 92);
     this.gfx = scene.add.graphics();
-    this.title = scene.add.text(RIGHT_EDGE - pipsW - 10, this.y + PhasePips.PIP / 2, '', TITLE_STYLE(9)).setOrigin(1, 0.5);
-    this.goal = scene.add.text(RIGHT_EDGE, this.y + 24, '', TEXT_STYLE(13)).setOrigin(1, 0).setAlign('right').setWordWrapWidth(320).setLineSpacing(-4);
-    this.money = scene.add.text(RIGHT_EDGE, 0, '', TEXT_STYLE(18, UI.goldText)).setOrigin(1, 0).setAlpha(0);
-    this.container = scene.add.container(0, 0, [this.gfx, this.title, this.goal, this.money]).setDepth(20);
+    this.names = PHASES.map((p, i) =>
+      scene.add.text(this.x + i * (this.w + this.gap) + this.w / 2, this.y + 15, `${PHASE_INFO[p].number}  ${PHASE_INFO[p].title.replace('LUNAR ', '').replace('HUMAN ', '')}`, TEXT_STYLE(12)).setOrigin(0.5)
+    );
+    this.goal = scene.add.text(this.x, this.y + 36, '', TEXT_STYLE(12, UI.textMuted)).setWordWrapWidth(3 * this.w + 2 * this.gap).setLineSpacing(-4);
+    this.container = scene.add.container(0, 0, [bg, this.gfx, ...this.names, this.goal]).setDepth(20);
   }
 
   public setVisible(v: boolean): void {
     this.container.setVisible(v);
   }
 
-  /** Horizontal offset (px) for the liftoff slide-in; 0 = in place. */
-  public setSlide(dx: number): void {
-    this.container.x = dx;
-  }
-
-  /** Money just came in: pop `+$n` under the goal (amounts close together add up). */
-  public earn(amount: number): void {
-    if (amount <= 0) return;
-    this.popAmount = this.popTimer > 0 ? this.popAmount + amount : amount;
-    this.popTimer = 1.6;
-  }
-
-  /** Bottom of the goal block, so the warp readout can sit under it. */
-  public get bottom(): number {
-    return this.goal.y + this.goal.height + 30;
-  }
-
-  public update(current: PhaseId, done: number, goal: string, time: number, dt: number): void {
+  public update(current: PhaseId, done: number, goal: string, time: number): void {
     const g = this.gfx;
     g.clear();
-    const p = PhasePips.PIP;
-    const x0 = RIGHT_EDGE - 3 * p - 2 * PhasePips.GAP;
-    const now = PHASES.indexOf(current);
     PHASES.forEach((_, i) => {
-      const x = x0 + i * (p + PhasePips.GAP);
+      const x = this.x + i * (this.w + this.gap);
       const isDone = i < done;
-      const isNow = i === now && done < 3;
-      g.fillStyle(0x07060b, 1);
-      g.fillRect(x - 2, this.y - 2, p + 4, p + 4);
-      if (isDone) {
-        g.fillStyle(UI.green, 1);
-        g.fillRect(x, this.y, p, p);
-      } else if (isNow) {
-        g.fillStyle(UI.sky, 0.6 + 0.4 * Math.sin(time / 220));
-        g.fillRect(x, this.y, p, p);
-      } else {
-        g.fillStyle(UI.dim, 1);
-        g.fillRect(x, this.y, p, p);
-        g.fillStyle(0x0f0d15, 1);
-        g.fillRect(x + 3, this.y + 3, p - 6, p - 6);
+      const isNow = PHASES.indexOf(current) === i && done < 3;
+      if (i > 0) {
+        g.fillStyle(i <= done ? UI.green : UI.dim, 1);
+        g.fillRect(x - this.gap, this.y + 13, this.gap, 4);
       }
+      if (isDone) pixelPill(g, x, this.y, this.w, 30, UI.green, 1, 0x1f8a4f);
+      else if (isNow) pixelPill(g, x, this.y, this.w, 30, 0x1d3550, 0.75 + 0.25 * Math.sin(time / 260), UI.sky);
+      else pixelPill(g, x, this.y, this.w, 30, 0x0f0d15, 1, UI.dim);
+      this.names[i].setColor(isDone ? '#07291a' : isNow ? '#ffffff' : UI.textMuted).setStroke('#07060b', isDone ? 0 : 4);
     });
-    const info = PHASE_INFO[current];
-    this.title.setText(done >= 3 ? 'MISSION COMPLETE' : `${info.number} · ${info.title}`).setColor(done >= 3 ? UI.greenText : UI.text);
-    if (this.goal.text !== goal) this.goal.setText(goal);
-
-    // Money pop: rises a little and fades.
-    if (this.popTimer > 0) {
-      this.popTimer = Math.max(0, this.popTimer - dt);
-      const k = 1 - this.popTimer / 1.6;
-      this.money
-        .setText(`+$${this.popAmount.toLocaleString()}`)
-        .setY(this.goal.y + this.goal.height + 4 - 6 * k)
-        .setAlpha(Phaser.Math.Clamp(this.popTimer / 0.5, 0, 1));
-    } else {
-      this.money.setAlpha(0);
-    }
+    this.goal.setText(goal);
   }
 }
 
-/** Width of the bottom-centre card. */
-const CARD_W = 460;
-const CARD_PAD = 10;
-
 /**
- * Orbit band (a section of the bottom-centre card): the orbit's low and
- * high points against the safe band. Green when both are inside it.
+ * Orbit gauge, top centre: an arc showing the orbit's low and high points
+ * against the safe band. Green when both are inside it.
  */
-class OrbitBand {
-  public readonly container: Phaser.GameObjects.Container;
-  public static readonly H = 78;
+export class OrbitGauge {
   private readonly gfx: Phaser.GameObjects.Graphics;
   private readonly lowText: Phaser.GameObjects.Text;
   private readonly highText: Phaser.GameObjects.Text;
   private readonly status: Phaser.GameObjects.Text;
-  private readonly w = CARD_W - 40;
+  private readonly container: Phaser.GameObjects.Container;
+  private readonly cx = 640;
+  private readonly y = 18;
+  private readonly w = 420;
 
   constructor(scene: Phaser.Scene) {
-    const cx = CARD_W / 2;
+    const bg = scene.add.graphics();
+    hudPanel(bg, this.cx - this.w / 2 - 20, this.y - 6, this.w + 40, 82);
     this.gfx = scene.add.graphics();
-    this.lowText = scene.add.text(20, 0, '', TEXT_STYLE(13, '#7dd3fc'));
-    this.highText = scene.add.text(CARD_W - 20, 0, '', TEXT_STYLE(13, '#fbbf24')).setOrigin(1, 0);
-    this.status = scene.add.text(cx, 48, '', TEXT_STYLE(13)).setOrigin(0.5, 0);
-    const title = scene.add.text(cx, 0, 'ORBIT', TEXT_STYLE(11, UI.textMuted)).setOrigin(0.5, 0);
-    this.container = scene.add.container(0, 0, [this.gfx, title, this.lowText, this.highText, this.status]);
+    this.lowText = scene.add.text(this.cx - this.w / 2, this.y + 2, '', TEXT_STYLE(13, '#7dd3fc'));
+    this.highText = scene.add.text(this.cx + this.w / 2, this.y + 2, '', TEXT_STYLE(13, '#fbbf24')).setOrigin(1, 0);
+    this.status = scene.add.text(this.cx, this.y + 52, '', TEXT_STYLE(13)).setOrigin(0.5, 0);
+    const title = scene.add.text(this.cx, this.y + 2, 'ORBIT', TEXT_STYLE(11, UI.textMuted)).setOrigin(0.5, 0);
+    this.container = scene.add.container(0, 0, [bg, this.gfx, title, this.lowText, this.highText, this.status]).setDepth(20);
+  }
+
+  public setVisible(v: boolean): void {
+    this.container.setVisible(v);
   }
 
   /** `hold` is 0..1 progress of holding a stable orbit (phase 1), or null. */
@@ -130,10 +101,9 @@ class OrbitBand {
     g.clear();
     const { minPeriapsis, maxApoapsis } = CONFIG.phases.orbit;
     const top = 1500;
-    const x0 = 20;
-    const cx = CARD_W / 2;
+    const x0 = this.cx - this.w / 2;
     const toX = (alt: number) => x0 + (Phaser.Math.Clamp(alt, 0, top) / top) * this.w;
-    const barY = 28;
+    const barY = this.y + 30;
 
     // Track: surface on the left, edge of the Moon's pull on the right, safe band in green.
     hudWell(g, x0, barY, this.w, 12);
@@ -150,6 +120,7 @@ class OrbitBand {
     const highOk = !o.escaping && o.apoapsisAltitude <= maxApoapsis;
     const lo = o.periapsisAltitude;
     const hi = o.escaping ? Infinity : o.apoapsisAltitude;
+    // Span of the orbit's heights.
     g.fillStyle(lowOk && highOk ? UI.green : UI.amber, 0.9);
     g.fillRect(toX(Math.max(0, lo)), barY + 3, Math.max(3, toX(hi) - toX(Math.max(0, lo))), 6);
     g.fillStyle(lo < 0 ? UI.red : 0x7dd3fc, 1);
@@ -162,10 +133,10 @@ class OrbitBand {
 
     if (hold !== null && lowOk && highOk) {
       g.fillStyle(UI.green, 1);
-      g.fillRect(cx - 80, 70, 160 * hold, 4);
-      this.status.setText('STABLE ORBIT… hold it').setColor(UI.greenText).setAlpha(1);
+      g.fillRect(this.cx - 80, this.y + 70, 160 * hold, 4);
+      this.status.setText('STABLE ORBIT… hold it').setColor(UI.greenText);
     } else if (lowOk && highOk) {
-      this.status.setText('Stable orbit').setColor(UI.greenText).setAlpha(1);
+      this.status.setText('Stable orbit').setColor(UI.greenText);
     } else if (lo < 0) {
       this.status.setText('Burn sideways to swing round the Moon').setColor('#f87171').setAlpha(0.7 + 0.3 * Math.sin(time / 150));
     } else if (!highOk) {
@@ -176,36 +147,46 @@ class OrbitBand {
   }
 }
 
-/** Problem section of the bottom-centre card: what went wrong, what to do, and a progress bar. */
-class ProblemSection {
-  public readonly container: Phaser.GameObjects.Container;
-  public static readonly H = 104;
+/** The card that pops up when something goes wrong, with what to do about it. */
+export class ProblemCard {
+  private readonly bg: Phaser.GameObjects.Graphics;
   private readonly gfx: Phaser.GameObjects.Graphics;
   private readonly title: Phaser.GameObjects.Text;
   private readonly howTo: Phaser.GameObjects.Text;
   private readonly detail: Phaser.GameObjects.Text;
+  private readonly container: Phaser.GameObjects.Container;
+  private readonly cx = 640;
+  private readonly y = 112;
+  private readonly w = 460;
+  private readonly h = 112;
 
   constructor(scene: Phaser.Scene) {
-    const cx = CARD_W / 2;
+    this.bg = scene.add.graphics();
     this.gfx = scene.add.graphics();
-    this.title = scene.add.text(cx, 0, '', TEXT_STYLE(18, '#fca5a5')).setOrigin(0.5, 0);
-    this.howTo = scene.add.text(cx, 26, '', TEXT_STYLE(13)).setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(CARD_W - 30);
-    this.detail = scene.add.text(cx, ProblemSection.H, '', TEXT_STYLE(12, UI.textMuted)).setOrigin(0.5, 1);
-    this.container = scene.add.container(0, 0, [this.gfx, this.title, this.howTo, this.detail]);
+    this.title = scene.add.text(this.cx, this.y + 10, '', TEXT_STYLE(18, '#fca5a5')).setOrigin(0.5, 0);
+    this.howTo = scene.add.text(this.cx, this.y + 36, '', TEXT_STYLE(13)).setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(this.w - 30);
+    this.detail = scene.add.text(this.cx, this.y + this.h - 12, '', TEXT_STYLE(12, UI.textMuted)).setOrigin(0.5, 1);
+    this.container = scene.add.container(0, 0, [this.bg, this.gfx, this.title, this.howTo, this.detail]).setDepth(20).setVisible(false);
   }
 
-  public update(p: ActiveProblem, orbit: OrbitElements | null): void {
+  public update(p: ActiveProblem | null, extra: { periapsis: number | null }, time: number): void {
+    this.container.setVisible(p !== null);
+    if (!p) return;
+    const x0 = this.cx - this.w / 2;
+    const flash = 0.6 + 0.4 * Math.sin(time / 120);
+    this.bg.clear();
+    drawPixelPanel(this.bg, x0, this.y, this.w, this.h, { fill: 0x1f0a10, fillAlpha: 0.94, border: flash > 0.8 ? UI.red : 0x8a2a32, highlight: UI.red, u: 3 });
+
     const info = PROBLEM_INFO[p.id];
     this.title.setText(`⚠ ${info.title}${p.timeLeft !== null ? `   ${Math.ceil(p.timeLeft)}s` : ''}`);
     this.howTo.setText(info.howTo);
 
     const g = this.gfx;
     g.clear();
-    const barX = 40;
-    const barW = CARD_W - 80;
-    const barY = 66;
+    const barX = x0 + 40;
+    const barW = this.w - 80;
+    const barY = this.y + 74;
     hudWell(g, barX, barY, barW, 10);
-    this.detail.setColor(UI.textMuted);
 
     switch (p.id) {
       case 'FUEL_LEAK': {
@@ -234,12 +215,12 @@ class ProblemSection {
         break;
       }
       case 'ORBIT_DECAY': {
-        const pe = orbit?.periapsisAltitude ?? 0;
+        const pe = extra.periapsis ?? 0;
         const safe = CONFIG.phases.rover.problems.ORBIT_DECAY.safePeriapsis;
         g.fillStyle(UI.sky, 1);
         g.fillRect(barX, barY, barW * p.progress, 10);
         this.detail.setText(`low point ${pe < 0 ? 'HITS THE MOON' : formatDistance(pe)}  (keep above ${safe} m)`).setColor(pe >= safe ? UI.greenText : '#f87171');
-        break;
+        return;
       }
       case 'FLAMEOUT': {
         g.fillStyle(UI.amber, 1);
@@ -256,69 +237,6 @@ class ProblemSection {
       default:
         this.detail.setText('');
     }
-  }
-}
-
-/**
- * The one card slot at the bottom centre, shown only while relevant: it
- * hosts the problem card and the orbit LOW/HIGH band (stacked when both
- * are up) on a single sheet of smoked glass.
- */
-export class BottomCard {
-  private readonly glass: Phaser.GameObjects.Image;
-  private readonly flash: Phaser.GameObjects.Graphics;
-  private readonly problem: ProblemSection;
-  private readonly orbit: OrbitBand;
-  private readonly container: Phaser.GameObjects.Container;
-  private readonly x = 640 - CARD_W / 2;
-  private readonly bottom = 708;
-  private shape = '';
-
-  constructor(scene: Phaser.Scene) {
-    this.glass = glassPanel(scene, this.x, this.bottom - 100, CARD_W, 100);
-    this.flash = scene.add.graphics();
-    this.problem = new ProblemSection(scene);
-    this.orbit = new OrbitBand(scene);
-    this.container = scene.add.container(0, 0, [this.glass, this.flash, this.problem.container, this.orbit.container]).setDepth(20).setVisible(false);
-  }
-
-  /**
-   * `problem` null hides the problem section; the orbit band shows when `orbit.showBand`
-   * (`hold` is the phase 1 hold progress, 0..1, or null). The card hides itself when neither is shown.
-   */
-  public update(problem: ActiveProblem | null, orbit: { elements: OrbitElements | null; showBand: boolean; hold: number | null }, time: number): void {
-    const showOrbit = orbit.showBand;
-    const showProblem = problem !== null;
-    this.container.setVisible(showOrbit || showProblem);
-    this.problem.container.setVisible(showProblem);
-    this.orbit.container.setVisible(showOrbit);
-    if (!showOrbit && !showProblem) return;
-
-    const h = CARD_PAD * 2 + (showProblem ? ProblemSection.H : 0) + (showOrbit ? OrbitBand.H : 0) + (showOrbit && showProblem ? 8 : 0);
-    const top = this.bottom - h;
-    const opts: GlassOptions = showProblem ? { accent: UI.red, tint: 0.4 } : {};
-    const shape = `${h}|${showProblem}`;
-    if (shape !== this.shape) {
-      this.shape = shape;
-      resizeGlass(this.glass, this.x, top, CARD_W, h, opts);
-    }
-
-    let y = top + CARD_PAD;
-    if (showProblem) {
-      this.problem.container.setPosition(this.x, y);
-      this.problem.update(problem, orbit.elements);
-      y += ProblemSection.H + 8;
-    }
-    if (showOrbit) {
-      this.orbit.container.setPosition(this.x, y);
-      this.orbit.update(orbit.elements, orbit.hold, time);
-    }
-
-    // A pulsing red frame while something is wrong.
-    this.flash.clear();
-    if (showProblem) {
-      this.flash.lineStyle(3, UI.red, 0.35 + 0.35 * Math.sin(time / 120));
-      this.flash.strokeRect(this.x + 1.5, top + 1.5, CARD_W - 3, h - 3);
-    }
+    this.detail.setColor(UI.textMuted);
   }
 }

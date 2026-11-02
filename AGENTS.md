@@ -306,28 +306,16 @@ Take it away, fly safe! 🛰️
 - **Seaside spaceport** (`LaunchSite.ts`): land and mountains left, cliff + lighthouse, ocean to the horizon on the right (wraps to a beach so it still tiles). Painted complex: control bunker with dish, flags, water tower, floodlight masts, fuel spheres, palms. `WorldRenderer.drawSiteLife` animates flags, sea glints, birds, pad steam, and lamps/beacon after dark; `drawPad` draws the slab, flame trench and a pixel gantry sized to the rocket, with an arm until liftoff. Clouds drift; the Moon starts pale in the top-right corner.
 - **Lab**: COCKPIT / SATELLITE / ROVER payload slot in PARTS (card fan, C key); bank card moved to the left column; FLIGHT READY chip removed; BLOCK is selected on open.
 
-#### 🟣 [Claude] - 2026-11-01 (Flight HUD redesign, PR #49: spec #43, tickets #44–#48 + review fixes)
-**Update for Gemini**: the flight HUD is rebuilt around smoked Rocket Lab glass (`theme.ts` `glassPanel` / `glassTexture`); the old `Altimeter`, `CoinCounter`, `FuelTank`, `JourneyArc` and `LaunchButton` widgets are gone.
-- **Pad**: `PreflightCard` on the left (mission + reward, DAWN/NOON/DUSK/NIGHT launch time, verdict, cost vs bank, LAUNCH!). Through the countdown it stays put but takes no clicks; at liftoff it slides out and the flight columns slide in (one slide table in `FlightScene.updateHud`).
-- **Left column** (`LeftColumn`): attitude ball (sky by launch time, wind arrow, amber/red rim past 20°/35°), one mini tank per fuel tank (×n groups above 6 tanks, with stable group ids so a puff only plays when a shown tank leaves), TWR dial, mass. Pure model in `src/game/flightHud.ts`.
-- **Right column**: `PhasePips` (phase + goal, `+$` pop), `ProgressTrack` (Earth→Moon, shown for the whole flight), `KeyHints` (key caps; problem caps live in `PROBLEM_INFO[id].hints`). **Bottom centre**: `BottomCard` (problem card + orbit band; takes the orbit as one object).
-- **Rock belt** (`rocks.ts`): every lane rock and drifter at its own height (no rows, drifters included); drifters hold still until `anchorBelt(rocks, simTime, y)` starts the belt clock (predicted at engage, corrected at belt entry); the runner climbs at exactly `cruiseSpeed` inside the belt so the reserved route holds. Threat chevrons only flag lanes a rock will cross within `threatLookahead` s (`laneThreats`).
-- **Config**: new `game.json` → `flightHud` block (tilt thresholds, tank grouping, wind, slide/moment timings) and generator keys under `rockBelt.evasiveRunner`.
-- **Verification**: `npm run typecheck` and `npx vitest run` green.
+#### 🟣 [Claude] - 2026-11-02 (Harder rock belt, opaque Moon; HUD redesign undone)
+- **Rock belt** (`src/game/rocks.ts`, `rockBelt.evasiveRunner` in `game.json`): same 5 lanes and snap controls, but every rock gets its own height (no rows), density ramps up the belt and follows the launch time (DAWN ×0.7 … NIGHT ×1.6), drifters cross lanes in the last third, and a reachable route is always reserved (the climb is held at cruise speed inside the belt). Shields are removed entirely. Runner warning chevrons now flag only lanes a rock crosses within `threatLookahead`.
+- **Moon**: the sky Moon is fully opaque at every time of day.
+- The side-column HUD / pre-flight card redesign (PR #49 tickets #45–#48) was tried and undone at the player's request; the flight HUD is back to the pixel HUD from PR #40.
 
 ---
 
 ## 📋 Task Board & Progress Tracker
 
 Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLAUDE]`), and `[x]` for completed.
-
-### 🧭 Flight HUD Redesign (spec #43, PR #49)
-- [x] #44: Staggered rock belt with ramp, drifters and no shields (`rocks.ts`, `game.json`)
-- [x] #45: Pure flight HUD model, fuel type on flight parts (`flightHud.ts`, `vehicle.ts`)
-- [x] #46: Smoked glass HUD, right column, bottom-centre card (`theme.ts`, `PhaseHud.ts`, `ProgressTrack.ts`, `KeyHints.ts`)
-- [x] #47: Left instrument column: attitude ball, fuel tanks, TWR, mass (`LeftColumn.ts`)
-- [x] #48: Pre-flight card on the pad and slide-in HUD at liftoff (`PreflightCard.ts`, `FlightScene.ts`)
-- [x] Review fixes for PR #49 (liftoff timing, drifter rows, stable tank groups, lane threat look-ahead, config, cleanup)
 
 ### 🌕 Manual Moon Landing & Passive Guidance Tickets (#34–#36)
 - [x] #34: 01: Purge Landing Autopilot & Remove Mode Toggles (`FlightScene.ts`, `progress.ts`, `game.test.ts`)

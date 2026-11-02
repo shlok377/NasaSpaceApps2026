@@ -17,18 +17,19 @@ import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, PlayerPro
 import { anchorBelt, checkBelt, Combo, generateBelt, generateLaneWaves, Rock } from '../game/rocks';
 import { createEvasiveRunnerState, EvasiveRunnerState, updateEvasiveRunner, RUNNER_CONFIG } from '../game/evasiveRunner';
 import { Award, StuntTracker } from '../game/stunts';
-import { TIMES_OF_DAY, TimeOfDay, timeOfDayReward, timeOfDayWind } from '../game/timeOfDay';
+import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay, timeOfDayReward, timeOfDayWind } from '../game/timeOfDay';
+import { PX, drawPixelPanel, pixelBody, pixelTitle } from '../ui/pixel';
 import { moonSoiAltitude } from '../physics/bodies';
 import { ENGINE, FINS, G0, LIMITS, ROCK_BELT, WORLD } from '../physics/constants';
 import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physics/FlightSim';
 import { evaluateMission, MAX_STARS, MissionResult } from '../physics/mission';
 import { analyzeVehicle, buildFlightVehicle, FlightVehicle, VehicleReport } from '../physics/vehicle';
-import { LEFT_COLUMN, LeftColumn } from '../ui/LeftColumn';
-import { flightHudModel } from '../game/flightHud';
-import { HintRow, KeyHints } from '../ui/KeyHints';
-import { PREFLIGHT_CARD, PreflightCard } from '../ui/PreflightCard';
-import { BottomCard, PhasePips, RIGHT_EDGE } from '../ui/PhaseHud';
-import { ProgressTrack } from '../ui/ProgressTrack';
+import { Altimeter } from '../ui/Altimeter';
+import { CoinCounter } from '../ui/CoinCounter';
+import { FuelTank } from '../ui/FuelTank';
+import { JourneyArc, Milestone } from '../ui/JourneyArc';
+import { LaunchButton } from '../ui/LaunchButton';
+import { OrbitGauge, PhaseStrip, ProblemCard } from '../ui/PhaseHud';
 import { CLASSIC, CLASSIC_TEXT_STYLE, formatDistance, TEXT_STYLE, TITLE_STYLE, UI } from '../ui/theme';
 import { preloadGameAssets } from '../core/assets';
 import { Effects } from './flight/Effects';
@@ -51,20 +52,7 @@ type Keys = Record<
 
 /** Height where the Moon's pull takes over, straight below it: the end of the climb. */
 const SOI_ALTITUDE = moonSoiAltitude();
-/** Liftoff slide: the pre-flight card out, the flight columns in (ms). */
-const SLIDE_MS = CONFIG.flightHud.slideMs;
-/** How far right the right column starts (px): past the screen edge from its widest part, the wrapped goal. */
-const RIGHT_SLIDE = 360;
-/** Big centre moments (phase titles, banners) stay up about this long (s). */
-const MOMENT_SECONDS = CONFIG.flightHud.momentSeconds;
-
-/** A HUD widget that slides in from (or out to) the screen edge at liftoff. */
-interface Slider {
-  setSlide(dx: number): void;
-}
-
-/** Climb milestones that pay a bonus, as a fraction of the climb to the Moon's pull. */
-const MILESTONES: Array<{ label: string; at: number }> = [
+const MILESTONES: Milestone[] = [
   { label: 'Clouds', at: 1_500 / SOI_ALTITUDE },
   { label: 'Space', at: WORLD.atmosphereTop / SOI_ALTITUDE }
 ];
@@ -131,23 +119,20 @@ export class FlightScene extends Phaser.Scene {
   private fx!: Effects;
 
   // HUD
-  private phasePips!: PhasePips;
-  private bottomCard!: BottomCard;
-  private track!: ProgressTrack;
-  private keyHints!: KeyHints;
-  private leftColumn!: LeftColumn;
-  /** Money (bank + live award cash) last frame, to pop `+$` when it rises. */
-  private lastCash: number | null = null;
-  private preflight!: PreflightCard;
-  /**
-   * Liftoff slide: each widget with its off-screen offset (px); `leaves` widgets
-   * (the pre-flight card) slide out, the rest slide in.
-   */
-  private slides: Array<{ widget: Slider; offscreen: number; leaves?: boolean }> = [];
-  /** Scene time (ms) the liftoff slide began (at liftoff), or null before it. */
-  private slideStart: number | null = null;
+  private phaseStrip!: PhaseStrip;
+  private orbitGauge!: OrbitGauge;
+  private problemCard!: ProblemCard;
+  private journey!: JourneyArc;
+  private altimeter!: Altimeter;
+  private fuelTank!: FuelTank;
+  private coins!: CoinCounter;
+  private launchButton!: LaunchButton;
+  private missionText!: Phaser.GameObjects.Text;
   /** Launch time picked on the pad (resets to DAWN every launch). */
   private timeOfDay: TimeOfDay = 'DAWN';
+  private timePicker!: Phaser.GameObjects.Container;
+  private timeCards: Array<{ time: TimeOfDay; gfx: Phaser.GameObjects.Graphics; hover: boolean }> = [];
+  private hintText!: Phaser.GameObjects.Text;
   private bannerText!: Phaser.GameObjects.Text;
   private phaseTitle!: Phaser.GameObjects.Text;
   private phaseGoal!: Phaser.GameObjects.Text;
@@ -242,8 +227,6 @@ export class FlightScene extends Phaser.Scene {
     this.impactMarker = null;
     this.markerAt = -Infinity;
     this.timeOfDay = 'DAWN';
-    this.lastCash = null;
-    this.slideStart = null;
   }
 
   preload(): void {
@@ -280,65 +263,107 @@ export class FlightScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
 
   private createHud(): void {
-    // Right column: phase pips + goal (+ money pop), the Earth→Moon track, key caps.
-    this.phasePips = new PhasePips(this);
-    this.track = new ProgressTrack(this, 1236, 186, 548, SOI_ALTITUDE, [
-      { label: 'Clouds', height: 1_500 },
-      { label: 'Space', height: WORLD.atmosphereTop },
-      { label: 'Rocks', height: ROCK_BELT.bottom, to: ROCK_BELT.top },
-      { label: 'Moon', height: SOI_ALTITUDE }
-    ]);
-    this.keyHints = new KeyHints(this, 682);
-    // Bottom centre: the problem card and the orbit band.
-    this.bottomCard = new BottomCard(this);
-    // Left column (hidden on the pad): attitude ball, fuel mini tanks, TWR dial, mass.
-    this.leftColumn = new LeftColumn(this);
+    this.phaseStrip = new PhaseStrip(this);
+    this.journey = new JourneyArc(this, 690, MILESTONES);
+    this.orbitGauge = new OrbitGauge(this);
+    this.problemCard = new ProblemCard(this);
+    this.altimeter = new Altimeter(
+      this,
+      1230,
+      150,
+      380,
+      SOI_ALTITUDE,
+      [
+        { label: 'Clouds', height: 1_500 },
+        { label: 'SPACE', height: WORLD.atmosphereTop },
+        { label: 'MOON', height: SOI_ALTITUDE }
+      ],
+      { from: ROCK_BELT.bottom, to: ROCK_BELT.top, label: 'rocks' }
+    );
+    this.fuelTank = new FuelTank(this, 38, 560);
+    this.coins = new CoinCounter(this, 1264, 34);
 
-    // Pad: the pre-flight card on the left (mission, launch time, verdict, cost vs bank, LAUNCH!).
-    const [verdict, verdictColor] = this.verdict();
-    this.preflight = new PreflightCard(this, {
-      mission: this.mission,
-      verdict,
-      verdictColor,
-      cost: this.cost,
-      bank: this.progress.money,
-      onPickTime: time => this.setTimeOfDay(time),
-      onLaunch: () => this.startCountdown()
-    });
-    this.setTimeOfDay(this.timeOfDay);
-    const leftOut = -(LEFT_COLUMN.x + LEFT_COLUMN.w + 16);
-    this.slides = [
-      { widget: this.preflight, offscreen: -(PREFLIGHT_CARD.x + PREFLIGHT_CARD.w + 16), leaves: true },
-      { widget: this.leftColumn, offscreen: leftOut },
-      { widget: this.phasePips, offscreen: RIGHT_SLIDE },
-      { widget: this.track, offscreen: RIGHT_SLIDE },
-      { widget: this.keyHints, offscreen: RIGHT_SLIDE }
-    ];
-    // Banners wrap to two lines at most; the big centre titles (phase title, countdown, debris prompt) keep to one.
-    this.bannerText = this.add.text(640, 236, '', TEXT_STYLE(20, '#ffffff')).setOrigin(0.5, 0).setAlpha(0).setDepth(20).setAlign('center').setWordWrapWidth(1100).setMaxLines(2);
+    const [verdict, color] = this.verdict();
+    const affordable = this.progress.money >= this.cost;
+    this.launchButton = new LaunchButton(this, 640, 600, verdict, color, affordable ? `Launch cost $${this.cost}  ·  SPACE` : `Costs $${this.cost}, you have $${this.progress.money}`, () =>
+      this.startCountdown()
+    );
+    this.missionText = this.add.text(640, 168, '', TEXT_STYLE(15, UI.goldText)).setOrigin(0.5);
+    this.createTimePicker();
+    this.hintText = this.add.text(640, 694, '', TEXT_STYLE(14)).setOrigin(0.5).setDepth(20);
+    this.bannerText = this.add.text(640, 236, '', TEXT_STYLE(20, '#ffffff')).setOrigin(0.5, 0).setAlpha(0).setDepth(20);
     this.phaseTitle = this.add.text(640, 300, '', TITLE_STYLE(30, '#ffffff')).setOrigin(0.5).setAlpha(0).setDepth(30);
-    this.phaseGoal = this.add.text(640, 344, '', TEXT_STYLE(16, UI.text)).setOrigin(0.5, 0).setAlpha(0).setDepth(30).setAlign('center').setWordWrapWidth(900).setMaxLines(1);
+    this.phaseGoal = this.add.text(640, 344, '', TEXT_STYLE(16, UI.text)).setOrigin(0.5, 0).setAlpha(0).setDepth(30).setAlign('center').setWordWrapWidth(640);
     this.countdownText = this.add.text(640, 320, '', TITLE_STYLE(72, '#ffffff')).setOrigin(0.5).setVisible(false).setDepth(30);
     this.readoutText = this.add.text(0, 0, '', TEXT_STYLE(15)).setOrigin(0, 0.5).setVisible(false).setDepth(10);
     this.comboText = this.add.text(640, 128, '', TEXT_STYLE(18, '#f0abfc')).setOrigin(0.5).setVisible(false);
-    this.warpText = this.add.text(RIGHT_EDGE, 120, '', TEXT_STYLE(14, '#93c5fd')).setOrigin(1, 0.5).setDepth(20);
-    this.endButton = this.add.text(RIGHT_EDGE, 700, '■ End flight', TEXT_STYLE(13, UI.textMuted)).setOrigin(1, 0.5).setInteractive({ useHandCursor: true }).setVisible(false);
+    this.warpText = this.add.text(1250, 80, '', TEXT_STYLE(14, '#93c5fd')).setOrigin(1, 0.5).setDepth(20);
+    this.endButton = this.add.text(1250, 694, '■ End flight', TEXT_STYLE(13, UI.textMuted)).setOrigin(1, 0.5).setInteractive({ useHandCursor: true }).setVisible(false);
     this.endButton.on('pointerdown', () => {
       if (!this.result && this.launched) this.finishMission();
     });
   }
 
   // ---------------------------------------------------------------------------
-  // Launch time (picked on the pre-flight card)
+  // Launch time picker (on the pad only)
   // ---------------------------------------------------------------------------
 
-  /** Later is windier and pays more; the scene re-lights live and the card's reward rescales. */
+  private static readonly TIME_CARD_W = 120;
+  private static readonly TIME_CARD_H = 56;
+
+  /** DAWN → NIGHT strip under the mission line: later is windier and pays more. */
+  private createTimePicker(): void {
+    const w = FlightScene.TIME_CARD_W;
+    const h = FlightScene.TIME_CARD_H;
+    this.timePicker = this.add.container(0, 0).setDepth(15);
+    this.timeCards = TIMES_OF_DAY.map((time, i) => {
+      const x = 640 + (i - 1.5) * (w + 10) - w / 2;
+      const y = 196;
+      const look = TIME_LOOKS[time];
+      const gfx = this.add.graphics();
+      const label = pixelTitle(this, x + w / 2, y + 10, look.label, 10, PX.text.white).setOrigin(0.5, 0);
+      const pay = timeOfDayReward(time);
+      const sub = pixelBody(this, x + w / 2, y + 28, `${look.blurb} · $×${pay}`, 18, PX.text.muted).setOrigin(0.5, 0);
+      const zone = this.add.zone(x + w / 2, y + h / 2, w, h).setInteractive({ useHandCursor: true });
+      const card = { time, gfx, hover: false };
+      zone.on('pointerover', () => ((card.hover = true), this.drawTimePicker()));
+      zone.on('pointerout', () => ((card.hover = false), this.drawTimePicker()));
+      zone.on('pointerdown', () => this.setTimeOfDay(time));
+      this.timePicker.add([gfx, label, sub, zone]);
+      return card;
+    });
+    this.setTimeOfDay(this.timeOfDay);
+  }
+
+  private drawTimePicker(): void {
+    const w = FlightScene.TIME_CARD_W;
+    const h = FlightScene.TIME_CARD_H;
+    this.timeCards.forEach(({ time, gfx, hover }, i) => {
+      const x = 640 + (i - 1.5) * (w + 10) - w / 2;
+      const on = time === this.timeOfDay;
+      const accent = TIME_LOOKS[time].accent;
+      gfx.clear();
+      drawPixelPanel(gfx, x, 196, w, h, {
+        fill: on ? 0x2a2236 : PX.panelDeep,
+        fillAlpha: 0.92,
+        border: on ? accent : hover ? PX.border : PX.borderDim,
+        highlight: on ? 0xffffff : PX.glow,
+        u: on ? 3 : 2
+      });
+      // Swatch of the sky in the corner.
+      gfx.fillStyle(accent, on ? 1 : 0.5);
+      gfx.fillRect(x + 8, 196 + 8, 8, 8);
+    });
+  }
+
   private setTimeOfDay(time: TimeOfDay): void {
     if (this.sim.phase !== 'PRELAUNCH' || this.countdown !== null) return;
     this.timeOfDay = time;
     this.sim.windScale = timeOfDayWind(time);
     this.world.setTimeOfDay(time);
-    this.preflight.setTime(time);
+    const reward = this.mission ? Math.round(this.mission.reward * timeOfDayReward(time)) : 0;
+    this.missionText.setText(this.mission ? `MISSION: ${this.mission.title}: ${this.mission.goal}  (+$${reward})` : 'All missions done: fly for the high score!');
+    this.drawTimePicker();
   }
 
   private stepTimeOfDay(dir: number): void {
@@ -446,8 +471,11 @@ export class FlightScene extends Phaser.Scene {
       this.spacePressedThisFrame = false;
       this.laneSteerInput = 0;
 
+      if (ev.promptTriggered) {
+        this.showBanner(`DEBRIS FIELD AHEAD: PRESS [SPACE] TO ENGAGE EVASIVE RUNNER (${Math.ceil(this.runnerState.promptTimer)}s)`, '#38bdf8');
+      }
       if (ev.engaged) {
-        this.runnerEntryVy = Math.max(this.sim.state.vy, RUNNER_CONFIG.cruiseSpeed);
+        this.runnerEntryVy = Math.max(this.sim.state.vy, RUNNER_CONFIG.cruiseSpeed ?? 45);
         this.rocks = generateLaneWaves(Math.floor(Math.random() * 1e9), this.timeOfDay);
         // Predict the belt clock from here (as if climbing at the cruise speed); it is re-anchored at the real entry.
         anchorBelt(this.rocks, this.sim.state.time, this.sim.state.y);
@@ -593,8 +621,8 @@ export class FlightScene extends Phaser.Scene {
     }
     this.countdown = null;
     this.launched = true;
-    this.countdownText.setText('LIFTOFF!');
-    this.tweens.add({ targets: this.countdownText, alpha: 0, delay: MOMENT_SECONDS * 1000 - 400, duration: 400, onComplete: () => this.countdownText.setVisible(false) });
+    this.countdownText.setText('GO!');
+    this.tweens.add({ targets: this.countdownText, alpha: 0, delay: 500, duration: 400, onComplete: () => this.countdownText.setVisible(false) });
     this.sim.launch();
     this.time.delayedCall(1000, () => this.showPhaseTitle('ORBIT'));
   }
@@ -663,7 +691,7 @@ export class FlightScene extends Phaser.Scene {
           break;
         case 'SITE_MOVED':
           this.cameras.main.shake(300, 0.008);
-          this.showBanner(`⚠ ${PROBLEM_INFO.BOULDERS.title}: fly to the new green site`, '#fca5a5');
+          this.showBanner(`⚠ ${PROBLEM_INFO.BOULDERS.title}: ${PROBLEM_INFO.BOULDERS.howTo}`, '#fca5a5');
           break;
         case 'COMPLETE':
           if (e.onSite) this.celebrate({ id: 'BULLSEYE', label: 'ON THE SITE', points: 1_000 });
@@ -738,7 +766,7 @@ export class FlightScene extends Phaser.Scene {
     const info = PHASE_INFO[phase];
     this.phaseTitle.setText(`PHASE ${info.number} · ${info.title}`).setAlpha(1);
     this.phaseGoal.setText(info.goal).setAlpha(1);
-    this.titleTimer = MOMENT_SECONDS;
+    this.titleTimer = 3.2;
   }
 
   private checkMilestones(t: FlightTelemetry): void {
@@ -761,13 +789,11 @@ export class FlightScene extends Phaser.Scene {
       this.fx.burst(at.x, at.y, WORLD_COLORS.rock);
       this.sim.hitPart(hit.partId);
     }
-    // Each near miss grows the combo by one.
-    for (let i = 0; i < r.nearMisses.length; i++) {
+    for (const _ of r.nearMisses) {
       const n = this.combo.nearMiss(this.sim.state.time);
       this.celebrate({ id: 'NEAR_MISS', label: n > 1 ? `NEAR MISS ×${n}` : 'NEAR MISS', points: 100 * n });
     }
-    // One refuel per fuel can picked up.
-    for (let i = 0; i < r.pickups.length; i++) {
+    for (const _ of r.pickups) {
       const added = this.sim.refuel(this.vehicle.fuelCapacity * CONFIG.rockBelt.fuelCanRefill);
       this.celebrate({ id: 'PICKUP_FUEL', label: added > 0 ? `+${Math.round(added)} kg FUEL` : 'FUEL (full)', points: 50 });
     }
@@ -797,55 +823,43 @@ export class FlightScene extends Phaser.Scene {
     const mode = this.world.camera.mode;
     const r = this.runner;
     const best = Math.max(this.progress.bestHeight, this.sim.stats.maxAltitude);
-    // Before liftoff (on the pad and through the countdown) the flight columns are away.
-    const onPad = !this.launched;
+    const onPad = this.sim.phase === 'PRELAUNCH' && this.countdown === null;
 
-    // Right column (hidden on the pad): phase pips + goal, money pop, Earth→Moon track, key caps.
-    this.phasePips.setVisible(!onPad);
-    // Money is hidden in flight; it only pops `+$n` under the goal when it comes in.
-    const cash = this.progress.money + (this.result ? 0 : cashFromAwards(this.stunts.awards));
-    if (this.lastCash !== null && cash > this.lastCash && !onPad && !this.result) this.phasePips.earn(cash - this.lastCash);
-    this.lastCash = cash;
-    this.phasePips.update(r.phase, r.phasesDone, this.objective(t), now, dt);
-    this.warpText.setY(this.phasePips.bottom + 10);
+    this.phaseStrip.setVisible(!onPad);
+    this.phaseStrip.update(r.phase, r.phasesDone, this.objective(t), now);
 
     const ascent = mode === 'ASCENT';
-    // The Earth→Moon track stays up the whole flight (it sits right of the orbit map and the bottom card).
-    this.track.setVisible(!onPad);
-    this.track.update(Math.max(0, t.earthAltitude), this.sim.stats.maxAltitude, best);
-    this.keyHints.setVisible(!onPad);
-    this.keyHints.update(flying && this.launched ? this.hintRows(t) : [], dt);
+    this.journey.setVisible(ascent && !onPad);
+    this.journey.update(
+      {
+        fraction: Phaser.Math.Clamp(t.earthAltitude / SOI_ALTITUDE, 0, 1),
+        travelled: Math.max(0, Math.min(SOI_ALTITUDE, t.earthAltitude)),
+        total: SOI_ALTITUDE,
+        outbound: t.verticalSpeed >= 0,
+        onCourse: this.coastApex !== null && this.coastApex >= SOI_ALTITUDE,
+        passed: this.passed
+      },
+      now
+    );
+    this.altimeter.setVisible(ascent);
+    this.altimeter.update(Math.max(0, t.earthAltitude), best, this.coastApex);
+    this.orbitGauge.setVisible(mode === 'ORBIT' && !this.result);
+    this.orbitGauge.update(t.moonOrbit, r.phase === 'ORBIT' ? r.stableFor / CONFIG.phases.orbit.holdSeconds : null, now);
+    this.problemCard.update(flying ? (r.problem as ActiveProblem | null) : null, { periapsis: t.moonOrbit?.periapsisAltitude ?? null }, now);
+    this.fuelTank.update(t.fuelFraction, t.mass, this.vehicle.wetMass, t.twr, t.throttle > 0, now, dt);
+    this.coins.update(this.progress.money + (this.result ? 0 : cashFromAwards(this.stunts.awards)), dt);
 
-    // Bottom-centre card: the problem card and, while orbiting, the orbit band.
-    const problem = flying ? (r.problem as ActiveProblem | null) : null;
-    const showOrbit = flying && mode === 'ORBIT' && (r.phase === 'ORBIT' || problem?.id === 'ORBIT_DECAY');
-    this.bottomCard.update(problem, { elements: t.moonOrbit, showBand: showOrbit, hold: r.phase === 'ORBIT' ? r.stableFor / CONFIG.phases.orbit.holdSeconds : null }, now);
-    this.leftColumn.setVisible(!onPad);
-    if (!onPad) {
-      this.leftColumn.update(flightHudModel(this.sim, t, this.timeOfDay), {
-        mass: t.mass,
-        wetMass: this.vehicle.wetMass,
-        twr: t.twr,
-        throttleActive: t.throttle > 0,
-        time: now,
-        dt
-      });
-    }
-
-    // Liftoff slide (at liftoff): the pre-flight card leaves left, the columns come in from the edges.
-    // Through the countdown the card stays put but takes no more clicks.
-    if (onPad) this.slideStart = null;
-    else if (this.slideStart === null) this.slideStart = now;
-    const k = this.slideStart === null ? 0 : Phaser.Math.Clamp((now - this.slideStart) / SLIDE_MS, 0, 1);
-    const ease = 1 - (1 - k) ** 3;
-    for (const s of this.slides) s.widget.setSlide(s.leaves ? ease * s.offscreen : (1 - ease) * s.offscreen);
-    this.preflight.setEnabled(this.sim.phase === 'PRELAUNCH' && this.countdown === null);
-    this.preflight.update(now);
+    this.launchButton.setVisible(onPad);
+    this.timePicker.setVisible(onPad);
+    this.launchButton.update(now);
+    this.missionText.setVisible(onPad);
     this.endButton.setVisible(flying && this.launched);
     this.warpText.setText(this.timeScale > 1 && flying ? `▶▶ ×${this.timeScale}` : '');
 
     const comboOn = this.combo.active(this.sim.state.time) && this.combo.count > 1;
     this.comboText.setVisible(comboOn && flying && ascent).setText(`COMBO ×${this.combo.count}`);
+
+    this.hintText.setText(flying && this.launched ? this.hint(t) : '');
 
     // Speed + height next to the rocket, only when landing matters.
     const landing = flying && (mode === 'DESCENT' || mode === 'TOUCHDOWN' || (ascent && t.verticalSpeed < -5 && t.earthAltitude < 400 && this.launched));
@@ -864,84 +878,59 @@ export class FlightScene extends Phaser.Scene {
 
     if (this.titleTimer > 0) {
       this.titleTimer -= dt;
-      const a = Phaser.Math.Clamp(this.titleTimer / 0.4, 0, 1);
+      const a = Phaser.Math.Clamp(this.titleTimer / 0.6, 0, 1);
       this.phaseTitle.setAlpha(a);
       this.phaseGoal.setAlpha(a);
     }
 
-    if (this.runnerState.promptActive) {
-      this.bannerText
-        .setMaxLines(1)
-        .setText(`DEBRIS FIELD AHEAD! [SPACE] EVASIVE RUNNER (${Math.ceil(this.runnerState.promptTimer)}s)`)
-        .setColor('#38bdf8')
-        .setAlpha(1);
-      this.bannerTimer = 0.4;
-    } else if (this.bannerTimer > 0) {
+    if (this.bannerTimer > 0) {
       this.bannerTimer -= dt;
       this.bannerText.setAlpha(Phaser.Math.Clamp(this.bannerTimer / 0.4, 0, 1));
     } else if (this.bannerQueue.length > 0) {
       const b = this.bannerQueue.shift()!;
-      this.bannerText.setMaxLines(2).setText(b.text).setColor(b.color).setAlpha(1);
-      this.bannerTimer = MOMENT_SECONDS;
+      this.bannerText.setText(b.text).setColor(b.color).setAlpha(1);
+      this.bannerTimer = 2.8;
     } else {
       this.bannerText.setAlpha(0);
     }
   }
 
-  /** The current goal in a few words, under the phase pips. */
+  /** The current goal in a few words, under the phase strip. */
   private objective(t: FlightTelemetry): string {
     const r = this.runner;
     if (r.complete) return 'Mission complete!';
-    if (r.phase === 'ORBIT') return t.moonOrbit ? 'Get LOW and HIGH into the green band' : 'Fly to the Moon, passing just beside it';
+    if (r.phase === 'ORBIT') return t.moonOrbit ? 'Get the LOW and HIGH points into the green band' : 'Fly to the Moon, leaning a little to pass beside it';
     if (r.phase === 'ROVER') {
       if (r.problem) return 'Deal with the problem!';
       if (r.rover && !r.rover.landed) return 'Rover falling…';
-      if (r.dropReady) return `Drop the rover in the green zone (spares: ${r.sparesLeft})`;
+      if (r.dropReady) return `Drop the rover in the green zone  ·  spares: ${r.sparesLeft}`;
       return 'Orbiting… stay alert';
     }
-    return onImpactCourse(t) ? 'Land upright, under 10 m/s, on the blue site' : 'Drop out of orbit: aim the white ✕ at the blue site';
+    return onImpactCourse(t) ? 'Land upright, under 10 m/s, on the blue site' : 'Burn backwards to drop out of orbit: aim the white ✕ at the blue site';
   }
 
-  /** Key-cap hints for right now (shown bottom right, faded out after a few seconds). */
-  private hintRows(t: FlightTelemetry): HintRow[] {
+  /** One plain-language hint for right now. */
+  private hint(t: FlightTelemetry): string {
     const r = this.runner;
     const mode = this.world.camera.mode;
-    if (this.sim.onGround) return [{ keys: ['ESC'], label: 'too heavy: back to the lab' }];
-    if (r.problem) return PROBLEM_INFO[r.problem.id].hints;
+    if (this.sim.onGround) return 'Too heavy to climb: go back (ESC) and add engines';
+    if (r.problem?.id === 'FLAMEOUT') return 'ENGINE OUT: HOLD E to relight!';
+    if (r.problem) return PROBLEM_INFO[r.problem.id].howTo;
     if (mode === 'ASCENT') {
-      if (this.runnerState.promptActive) return [{ keys: ['SPACE'], label: 'evasive runner' }];
-      if (this.runnerState.active) return [{ keys: ['A', 'D'], label: 'switch lane' }];
-      if (t.earthAltitude > ROCK_BELT.bottom - 300 && t.earthAltitude < ROCK_BELT.top) return [{ keys: ['A', 'D'], label: 'dodge the rocks' }];
-      if (this.coastApex !== null && this.coastApex >= SOI_ALTITUDE && t.thrust > 0) return [{ keys: ['X'], label: 'cut engines: you’ll coast there' }];
-      if (this.coastApex !== null && this.coastApex >= SOI_ALTITUDE) return [{ keys: [], label: 'coasting to the Moon' }];
-      if (t.fuelFraction <= 0) return [{ keys: [], label: 'out of fuel: coasting' }];
-      return [
-        { keys: ['A', 'D'], label: 'steer' },
-        { keys: ['W', 'S'], label: 'throttle' },
-        { keys: ['X'], label: 'cut engines' }
-      ];
+      if (t.earthAltitude > ROCK_BELT.bottom - 300 && t.earthAltitude < ROCK_BELT.top) return 'ROCK BELT: red arrows show rocks coming  ·  A / D dodge  ·  near misses build a combo';
+      if (this.coastApex !== null && this.coastApex >= SOI_ALTITUDE && t.thrust > 0) return 'You’ll coast to the Moon now: X cuts the engines to save fuel';
+      if (this.coastApex !== null && this.coastApex >= SOI_ALTITUDE) return 'Coasting to the Moon: save fuel for the orbit burn';
+      if (t.fuelFraction <= 0) return 'Out of fuel: coasting';
+      return 'A / D steer (lean a little so you pass beside the Moon)  ·  W / S throttle  ·  X cut engines';
     }
-    if (r.phase === 'ORBIT') {
-      return [
-        { keys: ['A', 'D'], label: 'turn' },
-        { keys: ['W'], label: 'burn' },
-        { keys: ['X'], label: 'stop burning' }
-      ];
-    }
+    if (r.phase === 'ORBIT') return 'A / D turn  ·  W burn  ·  X stop burning  ·  the arrow shows which way you’re moving';
     if (r.phase === 'ROVER') {
-      if (r.dropReady && !r.rover) return [{ keys: ['SPACE'], label: 'drop the rover on the ✕' }];
-      return [];
+      if (r.dropReady && !r.rover) return 'SPACE: drop the rover when the yellow ✕ is in the green zone';
+      if (r.rover && !r.rover.landed) return 'Rover falling… watch where it lands';
+      return 'Stay in orbit: problems can happen any moment';
     }
-    if (onImpactCourse(t)) {
-      return [
-        { keys: ['A', 'D'], label: 'point along the arrow' },
-        { keys: ['W'], label: 'burn to slow down' }
-      ];
-    }
-    return [
-      { keys: ['A', 'D'], label: 'face backwards' },
-      { keys: ['W'], label: 'burn to drop' }
-    ];
+    if (onImpactCourse(t)) return 'Point along dashed arrow and burn W to slow down  ·  land upright (< 10 m/s)';
+    return 'Turn to face backwards (against the arrow), then burn W to drop out of orbit';
   }
 
   // ---------------------------------------------------------------------------

@@ -24,40 +24,14 @@ export type OrbitProblemId = 'DEBRIS' | 'STUCK_THRUSTER' | 'FUEL_LEAK' | 'ORBIT_
 export type LandingProblemId = 'BOULDERS' | 'FLAMEOUT' | 'RADAR_FAILURE';
 export type ProblemId = OrbitProblemId | LandingProblemId;
 
-/** A key-cap hint: the keys and what they do (no keys = a plain note). */
-export interface ProblemHint {
-  keys: string[];
-  label: string;
-}
-
-/** Each problem in words: its title, what to do, and the key-cap hints for its controls. */
-export const PROBLEM_INFO: Record<ProblemId, { title: string; howTo: string; hints: ProblemHint[] }> = {
-  DEBRIS: {
-    title: 'DEBRIS SWARM INCOMING',
-    howTo: 'Get out of the red ring before it arrives: burn to raise or lower your orbit',
-    hints: [
-      { keys: ['A', 'D'], label: 'turn' },
-      { keys: ['W'], label: 'burn out of the ring' }
-    ]
-  },
-  STUCK_THRUSTER: {
-    title: 'THRUSTER STUCK ON',
-    howTo: 'It’s spinning you: hold A / D against the spin until the timer runs out',
-    hints: [{ keys: ['A', 'D'], label: 'hold against the spin' }]
-  },
-  FUEL_LEAK: { title: 'FUEL LEAK', howTo: 'Press F when the needle is in the green: 3 patches seal it', hints: [{ keys: ['F'], label: 'patch in the green' }] },
-  ORBIT_DECAY: {
-    title: 'ORBIT DECAYING',
-    howTo: 'Something is slowing you down: point along your motion (arrow) and burn W to keep your low point up',
-    hints: [{ keys: ['W'], label: 'burn along your motion' }]
-  },
-  BOULDERS: {
-    title: 'BOULDERS ON THE SITE',
-    howTo: 'The site is blocked: tilt with A / D and fly to the new green site',
-    hints: [{ keys: [], label: 'The site is blocked: tilt with A / D and fly to the new green site' }]
-  },
-  FLAMEOUT: { title: 'ENGINE FLAMEOUT', howTo: 'Hold E to relight the engine, and fast!', hints: [{ keys: ['E'], label: 'hold to relight' }] },
-  RADAR_FAILURE: { title: 'RADAR FAILURE', howTo: 'No height or speed readout: land by eye', hints: [{ keys: [], label: 'No height or speed readout: land by eye' }] }
+export const PROBLEM_INFO: Record<ProblemId, { title: string; howTo: string }> = {
+  DEBRIS: { title: 'DEBRIS SWARM INCOMING', howTo: 'Get out of the red ring before it arrives: burn to raise or lower your orbit' },
+  STUCK_THRUSTER: { title: 'THRUSTER STUCK ON', howTo: 'It’s spinning you: hold A / D against the spin until the timer runs out' },
+  FUEL_LEAK: { title: 'FUEL LEAK', howTo: 'Press F when the needle is in the green: 3 patches seal it' },
+  ORBIT_DECAY: { title: 'ORBIT DECAYING', howTo: 'Something is slowing you down: point along your motion (arrow) and burn W to keep your low point up' },
+  BOULDERS: { title: 'BOULDERS ON THE SITE', howTo: 'The site is blocked: tilt with A / D and fly to the new green site' },
+  FLAMEOUT: { title: 'ENGINE FLAMEOUT', howTo: 'Hold E to relight the engine, and fast!' },
+  RADAR_FAILURE: { title: 'RADAR FAILURE', howTo: 'No height or speed readout: land by eye' }
 };
 
 const ORBIT_CFG = CONFIG.phases.orbit;
