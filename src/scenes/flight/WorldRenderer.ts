@@ -15,6 +15,19 @@ import { DEFAULT_WINDOW, LaunchWindowId } from '../../game/launchWindows';
 import { SeashoreSite } from './Seashore';
 import { pxEllipse, pxGradient, pxLine, pxRect } from './pixelDraw';
 
+/** How faint the Moon starts on the pad: washed out by daylight, clearest at night. */
+const MOON_START_ALPHA: Record<LaunchWindowId, number> = { DAY: 0.15, SUNSET: 0.22, NIGHT: 0.3 };
+
+/**
+ * The sky Moon's opacity on the climb: faint from the pad, growing solid as the
+ * rocket closes in (progress 0 on the pad, 1 at the edge of the Moon's pull).
+ */
+export function skyMoonAlpha(progress: number, windowId: LaunchWindowId): number {
+  const k = Phaser.Math.Clamp(progress, 0, 1);
+  const start = MOON_START_ALPHA[windowId];
+  return start + (1 - start) * Math.pow(k, 0.6);
+}
+
 export const SCREEN_CX = 640;
 export const SCREEN_CY = 400;
 /** Pixels per metre on the pad (one grid cell = one metre). */
@@ -145,7 +158,7 @@ export class WorldRenderer {
   private smoothedRocketY = 470;
   private readonly cachedRetrogradeVec: ScreenRetrogradeVector = { dirX: 0, dirY: 0, alpha: 0 };
 
-  constructor(private readonly scene: Phaser.Scene, windowId: LaunchWindowId = DEFAULT_WINDOW) {
+  constructor(private readonly scene: Phaser.Scene, private readonly windowId: LaunchWindowId = DEFAULT_WINDOW) {
     const rng = new Phaser.Math.RandomDataGenerator(['moonshot']);
     this.clouds = Array.from({ length: 90 }, () => {
       const w = rng.realInRange(14, 50);
@@ -465,7 +478,7 @@ export class WorldRenderer {
       moonX = cx;
       this.skyMoonSprite?.setPosition?.(cx, cy);
       this.skyMoonSprite?.setDisplaySize?.(r * 2, r * 2);
-      this.skyMoonSprite?.setAlpha?.(0.25 + 0.75 * (1 - air * 0.5));
+      this.skyMoonSprite?.setAlpha?.(skyMoonAlpha(k, this.windowId));
       this.skyMoonSprite?.setVisible?.(true);
     } else {
       this.skyMoonSprite?.setVisible?.(false);
