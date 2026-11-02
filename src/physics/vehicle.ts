@@ -1,4 +1,4 @@
-import { HierarchicalRocketNode, PartType } from '../core/types';
+import { FuelKind, HierarchicalRocketNode, PartType } from '../core/types';
 import { AIRFRAME, ENGINE, FINS, G0, PROPELLANT_DENSITY, WORLD } from './constants';
 
 /** One part placed in the vehicle's body frame (origin at the command module). */
@@ -18,6 +18,8 @@ export interface FlightPart {
   a: number;
   dryMass: number; // kg
   fuelCapacity: number; // kg
+  /** What a fuel tank holds, from the lab (kerosene when unset). Only set on parts that carry fuel. */
+  fuelKind?: FuelKind;
   thrust: number; // N
   /** Normal-force coefficient for centre-of-pressure / aero torque. */
   normalForceCoeff: number;
@@ -109,6 +111,7 @@ export function partsFromTree(tree: HierarchicalRocketNode): FlightPart[] {
     a: -(node.gridY - tree.gridY) * AIRFRAME.cellLength,
     dryMass: node.mass,
     fuelCapacity: node.fuel * PROPELLANT_DENSITY,
+    ...(node.fuel > 0 ? { fuelKind: node.fuelKind ?? 'STANDARD' } : {}),
     thrust: node.thrust * G0,
     normalForceCoeff: normalForceFor(node.type)
   }));

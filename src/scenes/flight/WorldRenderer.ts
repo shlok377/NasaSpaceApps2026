@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { CONFIG } from '../../config';
 import { PART_DEFINITIONS } from '../../core/partDefinitions';
 import { BOULDER_FIELD, ROVER_ZONE, RoverCapsule, SurfaceZone } from '../../game/phases';
-import { Rock, rockX } from '../../game/rocks';
+import { laneThreats, Rock, rockX, runnerSpeedAt } from '../../game/rocks';
 import { EvasiveRunnerState, RUNNER_CONFIG, RUNNER_LANES } from '../../game/evasiveRunner';
 import { gravityAt, insideMoonSoi, localUp, moonAltitude, moonSurfacePoint } from '../../physics/bodies';
 import { MOON, MOON_CENTER, ROCK_BELT, WORLD } from '../../physics/constants';
@@ -32,7 +32,7 @@ import {
   daySkyKey,
   isSeaColumn
 } from './LaunchSite';
-import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay } from '../../game/timeOfDay';
+import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay, timeOfDayWind } from '../../game/timeOfDay';
 import { hash } from '../../ui/backdrop';
 
 export const SCREEN_CX = 640;
@@ -55,7 +55,6 @@ export const WORLD_COLORS = {
   pad: 0xf59e0b,
   rock: 0x6b6259,
   rockEdge: 0x3f3a35,
-  shield: 0x67e8f9,
   fuel: 0x22c55e,
   zone: 0x22c55e,
   site: 0x38bdf8,
@@ -154,6 +153,10 @@ export class WorldRenderer {
   private lastSkyMode: CameraMode | null = null;
   public skyRedrawCount = 0;
   private readonly daySky: Phaser.GameObjects.TileSprite;
+  /** Sun, sun glow and the night storm front: behind the land and sea, in front of the sky. */
+  private readonly celestialGfx: Phaser.GameObjects.Graphics;
+  /** The launch time's wind multiplier: drives cloud drift, flags, sea chop and pad steam. */
+  private wind = 1;
   /** Live touches on the launch site: flags, sea glints, birds, pad steam, lamps. */
   private readonly siteFxGfx: Phaser.GameObjects.Graphics;
   /** Gantry placement, measured from the rocket while it stands on the pad. */
@@ -206,6 +209,8 @@ export class WorldRenderer {
     this.daySky?.setOrigin?.(0);
     this.daySky?.setDepth?.(-2);
     this.daySky?.setTileScale?.(PIXEL, PIXEL);
+    this.celestialGfx = scene.add.graphics();
+    this.celestialGfx?.setDepth?.(-1.5);
     this.skyMoonSprite = scene.add.image(0, 0, GAME_ASSETS.UI_MOON_BIG.key);
     this.skyMoonSprite?.setVisible?.(false);
     this.skyMoonSprite?.setDepth?.(-1);
@@ -248,6 +253,7 @@ export class WorldRenderer {
     this.time = time;
     const look = TIME_LOOKS[time];
     this.daySky?.setTexture?.(daySkyKey(time));
+    this.wind = timeOfDayWind(time);
     for (const layer of [this.launchSite, this.landStrip, this.seaStrip, this.landDeep, this.seaDeep]) layer?.setTint?.(look.landTint);
     this.lastSkyAltitude = -Infinity;
   }
@@ -465,7 +471,7 @@ export class WorldRenderer {
     }
   }
 
-  public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, shield: boolean, overlay: MissionOverlay, runnerState?: EvasiveRunnerState): void {
+  public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, overlay: MissionOverlay, runnerState?: EvasiveRunnerState): void {
     this.labelIndex = 0;
     this.drawSky(sim, t);
     const g = this.worldGfx;
@@ -484,7 +490,7 @@ export class WorldRenderer {
       this.drawMoonCloseUp(sim, overlay);
       this.drawRetrogradeArrow(sim);
     }
-    this.drawRocketAndDebris(sim, t, alive, shield);
+    this.drawRocketAndDebris(sim, t, alive);
     for (let i = this.labelIndex; i < this.labels.length; i++) this.labels[i].setVisible(false);
   }
 
@@ -526,7 +532,7 @@ export class WorldRenderer {
     const now = this.scene.time?.now ?? 0;
     this.daySky?.setVisible?.(air > 0);
     this.daySky?.setAlpha?.(Phaser.Math.Clamp((air - 0.55) / 0.4, 0, 1));
-    if (this.daySky) this.daySky.tilePositionX = now / 400;
+    if (this.daySky) this.daySky.tilePositionX = (now / 400) * this.wind;
 
     // The spaceport, pinned to the ground line with the pad (global column 0) under world x = 0.
     const ground = this.toScreen(0, 0);
@@ -545,6 +551,7 @@ export class WorldRenderer {
     this.placeStrip(this.landDeep, siteVisible, 0, Math.min(1280, coast), deepY, Math.ceil((720 - deepY) / PIXEL), coast, SEA_FROM, LAND_PERIOD);
     this.placeStrip(this.seaDeep, siteVisible, Math.max(0, coast), 1280, deepY, Math.ceil((720 - deepY) / PIXEL), coast, SEA_FROM, SEA_PERIOD);
     this.drawSiteLife(sim, padX, siteY, siteVisible, now);
+    this.drawCelestial(siteY + HORIZON_ROW * PIXEL, siteVisible ? Phaser.Math.Clamp((air - 0.55) / 0.4, 0, 1) : 0);
 
     // During the climb the Moon hangs in the sky ahead and grows as you near it.
     if (this.camera.mode === 'ASCENT') {
@@ -553,10 +560,10 @@ export class WorldRenderer {
       const r = 30 + 206 * k * k;
       const cx = 1090 - Phaser.Math.Clamp(sim.state.x * 0.08, -200, 200) - 390 * k;
       const cy = 118 - 8 * k;
-      const daylight = this.time === 'NIGHT' ? 0 : this.time === 'DUSK' ? 0.4 : 1;
+      // Fully opaque in every time of day: a solid Moon, never a ghost.
       this.skyMoonSprite?.setPosition?.(cx, cy);
       this.skyMoonSprite?.setDisplaySize?.(r * 2, r * 2);
-      this.skyMoonSprite?.setAlpha?.(Phaser.Math.Clamp(1 - air * daylight * 0.55, 0.4, 1));
+      this.skyMoonSprite?.setAlpha?.(1);
       this.skyMoonSprite?.setVisible?.(true);
     } else {
       this.skyMoonSprite?.setVisible?.(false);
@@ -609,7 +616,7 @@ export class WorldRenderer {
     // Flags: each column of cloth bobs on a travelling wave.
     for (const [i, f] of COMPLEX.flags.entries()) {
       for (let c = 1; c <= 7; c++) {
-        const wave = Math.round(Math.sin(now / 160 - c * 0.9 + i * 2) * Math.min(1, c / 3));
+        const wave = Math.round(Math.sin((now / 160) * this.wind - c * 0.9 + i * 2) * Math.min(1, c / 3) * (this.wind > 1.6 ? 1.5 : 1));
         const shade = (c + wave) % 3 === 0 ? 0.82 : 1;
         dot(f.x + c, f.top + 1 + wave, multiplyColor(lerpColor(f.color, 0x000000, 1 - shade), tint), 1, 1, 4);
       }
@@ -618,12 +625,14 @@ export class WorldRenderer {
     // Glints on the sea: a few pixels that wink in and out (fewer and bluer at night).
     const firstCol = Math.floor(-groundX / PIXEL);
     // (At night the moonlight path below takes over from scattered glints.)
-    for (let k = 0; k < (this.time === 'NIGHT' ? 0 : 40); k++) {
-      const cycle = Math.floor(now / 900 + k * 0.37);
+    // Windier times chop the sea up more: more glints, winking faster.
+    const chop = (now / 900) * this.wind;
+    for (let k = 0; k < (this.time === 'NIGHT' ? 0 : Math.round(30 * this.wind)); k++) {
+      const cycle = Math.floor(chop + k * 0.37);
       const col = firstCol + Math.floor(hash(k, cycle) * (1280 / PIXEL));
       if (!isSeaColumn(col)) continue;
       const row = HORIZON_ROW + 2 + Math.floor(hash(cycle, k) ** 2 * 40);
-      const life = (now / 900 + k * 0.37) % 1;
+      const life = (chop + k * 0.37) % 1;
       const a = Math.sin(life * Math.PI) * (this.time === 'NIGHT' ? 0.45 : 0.85);
       dot(col, row, this.time === 'NIGHT' ? 0x9fb8e8 : 0xffffff, a, row - HORIZON_ROW > 14 ? 2 : 1, 1);
     }
@@ -648,7 +657,8 @@ export class WorldRenderer {
       for (let k = 0; k < 10; k++) {
         const life = (now / 2200 + k / 10) % 1;
         const side = k % 2 === 0 ? -1 : 1;
-        const col = side * (27 + life * 10 + hash(k) * 3);
+        // The wind leans the steam over towards the sea.
+        const col = side * (27 + life * 10 + hash(k) * 3) + life * 14 * (this.wind - 0.8);
         const row = SITE_GROUND_ROW - 2 - life * 14;
         const size = 1 + Math.floor(life * 3);
         dot(Math.round(col), Math.round(row), multiplyColor(0xf4f6f8, lerpColor(tint, 0xffffff, 0.4)), 0.55 * (1 - life), size, size);
@@ -676,6 +686,25 @@ export class WorldRenderer {
       }
     }
 
+    // Dawn: low mist drifting over the sea and the valleys.
+    if (this.time === 'DAWN') {
+      for (let i = 0; i < 6; i++) {
+        const row = HORIZON_ROW - 6 + i * 3;
+        const drift = ((now / 120) * this.wind + i * 37) % 96;
+        g.fillStyle(0xfff0f0, 0.24 - i * 0.03);
+        for (let x = -96 - drift; x < 1280; x += 96) g.fillRect(Math.round(x), sy(row), 64 + ((i * 13) % 24), PIXEL * 2);
+      }
+    }
+
+    // Noon: heat shimmer rising off the pad.
+    if (this.time === 'NOON') {
+      for (let i = 0; i < 10; i++) {
+        const row = SITE_GROUND_ROW - 4 - ((i * 7 + now / 90) % 20);
+        const off = Math.sin(now / 130 + i) * 3;
+        dot(Math.round(-24 + i * 5 + off), Math.round(row), 0xffffff, 0.08, 3, 1);
+      }
+    }
+
     // Night: the Moon lays a shimmering path of light across the sea, widening towards the shore.
     if (this.time === 'NIGHT') {
       const moonCol = Math.round(((this.skyMoonSprite?.x ?? 1090) - groundX) / PIXEL);
@@ -692,6 +721,28 @@ export class WorldRenderer {
           dot(col, row, k === 0 ? 0xf2f6ff : 0xb8c8f0, alpha, 1 + Math.floor(hash(k, d) * 3), 1);
         }
       }
+    }
+  }
+
+  /** Night only: a dark storm front far out over the sea. Drawn behind the land and sea. */
+  private drawCelestial(horizonY: number, alpha: number): void {
+    const g = this.celestialGfx;
+    g?.clear?.();
+    if (!g || alpha <= 0.01) return;
+    // A disc built from 4 px rows, so it matches the pixel art.
+    const disc = (cx: number, cy: number, r: number, color: number, a: number) => {
+      g.fillStyle(color, a * alpha);
+      for (let y = -r; y < r; y += PIXEL) {
+        const half = Math.floor(Math.sqrt(Math.max(0, r * r - (y + PIXEL / 2) ** 2)) / PIXEL) * PIXEL;
+        if (half > 0) g.fillRect(Math.round(cx - half), Math.round(cy + y), half * 2, PIXEL);
+      }
+    };
+    // No sun in any sky: the daytime skies carry their light in their colours.
+    if (this.time === 'NIGHT') {
+      // Night storm front out over the sea on the right, under the stars (no lightning).
+      const lumps = [[880, 26], [930, 34], [990, 30], [1050, 40], [1120, 34], [1190, 44], [1260, 38]];
+      for (const [x, r] of lumps) disc(x, horizonY - 6, r, 0x1a2038, 1);
+      for (const [x, r] of lumps) disc(x - 6, horizonY - 12, r - 10, 0x232b48, 1);
     }
   }
 
@@ -857,20 +908,23 @@ export class WorldRenderer {
       this.smokeSpritesPool[i].setVisible(false);
     }
 
-    // Rocks, shields and fuel in the belt, with warning chevrons for what's coming.
+    // Rocks and fuel in the belt, with warning chevrons for what's coming.
     if (s.y > ROCK_BELT.bottom - CONFIG.rockBelt.warningDistance) {
       const time = s.time;
       const ahead = CONFIG.rockBelt.warningDistance;
+      const runner = runnerState?.active === true;
+      if (runner) this.drawLaneThreats(g, rocks, s.y, time);
       for (const r of rocks) {
         if (r.spent) continue;
         const dy = r.y - s.y;
         if (dy < -halfH - 10 || dy > ahead) continue;
         const p = this.toScreen(rockX(r, time), r.y);
         const pr = r.radius * scale;
-        const color = r.kind === 'ROCK' ? WORLD_COLORS.danger : r.kind === 'SHIELD' ? WORLD_COLORS.shield : WORLD_COLORS.fuel;
+        const color = r.kind === 'ROCK' ? WORLD_COLORS.danger : WORLD_COLORS.fuel;
         if (p.y + pr < 0) {
           // Off the top of the screen: a chevron at the edge, brighter as it closes in.
-          if (p.x < -40 || p.x > 1320) continue;
+          // (In the evasive runner the per-lane look-ahead chevrons replace these.)
+          if (runner || p.x < -40 || p.x > 1320) continue;
           const closeness = 1 - Phaser.Math.Clamp((p.y + pr) / -(ahead * scale), 0, 1);
           const x = Phaser.Math.Clamp(p.x, 16, 1264);
           const size = 6 + Math.min(14, r.radius * 2.5) * (0.5 + closeness * 0.5);
@@ -890,11 +944,6 @@ export class WorldRenderer {
           polygon(g, pts, true);
           g.lineStyle(2, WORLD_COLORS.rockEdge, 1);
           polygon(g, pts, false);
-        } else if (r.kind === 'SHIELD') {
-          g.lineStyle(3, WORLD_COLORS.shield, 0.95);
-          g.strokeCircle(p.x, p.y, pr);
-          g.fillStyle(WORLD_COLORS.shield, 0.25);
-          g.fillCircle(p.x, p.y, pr);
         } else {
           g.fillStyle(WORLD_COLORS.fuel, 1);
           g.fillRoundedRect(p.x - pr * 0.6, p.y - pr, pr * 1.2, pr * 2, 4);
@@ -903,6 +952,24 @@ export class WorldRenderer {
         }
       }
     }
+  }
+
+  /**
+   * Evasive runner: one red chevron at the top of each lane a rock will cross
+   * within the short look-ahead (drifters at their future x), brighter and
+   * bigger the sooner it arrives. Rocks already on screen speak for themselves.
+   */
+  private drawLaneThreats(g: Phaser.GameObjects.Graphics, rocks: readonly Rock[], y: number, time: number): void {
+    const offScreen = this.toScreen(0, y).y / this.camera.scale;
+    const lookahead = RUNNER_CONFIG.threatLookahead;
+    laneThreats(rocks, y, time, lookahead, offScreen).forEach((eta, i) => {
+      if (eta === null) return;
+      const closeness = 1 - Phaser.Math.Clamp((eta - offScreen / runnerSpeedAt(y)) / lookahead, 0, 1);
+      const x = this.toScreen(RUNNER_LANES[i], y).x;
+      const size = 9 + 7 * closeness;
+      g.fillStyle(WORLD_COLORS.danger, 0.45 + 0.5 * closeness);
+      g.fillTriangle(x - size, 8 + size * 0.2, x + size, 8 + size * 0.2, x, 8 + size * 1.2);
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -1310,7 +1377,7 @@ export class WorldRenderer {
     img.setVisible(true);
   }
 
-  private drawRocketAndDebris(sim: FlightSim, t: FlightTelemetry, alive: boolean, shield: boolean): void {
+  private drawRocketAndDebris(sim: FlightSim, t: FlightTelemetry, alive: boolean): void {
     const g = this.rocketGfx;
     g.clear();
     const cellPx = this.camera.rocketScale;
@@ -1396,15 +1463,6 @@ export class WorldRenderer {
     // Hide any unused pooled sprites
     for (let i = this.activeSpriteCount; i < this.partSpritesPool.length; i++) {
       this.partSpritesPool[i].setVisible(false);
-    }
-
-    if (shield) {
-      const c = this.toScreen(s.x, s.y);
-      const r = cellPx * (sim.vehicle.length / 2 + 1);
-      g.lineStyle(3, WORLD_COLORS.shield, 0.6 + 0.3 * Math.sin(this.scene.time.now / 120));
-      g.strokeCircle(c.x, c.y, r);
-      g.fillStyle(WORLD_COLORS.shield, 0.08);
-      g.fillCircle(c.x, c.y, r);
     }
   }
 

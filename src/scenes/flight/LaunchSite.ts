@@ -119,17 +119,167 @@ function nightSkyAt(x: number, y: number, base: number): number {
   return c;
 }
 
+/** Horizontal distance from a feature, wrapped so clouds tile across the sky strip's seam. */
+const wrapX = (x: number, cx: number) => ((((x - cx + SKY_W / 2) % SKY_W) + SKY_W) % SKY_W) - SKY_W / 2;
+
+/** 8×8 ordered dither: finer than the 4×4 one, so colours melt into each other without visible bands. */
+const BAYER8 = [
+  0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26, 12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22, 3, 35, 11, 43, 1, 33, 9, 41,
+  51, 19, 59, 27, 49, 17, 57, 25, 15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21
+];
+const th8 = (x: number, y: number) => (BAYER8[(y & 7) * 8 + (x & 7)] + 0.5) / 64;
+
+/** Pick between neighbouring palette colours with the 8×8 dither: a seamless blend along t (0..1). */
+function blend(p: readonly number[], t: number, x: number, y: number): number {
+  const k = Math.min(1, Math.max(0, t)) * (p.length - 1);
+  const i = Math.min(Math.floor(k), p.length - 2);
+  return k - i > th8(x, y) ? p[i + 1] : p[i];
+}
+
+function seeded(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** A pixel cloud: a cluster of round lobes on a flat base, taller in the middle. */
+interface SkyCloud {
+  lobes: Array<{ x: number; y: number; r: number }>;
+  base: number;
+  left: number;
+  right: number;
+}
+
+function makeCloud(rand: () => number, cx: number, cy: number, w: number, h: number): SkyCloud {
+  const n = 4 + Math.floor(w / 14);
+  const lobes = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    const bump = Math.sin(t * Math.PI);
+    lobes.push({ x: cx - w / 2 + t * w + (rand() - 0.5) * 6, y: cy - bump * h * 0.6 + (rand() - 0.5) * 4, r: h * (0.45 + 0.55 * bump) * (0.8 + rand() * 0.4) });
+  }
+  return { lobes, base: cy + h * 0.35, left: lobes[0].x, right: lobes[n - 1].x };
+}
+
+/** How solid a cloud is at (x, y) (0 outside) and how far down its lobe the point sits (0 top, 1 bottom). */
+function cloudSample(c: SkyCloud, x: number, y: number): { dens: number; shade: number; side: number } | null {
+  if (y > c.base + 2) return null;
+  let best = 0;
+  let shade = 0;
+  for (const l of c.lobes) {
+    const v = 1 - Math.hypot(wrapX(x, l.x) * 0.9, y - l.y) / l.r;
+    if (v > best) {
+      best = v;
+      shade = (y - (l.y - l.r)) / (2 * l.r);
+    }
+  }
+  if (best <= 0) return null;
+  const flat = y > c.base ? 1 - (y - c.base) / 2 : 1;
+  const side = (wrapX(x, c.left) + 0) / (c.right - c.left + 1);
+  return { dens: best * flat, shade, side };
+}
+
+interface SkyRecipe {
+  /** Gradient top to bottom; blended down to `horizon` rows, then held. */
+  sky: number[];
+  curve: number;
+  /** Cloud shading, top (lit) to bottom (shadow); reversed when lit from below. */
+  cloud: number[];
+  litBelow?: boolean;
+  /** Edge highlight for thin cloud edges (dusk's gold rims, dawn's warm edge). */
+  rim?: number;
+  /** -1: lit on the left (dawn), 1: lit on the right; shading leans that way. */
+  light?: number;
+  seed: number;
+  /** [centre x, centre y, width, height] in sky pixels. */
+  clouds: Array<[number, number, number, number]>;
+}
+
+const HORIZON = 150;
+
+const RECIPES: Record<'DAWN' | 'NOON' | 'DUSK', SkyRecipe> = {
+  DAWN: {
+    sky: TIME_LOOKS.DAWN.sky,
+    curve: 1.1,
+    cloud: [0xfff4ec, 0xfbd8cf, 0xeeb2b8, 0xc793ad, 0x9a78a6],
+    rim: 0xfff2d6,
+    light: -1,
+    seed: 3,
+    clouds: [
+      [150, 58, 70, 16],
+      [255, 40, 54, 12],
+      [60, 82, 46, 10],
+      [215, 98, 40, 8]
+    ]
+  },
+  NOON: {
+    sky: TIME_LOOKS.NOON.sky,
+    curve: 1.3,
+    cloud: [0xffffff, 0xf3f7fb, 0xdce7f1, 0xbccddd, 0x94a9c0],
+    light: 1,
+    seed: 11,
+    clouds: [
+      [90, 92, 90, 30],
+      [205, 110, 70, 22],
+      [290, 70, 50, 14],
+      [30, 50, 40, 10]
+    ]
+  },
+  DUSK: {
+    sky: TIME_LOOKS.DUSK.sky,
+    curve: 0.9,
+    // The original dusk cloud colours: peach and coral, fading to soft plum, lit from below.
+    cloud: [0xffb38a, 0xf8a07a, 0xf08a6a, 0xc66a72, 0x9a4f78],
+    litBelow: true,
+    rim: 0xffd6a0,
+    seed: 9,
+    clouds: [
+      [110, 70, 60, 7],
+      [210, 52, 50, 6],
+      [40, 92, 40, 5],
+      [290, 86, 36, 5],
+      [160, 104, 34, 5]
+    ]
+  }
+};
+
+/** A daytime sky: a seamless dithered gradient and soft-edged, shaded pixel clouds (no sun). */
+function paintRecipe(r: SkyRecipe): (x: number, y: number) => number {
+  const rand = seeded(r.seed);
+  const clouds = r.clouds.map(([cx, cy, w, h]) => makeCloud(rand, cx, cy, w, h));
+  return (x, y) => {
+    let col = blend(r.sky, Math.pow(Math.min(1, y / HORIZON), r.curve), x, y);
+    for (const c of clouds) {
+      const q = cloudSample(c, x, y);
+      if (!q) continue;
+      if (Math.min(1, q.dens / 0.28) <= th8(x + 1, y + 2)) continue;
+      let s = q.shade;
+      if (r.light) s = s * 0.7 + (r.light < 0 ? q.side : 1 - q.side) * 0.3;
+      col = blend(r.cloud, r.litBelow ? 1 - s : s, x, y);
+      if (r.rim !== undefined && q.dens < 0.18 && (!r.litBelow || q.shade > 0.55)) col = r.rim;
+    }
+    return col;
+  };
+}
+
 export function createDaySkyTexture(scene: Phaser.Scene, time: TimeOfDay): void {
   const look = TIME_LOOKS[time];
   const sky = look.sky;
+  if (time !== 'NIGHT') {
+    paint(scene, daySkyKey(time), SKY_W, SKY_H, paintRecipe(RECIPES[time]));
+    return;
+  }
   paint(scene, daySkyKey(time), SKY_W, SKY_H, (x, y) => {
     const cloud = cloudAt(x, y, look.cloud, look.clouds);
     if (cloud !== null) return cloud;
     const t = (y / SKY_H) * (sky.length - 1);
     const i = Math.min(Math.floor(t), sky.length - 2);
-    const base = t - i > dither(x, y) ? sky[i + 1] : sky[i];
-    if (!look.stars) return base;
-    return nightSkyAt(x, y, base);
+    return nightSkyAt(x, y, t - i > dither(x, y) ? sky[i + 1] : sky[i]);
   });
 }
 
@@ -219,7 +369,7 @@ function landAt(gx: number, y: number, hillDrop = 0, mountains = true): number |
 
   // Far range: pale and hazy (air perspective).
   const far = ridge(u, FAR_PEAKS, 7);
-  if (y >= far.row && y < HORIZON_ROW + 6) {
+  if (y >= far.row) {
     const lit = far.dx < -(y - far.peak.top) * 0.4;
     if (y < far.peak.top + 6) return lit ? 0xf4f8fc : 0xdde7f1;
     return lit ? 0xc3d3e4 : 0xadc0d6;
