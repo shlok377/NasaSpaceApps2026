@@ -1,4 +1,4 @@
-import { PART_DEFINITIONS } from '../core/partDefinitions';
+import { partCost, PricedPart } from '../core/partDefinitions';
 import { PartType } from '../core/types';
 import { FlightStats } from '../physics/FlightSim';
 import { VehicleReport } from '../physics/vehicle';
@@ -54,7 +54,7 @@ export function newlyCompleted(ctx: MissionContext, completed: readonly string[]
   return MISSIONS.filter(m => !completed.includes(m.id) && m.check(ctx));
 }
 
-/** Price of a rocket from its part types ($). */
-export function rocketCost(types: readonly PartType[]): number {
-  return types.reduce((sum, t) => sum + PART_DEFINITIONS[t].cost, 0);
+/** Price of a rocket from its parts ($), including the extra for picked fuel / engine / payload types. */
+export function rocketCost(parts: readonly (PartType | PricedPart)[]): number {
+  return parts.reduce((sum, p) => sum + partCost(p), 0);
 }

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { TEXT_STYLE, UI } from './theme';
+import { hudPanel, TEXT_STYLE, TITLE_STYLE, UI } from './theme';
 import { GAME_ASSETS } from '../core/assets';
 import { twrToNeedleAngle, isLowThrustAlert, TWR_MIN_ANGLE } from '../physics/twr';
 
@@ -35,18 +35,21 @@ export class FuelTank {
 
   constructor(scene: Phaser.Scene, private readonly x: number, private readonly y: number) {
     const bg = scene.add.graphics();
-    bg.fillStyle(UI.backdrop, UI.backdropAlpha);
-    bg.fillRoundedRect(x - 14, y - 34, 318, this.h + 48, 16);
+    hudPanel(bg, x - 16, y - 36, 314, this.h + 50);
+    // Column dividers.
+    bg.fillStyle(0x07060b, 0.6);
+    bg.fillRect(x + 74, y - 20, 2, this.h + 22);
+    bg.fillRect(x + 164, y - 20, 2, this.h + 22);
 
     // Column 1: Minimalist Fuel Tank
     const fuelLabel = scene.add
-      .text(x + this.w / 2, y - 26, 'FUEL', TEXT_STYLE(11, UI.textMuted))
+      .text(x + this.w / 2, y - 24, 'FUEL', TITLE_STYLE(8, UI.textMuted))
       .setOrigin(0.5, 0);
 
     // Column 2: TWR Analog Dial (1.5x Scale)
     const col2CenterX = x + 118;
     const twrLabel = scene.add
-      .text(col2CenterX, y - 26, 'TWR', TEXT_STYLE(11, UI.textMuted))
+      .text(col2CenterX, y - 24, 'LIFT', TITLE_STYLE(8, UI.textMuted))
       .setOrigin(0.5, 0);
 
     this.gaugeSprite = scene.add
@@ -64,7 +67,7 @@ export class FuelTank {
 
     // Column 3: Vehicle Mass Segments
     const col3X = x + 176;
-    const massLabel = scene.add.text(col3X, y - 26, 'MASS', TEXT_STYLE(11, UI.textMuted));
+    const massLabel = scene.add.text(col3X, y - 24, 'MASS', TITLE_STYLE(8, UI.textMuted));
     this.massText = scene.add.text(col3X, y + 8, '', TEXT_STYLE(16));
 
     this.massSprites = [];
@@ -120,26 +123,36 @@ export class FuelTank {
     const low = f < 0.15;
     const color = low ? UI.red : f < 0.35 ? UI.amber : UI.green;
 
-    // --- Column 1: Unobstructed Sloshing Fuel Liquid ---
-    if (f > 0.001) {
-      const level = y + h - f * h;
-      const pts: Phaser.Math.Vector2[] = [new Phaser.Math.Vector2(x + 3, y + h - 3)];
-      for (let i = 0; i <= 10; i++) {
-        const px = x + 3 + ((w - 6) * i) / 10;
-        const wave = f < 0.99 ? Math.sin(time / 260 + i * 0.9) * 2.5 : 0;
-        pts.push(new Phaser.Math.Vector2(px, Math.max(y + 3, level + wave)));
-      }
-      pts.push(new Phaser.Math.Vector2(x + w - 3, y + h - 3));
-      g.fillStyle(color, 0.9);
-      g.fillPoints(pts, true);
-    }
-
-    // Tank shell; blinks red when nearly empty.
+    // --- Column 1: pixel tank with sloshing propellant ---
+    // Shell: hard outline with stepped corners; blinks red when nearly empty.
     const blink = low && Math.floor(time / 300) % 2 === 0;
-    g.lineStyle(3, blink ? UI.red : UI.backdrop, 1);
-    g.strokeRoundedRect(x, y, w, h, 14);
-    g.lineStyle(2, UI.dim, 0.8);
-    g.lineBetween(x + w * 0.3, y - 6, x + w * 0.7, y - 6);
+    g.fillStyle(0x07060b, 1);
+    g.fillRect(x + 4, y - 2, w - 8, h + 4);
+    g.fillRect(x - 2, y + 4, w + 4, h - 8);
+    g.fillStyle(blink ? UI.red : UI.dim, 1);
+    g.fillRect(x + 4, y, w - 8, h);
+    g.fillRect(x, y + 4, w, h - 8);
+    g.fillStyle(0x07060b, 1);
+    g.fillRect(x + 4, y + 4, w - 8, h - 8);
+    if (f > 0.001) {
+      const inner = h - 8;
+      const level = y + 4 + inner - f * inner;
+      // 4 px columns, each bobbing on the wave, so the surface stays pixel-crisp.
+      for (let cx = x + 4; cx < x + w - 4; cx += 4) {
+        const wave = f < 0.99 ? Math.round(Math.sin(time / 260 + (cx - x) * 0.22) * 1.5) * 2 : 0;
+        const top = Math.max(y + 4, Math.round(level + wave));
+        g.fillStyle(color, 1);
+        g.fillRect(cx, top, 4, y + h - 4 - top);
+        g.fillStyle(0xffffff, 0.35);
+        g.fillRect(cx, top, 4, 2);
+      }
+      // Glass glint down the left side.
+      g.fillStyle(0xffffff, 0.18);
+      g.fillRect(x + 8, y + 8, 4, h - 20);
+    }
+    // Cap.
+    g.fillStyle(UI.dim, 1);
+    g.fillRect(x + w * 0.3, y - 8, w * 0.4, 4);
     this.percentText.setText(`${Math.round(f * 100)}%`);
 
     // --- Column 2: TWR Dial with Analog Inertia & Alert ---

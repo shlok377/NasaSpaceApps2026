@@ -7,7 +7,7 @@ const config: Phaser.Types.Core.GameConfig = {
   width: 1280,
   height: 720,
   parent: 'game-container',
-  backgroundColor: '#0f172a',
+  backgroundColor: '#04050d',
   pixelArt: false,
   antialias: true,
   antialiasGL: true,
@@ -19,16 +19,12 @@ const config: Phaser.Types.Core.GameConfig = {
   scene: [BuilderScene, FlightScene]
 };
 
-async function bootGame(): Promise<void> {
-  if (typeof document !== 'undefined' && 'fonts' in document) {
-    try {
-      await document.fonts.load('16px "Mozilla Headline"');
-      await document.fonts.ready;
-    } catch {
-      // Gracefully continue if network is slow or offline
-    }
-  }
-  new Phaser.Game(config);
-}
+// Phaser text is drawn to canvas, so the fonts must be ready before the first scene renders.
+const fontsReady = Promise.all([
+  document.fonts.load('16px "Mozilla Headline"'),
+  document.fonts.load('16px "Press Start 2P"'),
+  document.fonts.load('22px "VT323"')
+]).catch(() => undefined);
+const timeout = new Promise(resolve => setTimeout(resolve, 2500));
 
-void bootGame();
+Promise.race([fontsReady, timeout]).then(() => new Phaser.Game(config));

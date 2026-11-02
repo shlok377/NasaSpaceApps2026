@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { formatDistance, TEXT_STYLE, UI } from './theme';
+import { formatDistance, hudPanel, TEXT_STYLE, UI } from './theme';
 import { GAME_ASSETS } from '../core/assets';
 
 export interface Milestone {
@@ -36,26 +36,25 @@ export class JourneyArc {
   private readonly container: Phaser.GameObjects.Container;
 
   constructor(scene: Phaser.Scene, cx: number, private readonly milestones: Milestone[]) {
-    this.start = new Phaser.Math.Vector2(cx - 270, 66);
-    this.end = new Phaser.Math.Vector2(cx + 270, 66);
-    this.control = new Phaser.Math.Vector2(cx, 4);
+    this.start = new Phaser.Math.Vector2(cx - 250, 58);
+    this.end = new Phaser.Math.Vector2(cx + 250, 58);
+    this.control = new Phaser.Math.Vector2(cx, 10);
 
     const backdrop = scene.add.graphics();
-    backdrop.fillStyle(UI.backdrop, UI.backdropAlpha);
-    backdrop.fillRoundedRect(cx - 320, 6, 640, 98, 18);
+    hudPanel(backdrop, cx - 300, 12, 600, 82);
 
     this.gfx = scene.add.graphics();
     this.earthSprite = scene.add.image(this.start.x, this.start.y, GAME_ASSETS.UI_EARTH.key).setDisplaySize(26, 26);
     this.moonSprite = scene.add.image(this.end.x, this.end.y, GAME_ASSETS.UI_MOON.key).setDisplaySize(24, 24);
 
-    const earth = scene.add.text(this.start.x, this.start.y + 18, 'Earth', TEXT_STYLE(12, UI.textMuted)).setOrigin(0.5, 0);
-    const moon = scene.add.text(this.end.x, this.end.y + 18, 'Moon', TEXT_STYLE(12, UI.textMuted)).setOrigin(0.5, 0);
+    const earth = scene.add.text(this.start.x, this.start.y + 14, 'EARTH', TEXT_STYLE(11, UI.textMuted)).setOrigin(0.5, 0);
+    const moon = scene.add.text(this.end.x, this.end.y + 14, 'MOON', TEXT_STYLE(11, UI.textMuted)).setOrigin(0.5, 0);
     this.flagTexts = milestones.map(m => {
       const p = this.point(m.at);
-      return scene.add.text(p.x, p.y + 12, m.label, TEXT_STYLE(10, UI.textMuted)).setOrigin(0.5, 0);
+      return scene.add.text(p.x, p.y + 8, m.label, TEXT_STYLE(10, UI.textMuted)).setOrigin(0.5, 0);
     });
-    this.distanceText = scene.add.text(cx, 80, '', TEXT_STYLE(13)).setOrigin(0.5, 0);
-    this.courseText = scene.add.text(this.end.x - 4, this.end.y - 34, 'ON COURSE', TEXT_STYLE(11, UI.greenText)).setOrigin(0.5, 1);
+    this.distanceText = scene.add.text(cx, 66, '', TEXT_STYLE(13)).setOrigin(0.5, 0);
+    this.courseText = scene.add.text(this.end.x - 30, this.end.y - 22, 'ON COURSE', TEXT_STYLE(11, UI.greenText)).setOrigin(1, 0.5);
 
     this.container = scene.add.container(0, 0, [
       backdrop,
@@ -94,19 +93,21 @@ export class JourneyArc {
       const t1 = (i + 1) / steps;
       const a = this.point(t0);
       const b = this.point(t1);
+      // Pixel route: solid blocks behind the rocket, dotted ahead.
       if (t1 <= f) {
-        g.lineStyle(4, UI.sky, 1);
-        g.lineBetween(a.x, a.y, b.x, b.y);
+        g.fillStyle(UI.sky, 1);
+        g.fillRect(Math.round(a.x) - 2, Math.round(a.y) - 2, Math.ceil(b.x - a.x) + 2, 4);
       } else if (i % 2 === 0) {
-        g.lineStyle(2, UI.dim, 1);
-        g.lineBetween(a.x, a.y, b.x, b.y);
+        g.fillStyle(UI.dim, 1);
+        g.fillRect(Math.round(a.x) - 2, Math.round(a.y) - 1, 4, 3);
       }
     }
 
     // Earth and Moon glow/aura when on course
     if (state.onCourse) {
       g.fillStyle(UI.green, 0.25 + 0.15 * Math.sin(time / 200));
-      g.fillCircle(this.end.x, this.end.y, 20);
+      g.fillRect(this.end.x - 18, this.end.y - 14, 36, 28);
+      g.fillRect(this.end.x - 14, this.end.y - 18, 28, 36);
     }
     this.courseText.setVisible(state.onCourse);
 
@@ -114,10 +115,11 @@ export class JourneyArc {
     this.milestones.forEach((m, i) => {
       const p = this.point(m.at);
       const done = state.passed[i];
-      g.lineStyle(2, done ? UI.gold : UI.dim, 1);
-      g.lineBetween(p.x, p.y, p.x, p.y - 16);
+      const fx = Math.round(p.x);
+      const fy = Math.round(p.y);
       g.fillStyle(done ? UI.gold : UI.dim, 1);
-      g.fillTriangle(p.x, p.y - 16, p.x + 10, p.y - 12, p.x, p.y - 8);
+      g.fillRect(fx - 1, fy - 16, 2, 16);
+      g.fillRect(fx + 1, fy - 16, 8, 6);
       this.flagTexts[i].setColor(done ? UI.goldText : UI.textMuted);
     });
 

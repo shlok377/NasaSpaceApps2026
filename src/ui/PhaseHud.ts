@@ -2,7 +2,20 @@ import Phaser from 'phaser';
 import { CONFIG } from '../config';
 import { ActiveProblem, PHASE_INFO, PHASES, PhaseId, PROBLEM_INFO } from '../game/phases';
 import { OrbitElements } from '../physics/orbit';
-import { formatDistance, TEXT_STYLE, UI } from './theme';
+import { drawPixelPanel } from './pixel';
+import { formatDistance, hudPanel, hudWell, TEXT_STYLE, UI } from './theme';
+
+/** Stepped-corner pill used for the phase tabs. */
+function pixelPill(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number, fill: number, fillAlpha: number, border: number | null): void {
+  if (border !== null) {
+    g.fillStyle(border, 1);
+    g.fillRect(x + 3, y, w - 6, h);
+    g.fillRect(x, y + 3, w, h - 6);
+  }
+  g.fillStyle(fill, fillAlpha);
+  g.fillRect(x + 3, y + 2, w - 6, h - 4);
+  g.fillRect(x + 2, y + 3, w - 4, h - 6);
+}
 
 /**
  * Three linked capsules, top left: the mission's phases. Done ones are
@@ -20,13 +33,12 @@ export class PhaseStrip {
 
   constructor(scene: Phaser.Scene) {
     const bg = scene.add.graphics();
-    bg.fillStyle(UI.backdrop, UI.backdropAlpha);
-    bg.fillRoundedRect(this.x - 10, this.y - 8, 3 * this.w + 2 * this.gap + 20, 86, 16);
+    hudPanel(bg, this.x - 10, this.y - 6, 3 * this.w + 2 * this.gap + 20, 92);
     this.gfx = scene.add.graphics();
     this.names = PHASES.map((p, i) =>
       scene.add.text(this.x + i * (this.w + this.gap) + this.w / 2, this.y + 15, `${PHASE_INFO[p].number}  ${PHASE_INFO[p].title.replace('LUNAR ', '').replace('HUMAN ', '')}`, TEXT_STYLE(12)).setOrigin(0.5)
     );
-    this.goal = scene.add.text(this.x, this.y + 40, '', TEXT_STYLE(12, UI.textMuted)).setWordWrapWidth(3 * this.w + 2 * this.gap);
+    this.goal = scene.add.text(this.x, this.y + 36, '', TEXT_STYLE(12, UI.textMuted)).setWordWrapWidth(3 * this.w + 2 * this.gap).setLineSpacing(-4);
     this.container = scene.add.container(0, 0, [bg, this.gfx, ...this.names, this.goal]).setDepth(20);
   }
 
@@ -42,22 +54,13 @@ export class PhaseStrip {
       const isDone = i < done;
       const isNow = PHASES.indexOf(current) === i && done < 3;
       if (i > 0) {
-        g.lineStyle(3, i <= done ? UI.green : UI.dim, 1);
-        g.lineBetween(x - this.gap, this.y + 15, x, this.y + 15);
+        g.fillStyle(i <= done ? UI.green : UI.dim, 1);
+        g.fillRect(x - this.gap, this.y + 13, this.gap, 4);
       }
-      if (isDone) {
-        g.fillStyle(UI.green, 0.9);
-        g.fillRoundedRect(x, this.y, this.w, 30, 15);
-      } else if (isNow) {
-        g.fillStyle(UI.sky, 0.25 + 0.15 * Math.sin(time / 260));
-        g.fillRoundedRect(x, this.y, this.w, 30, 15);
-        g.lineStyle(2, UI.sky, 1);
-        g.strokeRoundedRect(x, this.y, this.w, 30, 15);
-      } else {
-        g.lineStyle(2, UI.dim, 1);
-        g.strokeRoundedRect(x, this.y, this.w, 30, 15);
-      }
-      this.names[i].setColor(isDone ? '#052e16' : isNow ? '#ffffff' : UI.textMuted).setStroke(isDone ? '#4ade80' : '#000000', isDone ? 0 : 3);
+      if (isDone) pixelPill(g, x, this.y, this.w, 30, UI.green, 1, 0x1f8a4f);
+      else if (isNow) pixelPill(g, x, this.y, this.w, 30, 0x1d3550, 0.75 + 0.25 * Math.sin(time / 260), UI.sky);
+      else pixelPill(g, x, this.y, this.w, 30, 0x0f0d15, 1, UI.dim);
+      this.names[i].setColor(isDone ? '#07291a' : isNow ? '#ffffff' : UI.textMuted).setStroke('#07060b', isDone ? 0 : 4);
     });
     this.goal.setText(goal);
   }
@@ -79,8 +82,7 @@ export class OrbitGauge {
 
   constructor(scene: Phaser.Scene) {
     const bg = scene.add.graphics();
-    bg.fillStyle(UI.backdrop, UI.backdropAlpha);
-    bg.fillRoundedRect(this.cx - this.w / 2 - 20, this.y - 8, this.w + 40, 84, 16);
+    hudPanel(bg, this.cx - this.w / 2 - 20, this.y - 6, this.w + 40, 82);
     this.gfx = scene.add.graphics();
     this.lowText = scene.add.text(this.cx - this.w / 2, this.y + 2, '', TEXT_STYLE(13, '#7dd3fc'));
     this.highText = scene.add.text(this.cx + this.w / 2, this.y + 2, '', TEXT_STYLE(13, '#fbbf24')).setOrigin(1, 0);
@@ -104,10 +106,9 @@ export class OrbitGauge {
     const barY = this.y + 30;
 
     // Track: surface on the left, edge of the Moon's pull on the right, safe band in green.
-    g.fillStyle(0x1f2937, 1);
-    g.fillRoundedRect(x0, barY, this.w, 12, 6);
+    hudWell(g, x0, barY, this.w, 12);
     g.fillStyle(UI.green, 0.35);
-    g.fillRect(toX(minPeriapsis), barY, toX(maxApoapsis) - toX(minPeriapsis), 12);
+    g.fillRect(toX(minPeriapsis), barY + 2, toX(maxApoapsis) - toX(minPeriapsis), 8);
 
     if (!o) {
       this.lowText.setText('');
@@ -123,16 +124,16 @@ export class OrbitGauge {
     g.fillStyle(lowOk && highOk ? UI.green : UI.amber, 0.9);
     g.fillRect(toX(Math.max(0, lo)), barY + 3, Math.max(3, toX(hi) - toX(Math.max(0, lo))), 6);
     g.fillStyle(lo < 0 ? UI.red : 0x7dd3fc, 1);
-    g.fillCircle(toX(Math.max(0, lo)), barY + 6, 6);
+    g.fillRect(toX(Math.max(0, lo)) - 5, barY, 10, 12);
     g.fillStyle(highOk ? 0xfbbf24 : UI.red, 1);
-    g.fillCircle(toX(hi), barY + 6, 6);
+    g.fillRect(toX(hi) - 5, barY, 10, 12);
 
     this.lowText.setText(lo < 0 ? 'LOW: hits the Moon!' : `LOW ${formatDistance(lo)}${lowOk ? '' : `  (need ${minPeriapsis}+)`}`).setColor(lo < 0 ? '#f87171' : lowOk ? '#7dd3fc' : '#fbbf24');
     this.highText.setText(o.escaping ? 'HIGH: escaping!' : `HIGH ${formatDistance(hi)}${highOk ? '' : `  (max ${maxApoapsis.toLocaleString()})`}`).setColor(highOk ? '#fbbf24' : '#f87171');
 
     if (hold !== null && lowOk && highOk) {
       g.fillStyle(UI.green, 1);
-      g.fillRoundedRect(this.cx - 80, this.y + 70, 160 * hold, 4, 2);
+      g.fillRect(this.cx - 80, this.y + 70, 160 * hold, 4);
       this.status.setText('STABLE ORBIT… hold it').setColor(UI.greenText);
     } else if (lowOk && highOk) {
       this.status.setText('Stable orbit').setColor(UI.greenText);
@@ -174,10 +175,7 @@ export class ProblemCard {
     const x0 = this.cx - this.w / 2;
     const flash = 0.6 + 0.4 * Math.sin(time / 120);
     this.bg.clear();
-    this.bg.fillStyle(0x1a0b0b, 0.85);
-    this.bg.fillRoundedRect(x0, this.y, this.w, this.h, 14);
-    this.bg.lineStyle(2, UI.red, flash);
-    this.bg.strokeRoundedRect(x0, this.y, this.w, this.h, 14);
+    drawPixelPanel(this.bg, x0, this.y, this.w, this.h, { fill: 0x1f0a10, fillAlpha: 0.94, border: flash > 0.8 ? UI.red : 0x8a2a32, highlight: UI.red, u: 3 });
 
     const info = PROBLEM_INFO[p.id];
     this.title.setText(`⚠ ${info.title}${p.timeLeft !== null ? `   ${Math.ceil(p.timeLeft)}s` : ''}`);
@@ -188,8 +186,7 @@ export class ProblemCard {
     const barX = x0 + 40;
     const barW = this.w - 80;
     const barY = this.y + 74;
-    g.fillStyle(0x374151, 1);
-    g.fillRoundedRect(barX, barY, barW, 10, 5);
+    hudWell(g, barX, barY, barW, 10);
 
     switch (p.id) {
       case 'FUEL_LEAK': {
@@ -205,7 +202,7 @@ export class ProblemCard {
       case 'STUCK_THRUSTER': {
         const spin = Phaser.Math.Clamp(p.data.spin ?? 0, 0, 1.5) / 1.5;
         g.fillStyle(spin > 0.66 ? UI.red : spin > 0.4 ? UI.amber : UI.green, 1);
-        g.fillRoundedRect(barX, barY, barW * spin, 10, 5);
+        g.fillRect(barX, barY, barW * spin, 10);
         g.lineStyle(2, 0xffffff, 0.9);
         g.lineBetween(barX + barW * (1 / 1.5), barY - 4, barX + barW * (1 / 1.5), barY + 14);
         this.detail.setText(`spin ${p.data.direction > 0 ? '⟲ — hold D' : '⟳ — hold A'}   ·   keep it left of the line`);
@@ -213,7 +210,7 @@ export class ProblemCard {
       }
       case 'DEBRIS': {
         g.fillStyle(p.progress >= 1 ? UI.green : UI.amber, 1);
-        g.fillRoundedRect(barX, barY, barW * p.progress, 10, 5);
+        g.fillRect(barX, barY, barW * p.progress, 10);
         this.detail.setText(p.progress >= 1 ? 'Clear of the ring!' : 'distance from the debris ring');
         break;
       }
@@ -221,19 +218,19 @@ export class ProblemCard {
         const pe = extra.periapsis ?? 0;
         const safe = CONFIG.phases.rover.problems.ORBIT_DECAY.safePeriapsis;
         g.fillStyle(UI.sky, 1);
-        g.fillRoundedRect(barX, barY, barW * p.progress, 10, 5);
+        g.fillRect(barX, barY, barW * p.progress, 10);
         this.detail.setText(`low point ${pe < 0 ? 'HITS THE MOON' : formatDistance(pe)}  (keep above ${safe} m)`).setColor(pe >= safe ? UI.greenText : '#f87171');
         return;
       }
       case 'FLAMEOUT': {
         g.fillStyle(UI.amber, 1);
-        g.fillRoundedRect(barX, barY, barW * p.progress, 10, 5);
+        g.fillRect(barX, barY, barW * p.progress, 10);
         this.detail.setText('HOLD E');
         break;
       }
       case 'RADAR_FAILURE': {
         g.fillStyle(UI.sky, 1);
-        g.fillRoundedRect(barX, barY, barW * p.progress, 10, 5);
+        g.fillRect(barX, barY, barW * p.progress, 10);
         this.detail.setText('rebooting…');
         break;
       }
