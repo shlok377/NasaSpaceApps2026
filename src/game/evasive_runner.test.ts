@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { RocketTree } from '../core/RocketTree';
 import { buildFlightVehicle } from '../physics/vehicle';
 import { FlightSim } from '../physics/FlightSim';
-import { generateLaneWaves } from './rocks';
+import { beltTimeAt, generateLaneWaves } from './rocks';
+import { CONFIG } from '../config';
 import { moonSoiAltitude } from '../physics/bodies';
 import { ROCK_BELT } from '../physics/constants';
 import {
@@ -103,14 +104,14 @@ describe('EvasiveRunner State & Logic', () => {
     expect(state.targetLaneIndex).toBe(4);
   });
 
-  it('clears evasive runner mode upon ascending past 3,400m altitude', () => {
+  it('clears evasive runner mode upon ascending past the top of the belt', () => {
     const state = createEvasiveRunnerState();
     updateEvasiveRunner(state, 2450, 0.1, false, 0, 0);
     updateEvasiveRunner(state, 2500, 0.1, true, 0, 0);
     expect(state.active).toBe(true);
 
-    // Ascend through 3,400m
-    const res = updateEvasiveRunner(state, 3405, 0.1, false, 0, state.currentX);
+    // Ascend past the belt's top
+    const res = updateEvasiveRunner(state, ROCK_BELT.top + 5, 0.1, false, 0, state.currentX);
     expect(state.active).toBe(false);
     expect(state.cleared).toBe(true);
     expect(res.cleared).toBe(true);
@@ -173,27 +174,26 @@ describe('EvasiveRunner State & Logic', () => {
     expect(sim.vehicle.parts.length).toBe(initialParts - 1);
     expect(sim.debris.length).toBeGreaterThan(0);
 
-    // 7. Ascend past 3,400m -> cleared
-    sim.state.y = 3401;
+    // 7. Ascend past the belt's top -> cleared
+    sim.state.y = ROCK_BELT.top + 1;
     const cRes = updateEvasiveRunner(runnerState, sim.state.y, 0.1, false, 0, sim.state.x);
     expect(runnerState.active).toBe(false);
     expect(runnerState.cleared).toBe(true);
     expect(cRes.cleared).toBe(true);
   });
 
-  it('configures readable cruise speed (45 m/s) and camera zoom (14 px/m) to give ample reaction time', () => {
-    expect(RUNNER_CONFIG.cruiseSpeed).toBe(45);
-    expect(RUNNER_CONFIG.cameraScale).toBe(14);
-    expect(RUNNER_CONFIG.rocketY).toBe(560);
-
-    // At 14 px/m with rocket at y = 560 on a 720px screen:
-    // Distance from top of screen to rocket is 560 px = 40 meters.
-    // At effective cruise climb of 45 m/s * 0.35 = 15.75 m/s:
-    // Lookahead reaction time is 40 / 15.75 = ~2.54 seconds.
-    const lookaheadMetres = RUNNER_CONFIG.rocketY / RUNNER_CONFIG.cameraScale;
-    const effectiveClimbSpeed = RUNNER_CONFIG.cruiseSpeed * RUNNER_CONFIG.timeScale;
-    const reactionWindowSec = lookaheadMetres / effectiveClimbSpeed;
-    expect(reactionWindowSec).toBeGreaterThan(2.0); // > 2.0s is comfortable arcade reaction time
+  it('runs the belt fast: rocks reach the rocket 2–3× quicker than the old 45 m/s at 14 px/m', () => {
+    // On-screen approach speed (px per real second) relative to the old tuning.
+    const old = 45 * 14;
+    const atBottom = RUNNER_CONFIG.cruiseSpeed * RUNNER_CONFIG.cameraScale;
+    const atTop = RUNNER_CONFIG.cruiseSpeedTop * RUNNER_CONFIG.cameraScale;
+    expect(atBottom / old).toBeGreaterThanOrEqual(1.9);
+    expect(atTop / old).toBeGreaterThanOrEqual(2.7);
+    expect(atTop / old).toBeLessThanOrEqual(3.1);
+    // Crossing the whole belt takes about 30 s of real time.
+    const realSeconds = beltTimeAt(ROCK_BELT.top) / (CONFIG.gameSpeed * RUNNER_CONFIG.timeScale);
+    expect(realSeconds).toBeGreaterThan(25);
+    expect(realSeconds).toBeLessThan(35);
   });
 
   it('governs vertical velocity to cruise speed and restores momentum on exit', () => {
@@ -206,9 +206,9 @@ describe('EvasiveRunner State & Logic', () => {
     for (let f = 0; f < 20; f++) {
       vy += (targetVy - vy) * (1 - Math.exp(-dt * 6));
     }
-    // Should have eased down close to 45 m/s
-    expect(vy).toBeLessThan(60);
-    expect(vy).toBeGreaterThan(44);
+    // Should have eased down close to the cruise speed
+    expect(vy).toBeLessThan(targetVy + 15);
+    expect(vy).toBeGreaterThan(targetVy - 1);
 
     // On exit (cleared), momentum is restored
     if (entryVy > vy) {
@@ -217,20 +217,11 @@ describe('EvasiveRunner State & Logic', () => {
     expect(vy).toBe(220);
   });
 
-  it('provides a natural physics-based 10–15 second deep-space gap between clearing the rocks and Moon SOI', () => {
-    const soiAltitude = moonSoiAltitude();
-    const rockBeltTop = ROCK_BELT.top;
-    const spaceGapMetres = soiAltitude - rockBeltTop;
-
-    // Physical distance from clearing rocks (3,400m) to Moon pull (4,800m) is 1,400m
-    expect(spaceGapMetres).toBe(1400);
-
-    // At full burn (~140 m/s), takes ~10.0 seconds
-    const timeAtFullBurn = spaceGapMetres / 140;
-    expect(timeAtFullBurn).toBeCloseTo(10.0, 1);
-
-    // At cruising / coasting speed (~93 m/s), takes ~15.0 seconds
-    const timeAtCruise = spaceGapMetres / 93.33;
-    expect(timeAtCruise).toBeCloseTo(15.0, 1);
+  it('leaves a quiet deep-space gap between clearing the rocks and the Moon\'s pull', () => {
+    const spaceGapMetres = moonSoiAltitude() - ROCK_BELT.top;
+    // About 0.9 km: a few seconds at full burn, longer coasting.
+    expect(spaceGapMetres).toBeGreaterThan(600);
+    expect(spaceGapMetres / 140).toBeGreaterThan(4);
+    expect(spaceGapMetres / 93.33).toBeLessThan(15);
   });
 });

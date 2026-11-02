@@ -14,22 +14,20 @@ import {
   PROBLEM_INFO
 } from '../game/phases';
 import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, PlayerProgress, saveProgress } from '../game/progress';
-import { anchorBelt, checkBelt, Combo, generateBelt, generateLaneWaves, Rock } from '../game/rocks';
+import { anchorBelt, checkBelt, Combo, generateBelt, generateLaneWaves, Rock, runnerSpeedAt } from '../game/rocks';
 import { createEvasiveRunnerState, EvasiveRunnerState, updateEvasiveRunner, RUNNER_CONFIG } from '../game/evasiveRunner';
 import { Award, StuntTracker } from '../game/stunts';
 import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay, timeOfDayReward, timeOfDayWind } from '../game/timeOfDay';
-import { PX, drawPixelPanel, pixelBody, pixelTitle } from '../ui/pixel';
 import { moonSoiAltitude } from '../physics/bodies';
 import { ENGINE, FINS, G0, LIMITS, ROCK_BELT, WORLD } from '../physics/constants';
 import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physics/FlightSim';
 import { evaluateMission, MAX_STARS, MissionResult } from '../physics/mission';
 import { analyzeVehicle, buildFlightVehicle, FlightVehicle, VehicleReport } from '../physics/vehicle';
-import { Altimeter } from '../ui/Altimeter';
-import { CoinCounter } from '../ui/CoinCounter';
-import { FuelTank } from '../ui/FuelTank';
-import { JourneyArc, Milestone } from '../ui/JourneyArc';
+import { GoalChip, HeightLadder, InstrumentChip, MoneyChip } from '../ui/CornerHud';
+import { SkyCards } from '../ui/SkyCards';
+import { Milestone } from '../ui/JourneyArc';
 import { LaunchButton } from '../ui/LaunchButton';
-import { OrbitGauge, PhaseStrip, ProblemCard } from '../ui/PhaseHud';
+import { OrbitGauge, ProblemCard } from '../ui/PhaseHud';
 import { CLASSIC, CLASSIC_TEXT_STYLE, formatDistance, TEXT_STYLE, TITLE_STYLE, UI } from '../ui/theme';
 import { preloadGameAssets } from '../core/assets';
 import { Effects } from './flight/Effects';
@@ -119,19 +117,17 @@ export class FlightScene extends Phaser.Scene {
   private fx!: Effects;
 
   // HUD
-  private phaseStrip!: PhaseStrip;
+  private goalChip!: GoalChip;
   private orbitGauge!: OrbitGauge;
   private problemCard!: ProblemCard;
-  private journey!: JourneyArc;
-  private altimeter!: Altimeter;
-  private fuelTank!: FuelTank;
-  private coins!: CoinCounter;
+  private ladder!: HeightLadder;
+  private instruments!: InstrumentChip;
+  private coins!: MoneyChip;
   private launchButton!: LaunchButton;
   private missionText!: Phaser.GameObjects.Text;
   /** Launch time picked on the pad (resets to DAWN every launch). */
   private timeOfDay: TimeOfDay = 'DAWN';
-  private timePicker!: Phaser.GameObjects.Container;
-  private timeCards: Array<{ time: TimeOfDay; gfx: Phaser.GameObjects.Graphics; hover: boolean }> = [];
+  private skyCards!: SkyCards;
   private hintText!: Phaser.GameObjects.Text;
   private bannerText!: Phaser.GameObjects.Text;
   private phaseTitle!: Phaser.GameObjects.Text;
@@ -263,25 +259,21 @@ export class FlightScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
 
   private createHud(): void {
-    this.phaseStrip = new PhaseStrip(this);
-    this.journey = new JourneyArc(this, 690, MILESTONES);
+    this.goalChip = new GoalChip(this);
     this.orbitGauge = new OrbitGauge(this);
     this.problemCard = new ProblemCard(this);
-    this.altimeter = new Altimeter(
+    this.ladder = new HeightLadder(
       this,
-      1230,
-      150,
-      380,
       SOI_ALTITUDE,
       [
         { label: 'Clouds', height: 1_500 },
-        { label: 'SPACE', height: WORLD.atmosphereTop },
-        { label: 'MOON', height: SOI_ALTITUDE }
+        { label: 'Space', height: WORLD.atmosphereTop },
+        { label: 'Moon', height: SOI_ALTITUDE }
       ],
       { from: ROCK_BELT.bottom, to: ROCK_BELT.top, label: 'rocks' }
     );
-    this.fuelTank = new FuelTank(this, 38, 560);
-    this.coins = new CoinCounter(this, 1264, 34);
+    this.instruments = new InstrumentChip(this);
+    this.coins = new MoneyChip(this);
 
     const [verdict, color] = this.verdict();
     const affordable = this.progress.money >= this.cost;
@@ -290,7 +282,7 @@ export class FlightScene extends Phaser.Scene {
     );
     this.missionText = this.add.text(640, 168, '', TEXT_STYLE(15, UI.goldText)).setOrigin(0.5);
     this.createTimePicker();
-    this.hintText = this.add.text(640, 694, '', TEXT_STYLE(14)).setOrigin(0.5).setDepth(20);
+    this.hintText = this.add.text(640, 700, '', TEXT_STYLE(13)).setOrigin(0.5, 1).setAlign('center').setWordWrapWidth(600).setDepth(20);
     this.bannerText = this.add.text(640, 236, '', TEXT_STYLE(20, '#ffffff')).setOrigin(0.5, 0).setAlpha(0).setDepth(20);
     this.phaseTitle = this.add.text(640, 300, '', TITLE_STYLE(30, '#ffffff')).setOrigin(0.5).setAlpha(0).setDepth(30);
     this.phaseGoal = this.add.text(640, 344, '', TEXT_STYLE(16, UI.text)).setOrigin(0.5, 0).setAlpha(0).setDepth(30).setAlign('center').setWordWrapWidth(640);
@@ -308,52 +300,10 @@ export class FlightScene extends Phaser.Scene {
   // Launch time picker (on the pad only)
   // ---------------------------------------------------------------------------
 
-  private static readonly TIME_CARD_W = 120;
-  private static readonly TIME_CARD_H = 56;
-
-  /** DAWN → NIGHT strip under the mission line: later is windier and pays more. */
+  /** Sky window cards under the mission line: later is windier and pays more. */
   private createTimePicker(): void {
-    const w = FlightScene.TIME_CARD_W;
-    const h = FlightScene.TIME_CARD_H;
-    this.timePicker = this.add.container(0, 0).setDepth(15);
-    this.timeCards = TIMES_OF_DAY.map((time, i) => {
-      const x = 640 + (i - 1.5) * (w + 10) - w / 2;
-      const y = 196;
-      const look = TIME_LOOKS[time];
-      const gfx = this.add.graphics();
-      const label = pixelTitle(this, x + w / 2, y + 10, look.label, 10, PX.text.white).setOrigin(0.5, 0);
-      const pay = timeOfDayReward(time);
-      const sub = pixelBody(this, x + w / 2, y + 28, `${look.blurb} · $×${pay}`, 18, PX.text.muted).setOrigin(0.5, 0);
-      const zone = this.add.zone(x + w / 2, y + h / 2, w, h).setInteractive({ useHandCursor: true });
-      const card = { time, gfx, hover: false };
-      zone.on('pointerover', () => ((card.hover = true), this.drawTimePicker()));
-      zone.on('pointerout', () => ((card.hover = false), this.drawTimePicker()));
-      zone.on('pointerdown', () => this.setTimeOfDay(time));
-      this.timePicker.add([gfx, label, sub, zone]);
-      return card;
-    });
+    this.skyCards = new SkyCards(this, 640, 196, time => this.setTimeOfDay(time));
     this.setTimeOfDay(this.timeOfDay);
-  }
-
-  private drawTimePicker(): void {
-    const w = FlightScene.TIME_CARD_W;
-    const h = FlightScene.TIME_CARD_H;
-    this.timeCards.forEach(({ time, gfx, hover }, i) => {
-      const x = 640 + (i - 1.5) * (w + 10) - w / 2;
-      const on = time === this.timeOfDay;
-      const accent = TIME_LOOKS[time].accent;
-      gfx.clear();
-      drawPixelPanel(gfx, x, 196, w, h, {
-        fill: on ? 0x2a2236 : PX.panelDeep,
-        fillAlpha: 0.92,
-        border: on ? accent : hover ? PX.border : PX.borderDim,
-        highlight: on ? 0xffffff : PX.glow,
-        u: on ? 3 : 2
-      });
-      // Swatch of the sky in the corner.
-      gfx.fillStyle(accent, on ? 1 : 0.5);
-      gfx.fillRect(x + 8, 196 + 8, 8, 8);
-    });
   }
 
   private setTimeOfDay(time: TimeOfDay): void {
@@ -363,7 +313,7 @@ export class FlightScene extends Phaser.Scene {
     this.world.setTimeOfDay(time);
     const reward = this.mission ? Math.round(this.mission.reward * timeOfDayReward(time)) : 0;
     this.missionText.setText(this.mission ? `MISSION: ${this.mission.title}: ${this.mission.goal}  (+$${reward})` : 'All missions done: fly for the high score!');
-    this.drawTimePicker();
+    this.skyCards.setSelected(time);
   }
 
   private stepTimeOfDay(dir: number): void {
@@ -509,7 +459,8 @@ export class FlightScene extends Phaser.Scene {
         this.sim.state.theta = Math.PI / 2 + this.runnerState.tilt;
         // Govern the climb to the cruise speed so the rocks come down at a readable pace: eased on
         // the approach, then held exactly inside the belt, where the reserved safe route assumes it.
-        const cruise = RUNNER_CONFIG.cruiseSpeed;
+        // Inside the belt the climb follows the speed ramp exactly (faster the higher you get).
+        const cruise = runnerSpeedAt(this.sim.state.y);
         if (inBelt) this.sim.state.vy = cruise;
         else this.sim.state.vy += (cruise - this.sim.state.vy) * (1 - Math.exp(-dt * 6));
       }
@@ -825,32 +776,37 @@ export class FlightScene extends Phaser.Scene {
     const best = Math.max(this.progress.bestHeight, this.sim.stats.maxAltitude);
     const onPad = this.sim.phase === 'PRELAUNCH' && this.countdown === null;
 
-    this.phaseStrip.setVisible(!onPad);
-    this.phaseStrip.update(r.phase, r.phasesDone, this.objective(t), now);
+    this.goalChip.setVisible(!onPad && !this.result);
+    this.goalChip.update(r.phase, r.phasesDone, this.objective(t));
 
     const ascent = mode === 'ASCENT';
-    this.journey.setVisible(ascent && !onPad);
-    this.journey.update(
-      {
-        fraction: Phaser.Math.Clamp(t.earthAltitude / SOI_ALTITUDE, 0, 1),
-        travelled: Math.max(0, Math.min(SOI_ALTITUDE, t.earthAltitude)),
-        total: SOI_ALTITUDE,
-        outbound: t.verticalSpeed >= 0,
-        onCourse: this.coastApex !== null && this.coastApex >= SOI_ALTITUDE,
-        passed: this.passed
-      },
-      now
-    );
-    this.altimeter.setVisible(ascent);
-    this.altimeter.update(Math.max(0, t.earthAltitude), best, this.coastApex);
+    this.ladder.setVisible(ascent && !this.result);
+    this.ladder.update(Math.max(0, t.earthAltitude), best);
     this.orbitGauge.setVisible(mode === 'ORBIT' && !this.result);
     this.orbitGauge.update(t.moonOrbit, r.phase === 'ORBIT' ? r.stableFor / CONFIG.phases.orbit.holdSeconds : null, now);
     this.problemCard.update(flying ? (r.problem as ActiveProblem | null) : null, { periapsis: t.moonOrbit?.periapsisAltitude ?? null }, now);
-    this.fuelTank.update(t.fuelFraction, t.mass, this.vehicle.wetMass, t.twr, t.throttle > 0, now, dt);
+    this.instruments.setVisible(!this.result);
+    this.instruments.update(
+      {
+        // One reading per tank still on the rocket, left to right.
+        tanks: this.sim.vehicle.parts
+          .filter(p => p.fuelCapacity > 0)
+          .sort((a, b) => a.u - b.u)
+          .map(p => ({ id: p.id, kind: p.fuelKind ?? 'STANDARD', capacity: p.fuelCapacity, fraction: (this.sim.tanks.get(p.id) ?? 0) / p.fuelCapacity })),
+        fuel: t.fuelFraction,
+        twr: t.twr,
+        burning: t.thrust > 0,
+        tiltDeg: (t.pitchFromVertical * 180) / Math.PI,
+        mass: t.mass,
+        wetMass: this.vehicle.wetMass,
+        sky: TIME_LOOKS[this.timeOfDay].sky[3]
+      },
+      now
+    );
     this.coins.update(this.progress.money + (this.result ? 0 : cashFromAwards(this.stunts.awards)), dt);
 
     this.launchButton.setVisible(onPad);
-    this.timePicker.setVisible(onPad);
+    this.skyCards.setVisible(onPad);
     this.launchButton.update(now);
     this.missionText.setVisible(onPad);
     this.endButton.setVisible(flying && this.launched);

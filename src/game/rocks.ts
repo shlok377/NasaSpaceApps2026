@@ -104,13 +104,30 @@ interface PathSpan {
 export const RUNNER_BODY = {
   halfLength: RUNNER_CONFIG.rocketHalfLength,
   halfWidth: RUNNER_CONFIG.rocketHalfWidth,
-  /** Height climbed while a lane shift is under way (m). */
-  shiftClimb: RUNNER_CONFIG.cruiseSpeed * RUNNER_CONFIG.laneShiftDuration
+  /** Height climbed while a lane shift is under way (m), at the fastest climb. */
+  shiftClimb: RUNNER_CONFIG.cruiseSpeedTop * RUNNER_CONFIG.laneShiftDuration
 } as const;
 
-/** Belt clock (s since the runner rocket crossed the belt's bottom) when it is at height y. */
+/**
+ * The runner's climb speed at height y (m/s): the cruise speed below the belt, then
+ * ramping linearly up to cruiseSpeedTop at the belt's top, so the rocks come faster
+ * the deeper you get.
+ */
+export function runnerSpeedAt(y: number): number {
+  const k = Math.min(1, Math.max(0, (y - ROCK_BELT.bottom) / (ROCK_BELT.top - ROCK_BELT.bottom)));
+  return RUNNER_CONFIG.cruiseSpeed + (RUNNER_CONFIG.cruiseSpeedTop - RUNNER_CONFIG.cruiseSpeed) * k;
+}
+
+/** Belt clock (s since the runner rocket crossed the belt's bottom) when it is at height y, following the speed ramp. */
 export function beltTimeAt(y: number): number {
-  return (y - ROCK_BELT.bottom) / RUNNER_CONFIG.cruiseSpeed;
+  const v0 = RUNNER_CONFIG.cruiseSpeed;
+  if (y <= ROCK_BELT.bottom) return (y - ROCK_BELT.bottom) / v0;
+  const span = ROCK_BELT.top - ROCK_BELT.bottom;
+  const dv = RUNNER_CONFIG.cruiseSpeedTop - v0;
+  const top = Math.min(y, ROCK_BELT.top);
+  // ∫ dy / v(y) with v linear in y; past the top the climb stays at the top speed.
+  const inside = Math.abs(dv) < 1e-9 ? (top - ROCK_BELT.bottom) / v0 : (span / dv) * Math.log(runnerSpeedAt(top) / v0);
+  return inside + Math.max(0, y - ROCK_BELT.top) / RUNNER_CONFIG.cruiseSpeedTop;
 }
 
 /** Where `rock` is (m) at belt clock `beltTime` (s since its x0 moment), wrapped to the belt's width. */
@@ -179,12 +196,44 @@ export function generateLaneWaves(seed = 2026, time: TimeOfDay = 'NOON'): Rock[]
   const radius = () => RB.rockRadiusMin + rand() * (RB.rockRadiusMax - RB.rockRadiusMin) * cfg.rockRadiusFactor;
   const fitsAmongRocks = (laneIdx: number, h: number): boolean =>
     items.every(o => {
-      if (o.laneIndex === undefined) return true;
+      if (o.laneIndex === undefined) {
+        // A boulder: don't overlap it, and don't line up beside it.
+        const dy = Math.abs(o.y - h);
+        const dx = Math.abs(o.x0 - lanes[laneIdx]);
+        if (dy < o.radius + RB.rockRadiusMax + 2 && dx < o.radius + RB.rockRadiusMax + 2) return false;
+        return !(dy < cfg.rowTolerance && dx <= (lanes[1] - lanes[0]) * 1.5);
+      }
       const d = Math.abs(o.y - h);
       if (o.laneIndex === laneIdx) return d >= cfg.sameLaneSpacing;
       if (Math.abs(o.laneIndex - laneIdx) === 1) return d >= cfg.rowTolerance;
       return true;
     });
+
+  // 2a. Big boulders above the first third, sitting between two lanes so they block both.
+  //     Placed first so the denser lane rocks can make room around them.
+  const laneGapB = lanes[1] - lanes[0];
+  const topB = ROCK_BELT.top - cfg.beltTopGap;
+  const boulders = Math.round(((cfg.bouldersPer100m * span) / 100) * (2 / 3) * mult);
+  const bFrom = ROCK_BELT.bottom + span / 3;
+  for (let i = 0; i < boulders; i++) {
+    for (let attempt = 0; attempt < cfg.drifterAttempts; attempt++) {
+      const left = Math.floor(rand() * (lanes.length - 1));
+      const h = bFrom + rand() * (topB - bFrom);
+      const x0 = (lanes[left] + lanes[left + 1]) / 2;
+      const rock: Rock = { id: 0, kind: 'ROCK', x0, y: h, vx: 0, radius: cfg.boulderRadius, seed: rand(), spent: false, t0: null };
+      const roomy = items.every(o => {
+        const dy = Math.abs(o.y - h);
+        const dx = Math.abs(beltX(o, beltTimeAt(o.y)) - x0);
+        const reach = cfg.boulderRadius + o.radius + 2;
+        if (dy < reach && dx < reach) return false; // overlapping
+        return !(dy < cfg.rowTolerance && dx <= laneGapB * 1.5); // a row with the lanes beside it
+      });
+      if (roomy && clearOfPath(rock)) {
+        items.push(rock);
+        break;
+      }
+    }
+  }
 
   // 2. Lane rocks, each at its own height, density ramping bottom to top.
   const band = cfg.rockBand;
@@ -206,7 +255,7 @@ export function generateLaneWaves(seed = 2026, time: TimeOfDay = 'NOON'): Rock[]
     }
   }
 
-  // 3. Drifters in the last third, crossing the lanes as the rocket arrives. The
+  // 3. Drifters from the middle of the belt up, crossing the lanes as the rocket arrives. The
   //    no-rows rule holds for them too: when the rocket is level with a drifter,
   //    no lane rock in the lane it is crossing or a neighbouring one, and no other
   //    drifter, sits within rowTolerance of its height.
@@ -218,7 +267,7 @@ export function generateLaneWaves(seed = 2026, time: TimeOfDay = 'NOON'): Rock[]
       return Math.abs(lanes[o.laneIndex] - xAtArrival) > laneGap * 1.5;
     });
   const drifters = Math.round(cfg.drifters * mult);
-  const lastThird = ROCK_BELT.bottom + (span * 2) / 3;
+  const lastThird = ROCK_BELT.bottom + span * cfg.driftersFrom;
   const laneSpan = lanes[lanes.length - 1] - lanes[0];
   const edge = cfg.drifterEdge;
   for (let i = 0; i < drifters; i++) {
@@ -263,14 +312,14 @@ export function rockX(rock: Rock, time: number): number {
  * more than `minAhead` m above the rocket count (rocks on screen show themselves).
  */
 export function laneThreats(rocks: readonly Rock[], y: number, time: number, lookahead: number = RUNNER_CONFIG.threatLookahead, minAhead = 0): Array<number | null> {
-  const speed = RUNNER_CONFIG.cruiseSpeed;
+  const here = beltTimeAt(y);
   return RUNNER_LANES.map(laneX => {
     let soonest: number | null = null;
     for (const r of rocks) {
       if (r.spent || r.kind !== 'ROCK') continue;
       const dy = r.y - y;
       if (dy <= minAhead) continue;
-      const eta = dy / speed;
+      const eta = beltTimeAt(r.y) - here;
       if (eta > lookahead || (soonest !== null && eta >= soonest)) continue;
       if (Math.abs(rockX(r, time + eta) - laneX) < r.radius + RUNNER_BODY.halfWidth) soonest = eta;
     }

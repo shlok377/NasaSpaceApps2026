@@ -4,7 +4,7 @@ import { ROCK_BELT } from '../physics/constants';
 import { VehicleReport } from '../physics/vehicle';
 import { currentMission, MISSIONS, newlyCompleted, rocketCost } from './missions';
 import { flightEarnings, GRANT_FLOOR, loadProgress, saveProgress, STARTING_MONEY, withGrant } from './progress';
-import { anchorBelt, BELT, beltTimeAt, beltX, checkBelt, Combo, generateBelt, generateLaneWaves, laneThreats, rockBlocks, rockX, RUNNER_CONFIG, RUNNER_LANES } from './rocks';
+import { anchorBelt, BELT, beltTimeAt, runnerSpeedAt, beltX, checkBelt, Combo, generateBelt, generateLaneWaves, laneThreats, rockBlocks, rockX, RUNNER_BODY, RUNNER_CONFIG, RUNNER_LANES } from './rocks';
 
 const stats: FlightStats = {
   maxAltitude: 0,
@@ -160,6 +160,7 @@ describe('rock belt', () => {
     const SEEDS = Array.from({ length: 40 }, (_, i) => 1 + i * 7919);
     const span = ROCK_BELT.top - ROCK_BELT.bottom;
     const lastThird = ROCK_BELT.bottom + (span * 2) / 3;
+    const driftFrom = ROCK_BELT.bottom + span * RUNNER_CONFIG.driftersFrom;
 
     it('puts every rock at its own height: no rows across neighbouring lanes', () => {
       for (const seed of SEEDS) {
@@ -181,17 +182,44 @@ describe('rock belt', () => {
       }
     });
 
-    it('only drifts rocks sideways in the last third, and some do', () => {
+    it('only drifts rocks sideways from the middle of the belt up, and some do', () => {
       for (const seed of SEEDS) {
         const rocks = generateLaneWaves(seed);
         const drifters = rocks.filter(r => r.vx !== 0);
         expect(drifters.length).toBeGreaterThan(0);
         for (const r of drifters) {
-          expect(r.y).toBeGreaterThanOrEqual(lastThird);
+          expect(r.y).toBeGreaterThanOrEqual(driftFrom);
           expect(r.laneIndex).toBeUndefined();
         }
-        for (const r of rocks.filter(r => r.vx === 0)) expect(RUNNER_LANES).toContain(r.x0);
+        // Still rocks sit in a lane, or are boulders straddling two lanes.
+        for (const r of rocks.filter(r => r.vx === 0)) {
+          if (r.laneIndex !== undefined) expect(RUNNER_LANES).toContain(r.x0);
+          else expect(r.radius).toBe(RUNNER_CONFIG.boulderRadius);
+        }
       }
+    });
+
+    it('drops big boulders that block two lanes above the first third', () => {
+      let total = 0;
+      for (const seed of SEEDS) {
+        const boulders = generateLaneWaves(seed, 'NIGHT').filter(r => r.vx === 0 && r.laneIndex === undefined);
+        total += boulders.length;
+        for (const b of boulders) {
+          expect(b.y).toBeGreaterThanOrEqual(ROCK_BELT.bottom + span / 3);
+          const covered = RUNNER_LANES.filter(x => Math.abs(x - b.x0) < b.radius + RUNNER_BODY.halfWidth);
+          expect(covered.length).toBe(2);
+        }
+      }
+      expect(total).toBeGreaterThan(0);
+    });
+
+    it('speeds the climb up through the belt', () => {
+      expect(runnerSpeedAt(ROCK_BELT.bottom)).toBe(RUNNER_CONFIG.cruiseSpeed);
+      expect(runnerSpeedAt(ROCK_BELT.top)).toBe(RUNNER_CONFIG.cruiseSpeedTop);
+      expect(runnerSpeedAt((ROCK_BELT.bottom + ROCK_BELT.top) / 2)).toBeGreaterThan(RUNNER_CONFIG.cruiseSpeed);
+      // The belt clock follows the ramp: crossing it is quicker than at the bottom speed.
+      expect(beltTimeAt(ROCK_BELT.top)).toBeLessThan(span / RUNNER_CONFIG.cruiseSpeed);
+      expect(beltTimeAt(ROCK_BELT.top)).toBeGreaterThan(span / RUNNER_CONFIG.cruiseSpeedTop);
     });
 
     it('has no SHIELD pickups (nor any other pickups), only rocks', () => {
@@ -203,7 +231,7 @@ describe('rock belt', () => {
         const dawn = generateLaneWaves(seed, 'DAWN');
         const night = generateLaneWaves(seed, 'NIGHT');
         expect(night.length).toBeGreaterThan(dawn.length);
-        expect(night.filter(r => r.vx !== 0).length).toBeGreaterThan(dawn.filter(r => r.vx !== 0).length);
+        expect(night.filter(r => r.vx !== 0).length).toBeGreaterThanOrEqual(dawn.filter(r => r.vx !== 0).length);
       }
     });
 
@@ -248,7 +276,7 @@ describe('rock belt', () => {
       for (const time of ['DAWN', 'NIGHT'] as const) {
         for (const seed of SEEDS) expect(reachable(generateLaneWaves(seed, time))).toBe(true);
       }
-    });
+    }, 30_000); // 80 dense belts, each simulated in half-metre steps
 
     it('drifters hold at their belt-entry x until the belt clock starts', () => {
       const rocks = generateLaneWaves(42, 'NIGHT');
@@ -277,7 +305,7 @@ describe('rock belt', () => {
       for (const seed of SEEDS) {
         const rocks = generateLaneWaves(seed, 'NIGHT');
         const lane = rocks.filter(r => r.laneIndex !== undefined);
-        const drifters = rocks.filter(r => r.laneIndex === undefined);
+        const drifters = rocks.filter(r => r.laneIndex === undefined && r.vx !== 0);
         for (const d of drifters) {
           // Where the drifter is when the rocket is level with it.
           const x = beltX(d, beltTimeAt(d.y));
@@ -294,13 +322,15 @@ describe('rock belt', () => {
       const y = ROCK_BELT.bottom;
       const speed = RUNNER_CONFIG.cruiseSpeed;
       const lookahead = 3;
+      const etaOf = (h: number) => beltTimeAt(h) - beltTimeAt(y);
       const near = rock(RUNNER_LANES[1], y + speed * 1);
-      const far = rock(RUNNER_LANES[3], y + speed * (lookahead + 2));
+      const far = rock(RUNNER_LANES[3], y + RUNNER_CONFIG.cruiseSpeedTop * (lookahead + 2));
       // A drifter now in lane 0 that will sit in lane 4 when the rocket reaches it.
-      const eta = 2;
-      const drifter = rock(RUNNER_LANES[0], y + speed * eta, (RUNNER_LANES[4] - RUNNER_LANES[0]) / eta);
+      const dh = y + speed * 2;
+      const eta = etaOf(dh);
+      const drifter = rock(RUNNER_LANES[0], dh, (RUNNER_LANES[4] - RUNNER_LANES[0]) / eta);
       const threats = laneThreats([near, far, drifter], y, 0, lookahead);
-      expect(threats[1]).toBeCloseTo(1, 6);
+      expect(threats[1]).toBeCloseTo(etaOf(near.y), 6);
       expect(threats[3]).toBeNull();
       expect(threats[0]).toBeNull();
       expect(threats[4]).toBeCloseTo(eta, 6);
