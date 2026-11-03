@@ -1,0 +1,105 @@
+{
+  "scene": "launch",
+  "html": "/home/shlok377/Projects/NasaSpaceApps2026/diorama/look/pixel-launch.html",
+  "bytes": 60295,
+  "errors": [],
+  "network": [],
+  "images": [
+    "/home/shlok377/Projects/NasaSpaceApps2026/diorama/look/launch-still.png",
+    "/home/shlok377/Projects/NasaSpaceApps2026/diorama/look/launch-ta.png",
+    "/home/shlok377/Projects/NasaSpaceApps2026/diorama/look/launch-tb.png",
+    "/home/shlok377/Projects/NasaSpaceApps2026/diorama/look/launch-tc.png",
+    "/home/shlok377/Projects/NasaSpaceApps2026/diorama/look/launch-td.png",
+    "/home/shlok377/Projects/NasaSpaceApps2026/diorama/look/launch-hover.png",
+    "/home/shlok377/Projects/NasaSpaceApps2026/diorama/look/launch-press.png",
+    "/home/shlok377/Projects/NasaSpaceApps2026/diorama/look/launch-mobile.png"
+  ],
+  "checks": [
+    {
+      "label": "fill: the scene covers enough of the frame",
+      "pass": true,
+      "detail": 0.435
+    },
+    {
+      "label": "motion: the loop changes the picture",
+      "pass": true,
+      "detail": 0.0833
+    },
+    {
+      "label": "seam: the loop's end matches its start",
+      "pass": true,
+      "detail": 0
+    },
+    {
+      "label": "pointer: every hot group can be picked",
+      "pass": true,
+      "detail": [
+        "launch tower · swing arm",
+        "rocket · lunar lander",
+        "astronaut · tap to wave"
+      ]
+    },
+    {
+      "label": "hover: the hovered group lights up and the read-out names it",
+      "pass": true,
+      "detail": {
+        "changed": 0.0144,
+        "read": "launch tower · swing arm"
+      }
+    },
+    {
+      "label": "press: a tap changes the scene (the hint promises one)",
+      "pass": true,
+      "detail": 0.0071
+    },
+    {
+      "label": "reduced motion: the page holds the still frame",
+      "pass": true,
+      "detail": {
+        "running": false,
+        "frames": 0
+      }
+    },
+    {
+      "label": "frame cost: median within the 41.7 ms frame budget",
+      "pass": true,
+      "detail": {
+        "frames": 120,
+        "medianMs": 5.7,
+        "p95Ms": 6.7,
+        "tris": 1713,
+        "size": [
+          320,
+          240
+        ],
+        "budgetMs": 41.7
+      }
+    },
+    {
+      "label": "mobile: no horizontal overflow",
+      "pass": true
+    },
+    {
+      "label": "no browser errors",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "label": "offline: no network request",
+      "pass": true,
+      "detail": []
+    }
+  ],
+  "render": {
+    "frames": 120,
+    "medianMs": 5.7,
+    "p95Ms": 6.7,
+    "tris": 1713,
+    "size": [
+      320,
+      240
+    ],
+    "budgetMs": 41.7
+  },
+  "fps": 24
+}

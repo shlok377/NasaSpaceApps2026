@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Liftoff from the Moon pad</title>
+<style>
+  :root { color-scheme: light; }
+  html, body { margin: 0; background: #ffffff; color: #4a4d55; font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 16px; box-sizing: border-box; }
+  canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; max-width: 100%; height: auto; }
+  p { margin: 0; max-width: 60ch; text-align: center; text-wrap: balance; }
+  .soft { color: #7a7d85; font-size: 13px; }
+  .read { min-height: 1.45em; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #5a5d65; }
+  h1 { margin: 0; font-size: 15px; font-weight: 600; color: #2c2f36; }
+  canvas { touch-action: manipulation; }
+  /* ?embed: the canvas fills the frame, the words belong to the host page, the read-out sits in a corner */
+  .embed main { min-height: 0; padding: 0; gap: 0; position: relative; }
+  .embed canvas { width: 100% !important; max-width: none; }
+  .embed h1, .embed #means, .embed #hint { display: none; }
+  .embed .read { position: absolute; left: 10px; bottom: 8px; text-align: left; background: rgba(255, 255, 255, .88); padding: 0 6px; border-radius: 4px; }
+  .embed .read:empty { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <canvas id="stage" role="img"></canvas>
+  <h1 id="title"></h1>
+  <p id="means"></p>
+  <p id="hint" class="soft"></p>
+  <p id="read" class="read" aria-live="polite"></p>
+</main>
+<script>
+/* ============================================================================
+   Diorama Pixel kernel · one global `Pixel`, no dependency: a software
+   rasterizer that draws into a small canvas 2D and lets the browser enlarge
+   it with nearest-neighbour pixels.
+
+   A scene is a handful of convex solids (boxes, cylinders, cones, balls,
+   wedges) and 1 px lines in a small scene graph, seen through a fixed
+   orthographic camera (2:1 pixel isometric by default). Every frame the
+   kernel transforms the solids, rasterizes their triangles into a depth
+   buffer at the internal resolution (320 x 240 by default), rasterizes them
+   again from the sun into a shadow map, and shades every pixel: a lambert
+   term, the shadow, and a procedural texture per material (planks, thatch,
+   stone, leaves, cloth, grass, water, paving), quantized to that material's
+   ramp of four to six colours with an 8 x 8 Bayer matrix. The ground is not
+   a mesh: it is the plane y = 0, cut by an irregular outline whose edge
+   dissolves into the page through the same dither, and coloured by zones.
+
+   INDEX · what a scene may call.
+
+   Pixel.scene(spec)    declare a scene; spec is:
+     name, title, means, hint strings shown by the page (hint: what to hover, what to tap)
+     width, height            internal resolution (default 320 x 240)
+     duration                 seconds in the loop (ctx.q = t / duration, 0..1)
+     still                    seconds into the loop shown for reduced motion and thumbnails
+     fps                      frame cap (default 24: pixel art moves in steps, and it halves the work)
+     camera                   { az: 45, el: 30, scale (px per unit, default: fit), target: [x, y, z], height }
+     sun                      { az: -40, el: 48, ambient: .34 }   az/el in degrees, the light comes from there
+     outline                  true: one ramp step darker on silhouettes against farther things (default true)
+     ground                   { rx, rz, wobble: .3, fade: .45, zone(x, z, P) -> material key or object }
+     materials                { key: material } extra named materials
+     build(P)                 build once; return parts; parts.hot = [groups the pointer may pick], each with a .name
+     tick(ctx)                pose the parts from absolute time; never accumulate. ctx: t, q (0..1 in the loop), dt,
+                              parts, P, hover (hot group under the pointer, lit one shade), pressed + pressedAt (last
+                              press), active (a switch), pointer { x, y, inside }, read (set a line for the read-out)
+
+   P (toolkit given to build and tick):
+     P.group(x, y, z, parent)                     a node; .position .rotation (radians, yaw-pitch-roll) .scale .visible
+     P.box(w, h, d, mat, x, y, z, parent)          centred on x, y, z
+     P.cyl(rTop, rBottom, h, mat, x, y, z, parent, seg)
+     P.cone(r, h, mat, x, y, z, parent, seg)
+     P.ball(r, mat, x, y, z, parent, seg)
+     P.wedge(w, h, d, mat, x, y, z, parent)        a gable along x, base on y (thatch roofs)
+     P.line(points, mat, parent)                   a polyline of 1 px, [[x, y, z], ...] in parent space
+     P.person(x, z, parent, { shirt, pants, skin, hair, hat, shoes, sleeve, bare, yaw, h: 1.3 })
+                                                    -> { root, hips, body, head, armL, armR, elbowL, elbowR, handL, handR, legL, legR, kneeL, kneeR }
+     P.pose(person, 'stand'|'work'|'hold'|'carry'|'sit'|'wave', amount)   set every joint, then add motion on top
+     P.tree(x, z, parent, { r, h, clusters, mat, trunk, yaw, seed })      a trunk and a crown of round leaf clumps
+     P.bush(x, z, parent, { r, clusters, mat, flowers })                  a low clump, flowers a hex
+     P.mat(spec)                                    a material: a hex colour, a key ('grass', 'water', 'wood', 'thatch',
+                                                    'stone', 'paving', 'leaf', 'cloth', 'dirt', 'sand'), or
+                                                    { color | ramp, tex, grain: 'x'|'y'|'z', plank, size, stripe, alt, rough, dither, glow, round, flat }
+     P.update()                                     compose every world matrix now, so tick can read node.worldPoint(x, y, z)
+     P.wave(t, period, offset) P.phase(t, period, offset) P.pulse(t, period, width) P.smooth(t) P.lerp(a, b, t) P.clamp
+     P.noise(x, y) P.fbm(x, y) P.hash(x, y)        the same noise the textures use (for zones and outlines)
+
+   Pixel.mount(spec, canvas, { reduced, still, onRead }) -> runtime { renderAt(t), start(), stop(), setCap(fps), hoverAt(x, y),
+                                                       tap(x, y), stats(), destroy(), parts, ctx }
+   ============================================================================ */
+var Pixel = (function () {
+  'use strict';
+  var TAU = Math.PI * 2, DEG = Math.PI / 180;
+  var scenes = [];
+
+  /* ---------- small maths and noise ---------- */
+  var clamp = function (v, a, b) { return v < a ? a : v > b ? b : v; };
+  var lerp = function (a, b, t) { return a + (b - a) * t; };
+  var smooth = function (t) { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
+  var phase = function (t, p, o) { var x = (t / p + (o || 0)) % 1; return x < 0 ? x + 1 : x; };
+  var wave = function (t, p, o) { return Math.sin(phase(t, p, o) * TAU); };
+  var pulse = function (t, p, w) { var x = phase(t, p); return x < w ? Math.sin(x / w * Math.PI) : 0; };
+  function hash(x, y) {
+    var h = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  }
+  function hash3(x, y, z) { return hash((x | 0) + Math.imul(z | 0, 1013), (y | 0) ^ Math.imul(z | 0, 7919)); }
+  function noise(x, y) {
+    var ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+    fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+    var a = hash(ix, iy), b = hash(ix + 1, iy), c = hash(ix, iy + 1), d = hash(ix + 1, iy + 1);
+    return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+  }
+  function fbm(x, y) { return noise(x, y) * .57 + noise(x * 2.03 + 17.1, y * 2.03 + 5.3) * .29 + noise(x * 4.1 + 31.7, y * 4.1 + 11.9) * .14; }
+  var BAYER = (function () {
+    var b = [0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26, 12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22,
+      3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25, 15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21];
+    return new Float32Array(b.map(function (v) { return (v + .5) / 64; }));
+  })();
+
+  /* ---------- colour ramps ---------- */
+  function rgb(h) { h = h.replace('#', ''); if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]; var n = parseInt(h, 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+  function mix(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+  function scl(a, k) { return [a[0] * k, a[1] * k, a[2] * k]; }
+  function pack(c) { return (255 << 24) | (clamp(Math.round(c[2]), 0, 255) << 16) | (clamp(Math.round(c[1]), 0, 255) << 8) | clamp(Math.round(c[0]), 0, 255); }
+  /* five shades of one colour, shifted the way a pixel artist shifts them: shadows toward cool violet, lights toward warm cream */
+  function autoRamp(hex) {
+    var c = rgb(hex);
+    return [mix(scl(c, .42), [38, 36, 72], .38), mix(scl(c, .64), [58, 56, 96], .2), scl(c, .84), c, mix(scl(c, 1.08), [255, 246, 220], .32)];
+  }
+  function shade(hex, k) { var c = rgb(hex); return '#' + c.map(function (v) { return ('0' + clamp(Math.round(v * k), 0, 255).toString(16)).slice(-2); }).join(''); }
+  /* joint rotations in radians [x, y, z]; negative x swings a limb forward */
+  var POSES = {
+    stand: { armL: [0, 0, -.08], armR: [0, 0, .08], elbowL: [-.15, 0, 0], elbowR: [-.15, 0, 0] },
+    work: { armL: [-.55, 0, -.2], armR: [-.55, 0, .2], elbowL: [-.95, 0, 0], elbowR: [-.95, 0, 0], body: [.12, 0, 0], head: [.35, 0, 0] },
+    hold: { armL: [-.3, 0, -.12], armR: [-.3, 0, .12], elbowL: [-1.25, 0, 0], elbowR: [-1.25, 0, 0], head: [.2, 0, 0] },
+    carry: { armL: [0, 0, -.1], armR: [-.15, 0, .12], elbowL: [-.1, 0, 0], elbowR: [-1.4, 0, 0] },
+    sit: { hips: .3, legL: [-1.5, 0, -.04], legR: [-1.5, 0, .04], kneeL: [1.45, 0, 0], kneeR: [1.45, 0, 0], armL: [-.35, 0, -.1], armR: [-.35, 0, .1], elbowL: [-.6, 0, 0], elbowR: [-.6, 0, 0] },
+    wave: { armL: [0, 0, -.08], armR: [0, 0, 2.5], elbowR: [0, 0, .4], elbowL: [-.15, 0, 0] }
+  };
+  function packRamp(r) { return Uint32Array.from(r.map(function (c) { return pack(typeof c === 'string' ? rgb(c) : c); })); }
+
+  /* ---------- materials: a ramp, a texture, a grain ---------- */
+  var RAMPS = {
+    grass: ['#3c5530', '#4f6b36', '#65823f', '#7f984b', '#9cb062', '#bccb86'],
+    water: ['#355f7a', '#44738f', '#5a8ca6', '#78a8bd', '#a3c8d4', '#d6ebee'],
+    paving: ['#77705f', '#8f8874', '#a7a08a', '#bdb69e', '#d2cbb3', '#e6e1cf'],
+    dirt: ['#6e5a43', '#86704f', '#a08861', '#b89f77', '#cdb791'],
+    sand: ['#a08c68', '#b9a47b', '#cdb98e', '#ddcba2', '#ebdcb9'],
+    wood: ['#4a3423', '#64472d', '#80603b', '#9c7a4c', '#b8965f', '#d0b07a'],
+    darkwood: ['#2f2420', '#423128', '#574133', '#6e5440', '#86684f'],
+    thatch: ['#6b5532', '#88703f', '#a58b4f', '#bfa462', '#d6bd7b', '#e8d59c'],
+    stone: ['#5f5c58', '#77736c', '#8f8a80', '#a8a296', '#c1bbad'],
+    leaf: ['#2c4126', '#3d5730', '#52703a', '#6b8a45', '#89a556', '#aac173'],
+    cloth: ['#7a3b30', '#99503c', '#b5664a', '#cc8160', '#dfa07c'],
+    canvas: ['#8b8572', '#a8a28c', '#c3bea6', '#d9d4bd', '#ebe7d4']
+  };
+  var TEX = {
+    plain: function (m, x, y, z) { return (noise(x * 9 + y * 7, z * 9 - y * 5) - .5) * .08 * m.rough; },
+    grass: function (m, x, y, z, al, ac, t, px, py) { return (fbm(x * 1.3, z * 1.3) - .5) * .5 + (noise(x * 6, z * 6) - .5) * .18 + (hash(px, py) - .5) * .34; },
+    dirt: function (m, x, y, z, al, ac, t, px, py) { return (fbm(x * 2.2, z * 2.2) - .5) * .4 + (hash(px, py) - .5) * .22; },
+    sand: function (m, x, y, z, al, ac, t, px, py) { return (fbm(x * 1.7, z * 1.7) - .5) * .24 + (hash(px, py) - .5) * .2; },
+    water: function (m, x, y, z, al, ac, t, px, py) {
+      var ca = Math.cos(t), sa = Math.sin(t), b = fbm(x * .9 + ca * .45, z * 1.4 + sa * .3), r = noise(x * 3.2 + ca * 1.2, z * 6 + sa * .9);
+      return (b - .5) * .55 + (r > .7 ? (r - .7) * 1.4 : 0) - .04;
+    },
+    paving: function (m, x, y, z, al, ac, t, px, py) {
+      var s = m.size, row = Math.floor(z / (s * .78)), off = (row & 1) * s * .5, col = Math.floor((x + off) / s);
+      var fu = (x + off) / s - col, fv = z / (s * .78) - row;
+      if (fu < .1 || fv < .12) return -.36;
+      return (hash(col, row) - .5) * .26 + (noise(x * 7, z * 7) - .5) * .12 + (hash(px, py) - .5) * .08;
+    },
+    wood: function (m, x, y, z, al, ac) {
+      var p = ac / m.plank, i = Math.floor(p), f = p - i;
+      if (f < .14) return -.3;
+      return (hash(i, 7) - .5) * .2 + (noise(al * 1.8 + i * 13.3, f * 3) - .5) * .2 + (noise(al * 12 + i * 7.1, ac * 30) - .5) * .14;
+    },
+    thatch: function (m, x, y, z, al, ac) {
+      var rows = ac / .17, f = rows - Math.floor(rows);
+      return (noise(al * 30 + Math.floor(rows) * 5.3, rows * 1.3) - .5) * .5 + (f < .22 ? -.2 : 0) + (noise(al * 3, ac * 3) - .5) * .12;
+    },
+    stone: function (m, x, y, z, al, ac) {
+      var s = m.size, row = Math.floor(ac / (s * .55)), off = (row & 1) * s * .5, col = Math.floor((al + off) / s);
+      var fu = (al + off) / s - col, fv = ac / (s * .55) - row;
+      if (fu < .08 || fv < .14) return -.3;
+      return (hash(col, row + 3) - .5) * .26 + (noise(al * 9, ac * 9) - .5) * .1;
+    },
+    leaf: function (m, x, y, z, al, ac, t, px, py) { return (fbm(x * 5 + y * 3, z * 5 - y * 4) - .5) * .7 + (hash3(x * 30, z * 30, y * 30) - .5) * .2; },
+    cloth: function (m, x, y, z, al, ac) { return (noise(al * 2.5, ac * 9) - .5) * .14; }
+  };
+  var DEFAULTS = {
+    grass: { ramp: 'grass', tex: 'grass', ground: true, blades: true }, water: { ramp: 'water', tex: 'water', ground: true, water: true },
+    paving: { ramp: 'paving', tex: 'paving', size: .42, ground: true }, dirt: { ramp: 'dirt', tex: 'dirt', ground: true },
+    sand: { ramp: 'sand', tex: 'sand', ground: true },
+    wood: { ramp: 'wood', tex: 'wood', plank: .14, grain: 'x' }, darkwood: { ramp: 'darkwood', tex: 'wood', plank: .12, grain: 'x' },
+    thatch: { ramp: 'thatch', tex: 'thatch', grain: 'x' }, stone: { ramp: 'stone', tex: 'stone', size: .3, grain: 'x' },
+    leaf: { ramp: 'leaf', tex: 'leaf' }, leafLight: { ramp: ['#3d5a2e', '#557638', '#6f9243', '#8cab52', '#aac46a', '#c8d98f'], tex: 'leaf' }, cloth: { ramp: 'cloth', tex: 'cloth' }, canvas: { ramp: 'canvas', tex: 'cloth' }
+  };
+  function makeMaterial(spec, registry) {
+    if (spec && spec.isMaterial) return spec;
+    var key = typeof spec === 'string' ? spec : JSON.stringify(spec);
+    if (registry.cache[key]) return registry.cache[key];
+    var o = typeof spec === 'string' ? (registry.named[spec] || DEFAULTS[spec] || { color: spec }) : spec;
+    if (o.isMaterial) return o;
+    var m = { isMaterial: true, id: registry.list.length, tex: TEX[o.tex || 'plain'], grain: o.grain || 'x', plank: o.plank || .14, size: o.size || .4,
+      rough: o.rough == null ? 1 : o.rough, blades: !!o.blades, dither: o.dither != null ? o.dither : (o.tex && o.tex !== 'plain' ? 1 : .55), stripe: o.stripe || 0, ground: !!o.ground, water: !!o.water, flat: !!o.flat, glow: o.glow || 0, round: o.round != null ? !!o.round : o.tex === 'leaf' };
+    var r = o.ramp ? (typeof o.ramp === 'string' ? RAMPS[o.ramp] : o.ramp) : autoRamp(o.color || '#999999');
+    m.ramp = packRamp(r); m.n = m.ramp.length;
+    if (o.alt) { var ra = typeof o.alt === 'string' && RAMPS[o.alt] ? RAMPS[o.alt] : (Array.isArray(o.alt) ? o.alt : autoRamp(o.alt)); m.alt = packRamp(ra); }
+    registry.list.push(m); registry.cache[key] = m;
+    return m;
+  }
+
+  /* ---------- scene graph ---------- */
+  function V(x, y, z) { this.x = x || 0; this.y = y || 0; this.z = z || 0; }
+  V.prototype.set = function (x, y, z) { this.x = x; this.y = y; this.z = z; return this; };
+  function Node() { this.position = new V(); this.rotation = new V(); this.scale = new V(1, 1, 1); this.children = []; this.visible = true; this.m = new Float64Array(12); this.parent = null; this.geo = null; }
+  Node.prototype.add = function (c) { if (c.parent) { var i = c.parent.children.indexOf(c); if (i >= 0) c.parent.children.splice(i, 1); } c.parent = this; this.children.push(c); return this; };
+  /* world matrix, 3 x 4 row-major: R = Ry . Rx . Rz, then scale */
+  function compose(n, pm) {
+    var r = n.rotation, s = n.scale, p = n.position;
+    var cy = Math.cos(r.y), sy = Math.sin(r.y), cx = Math.cos(r.x), sx = Math.sin(r.x), cz = Math.cos(r.z), sz = Math.sin(r.z);
+    var a = cy * cz + sy * sx * sz, b = -cy * sz + sy * sx * cz, c = sy * cx;
+    var d = cx * sz, e = cx * cz, f = -sx;
+    var g = -sy * cz + cy * sx * sz, h = sy * sz + cy * sx * cz, k = cy * cx;
+    var L = [a * s.x, b * s.y, c * s.z, p.x, d * s.x, e * s.y, f * s.z, p.y, g * s.x, h * s.y, k * s.z, p.z], m = n.m;
+    if (!pm) { for (var i = 0; i < 12; i++) m[i] = L[i]; return; }
+    for (var row = 0; row < 3; row++) {
+      var o = row * 4;
+      m[o] = pm[o] * L[0] + pm[o + 1] * L[4] + pm[o + 2] * L[8];
+      m[o + 1] = pm[o] * L[1] + pm[o + 1] * L[5] + pm[o + 2] * L[9];
+      m[o + 2] = pm[o] * L[2] + pm[o + 1] * L[6] + pm[o + 2] * L[10];
+      m[o + 3] = pm[o] * L[3] + pm[o + 1] * L[7] + pm[o + 2] * L[11] + pm[o + 3];
+    }
+  }
+  Node.prototype.worldPoint = function (x, y, z) { var m = this.m; return [m[0] * x + m[1] * y + m[2] * z + m[3], m[4] * x + m[5] * y + m[6] * z + m[7], m[8] * x + m[9] * y + m[10] * z + m[11]]; };
+
+  /* geometries: local vertices, triangles, a centre (every solid is convex, so normals are flipped away from it) */
+  function geoBox(w, h, d) {
+    var x = w / 2, y = h / 2, z = d / 2, v = [], t = [0, 1, 3, 0, 3, 2, 4, 6, 7, 4, 7, 5, 0, 4, 5, 0, 5, 1, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 5, 7, 1, 7, 3];
+    for (var i = 0; i < 8; i++) v.push(i & 4 ? x : -x, i & 2 ? y : -y, i & 1 ? z : -z);
+    return { v: v, t: t, c: [0, 0, 0] };
+  }
+  function geoCyl(rt, rb, h, seg) {
+    var v = [], t = [], n = seg, i;
+    for (i = 0; i < n; i++) { var a = i / n * TAU + Math.PI / n; v.push(Math.cos(a) * rb, -h / 2, Math.sin(a) * rb, Math.cos(a) * rt, h / 2, Math.sin(a) * rt); }
+    v.push(0, -h / 2, 0, 0, h / 2, 0);
+    var B = 2 * n, T = 2 * n + 1;
+    for (i = 0; i < n; i++) { var j = (i + 1) % n; t.push(2 * i, 2 * j, 2 * j + 1, 2 * i, 2 * j + 1, 2 * i + 1, B, 2 * i, 2 * j); if (rt > 0) t.push(T, 2 * i + 1, 2 * j + 1); }
+    return { v: v, t: t, c: [0, rt > 0 ? 0 : -h / 4, 0] };
+  }
+  function geoBall(r, seg) {
+    var v = [], t = [], rings = Math.max(3, Math.round(seg * .6)), i, j;
+    v.push(0, r, 0);
+    for (i = 1; i < rings; i++) { var p = i / rings * Math.PI; for (j = 0; j < seg; j++) { var a = j / seg * TAU; v.push(Math.sin(p) * Math.cos(a) * r, Math.cos(p) * r, Math.sin(p) * Math.sin(a) * r); } }
+    v.push(0, -r, 0);
+    var last = v.length / 3 - 1;
+    for (j = 0; j < seg; j++) { var k = (j + 1) % seg; t.push(0, 1 + j, 1 + k); t.push(last, 1 + (rings - 2) * seg + j, 1 + (rings - 2) * seg + k); }
+    for (i = 0; i < rings - 2; i++) for (j = 0; j < seg; j++) { var k2 = (j + 1) % seg, a0 = 1 + i * seg + j, a1 = 1 + i * seg + k2, b0 = a0 + seg, b1 = a1 + seg; t.push(a0, b0, b1, a0, b1, a1); }
+    return { v: v, t: t, c: [0, 0, 0] };
+  }
+  function geoWedge(w, h, d) {
+    var x = w / 2, z = d / 2;
+    return { v: [-x, 0, -z, -x, 0, z, -x, h, 0, x, 0, -z, x, 0, z, x, h, 0], t: [0, 1, 2, 3, 5, 4, 0, 3, 4, 0, 4, 1, 0, 2, 5, 0, 5, 3, 1, 4, 5, 1, 5, 2], c: [0, h / 3, 0] };
+  }
+
+  /* ---------- the toolkit ---------- */
+  function toolkit(root, registry) {
+    function place(node, x, y, z, parent) { node.position.set(x || 0, y || 0, z || 0); (parent || root).add(node); return node; }
+    function solid(g, mat, x, y, z, parent) { var n = new Node(); n.geo = g; n.mat = makeMaterial(mat, registry); return place(n, x, y, z, parent); }
+    var P = {
+      clamp: clamp, lerp: lerp, smooth: smooth, phase: phase, wave: wave, pulse: pulse, noise: noise, fbm: fbm, hash: hash, TAU: TAU,
+      mat: function (s) { return makeMaterial(s, registry); },
+      update: function () { (function walk(n, pm) { compose(n, pm); for (var i = 0; i < n.children.length; i++) walk(n.children[i], n.m); })(root, null); },
+      group: function (x, y, z, parent) { return place(new Node(), x, y, z, parent); },
+      box: function (w, h, d, mat, x, y, z, parent) { return solid(geoBox(w, h, d), mat, x, y, z, parent); },
+      cyl: function (rt, rb, h, mat, x, y, z, parent, seg) { return solid(geoCyl(rt, rb, h, seg || 10), mat, x, y, z, parent); },
+      cone: function (r, h, mat, x, y, z, parent, seg) { return solid(geoCyl(0, r, h, seg || 10), mat, x, y, z, parent); },
+      ball: function (r, mat, x, y, z, parent, seg) { return solid(geoBall(r, seg || 8), mat, x, y, z, parent); },
+      wedge: function (w, h, d, mat, x, y, z, parent) { return solid(geoWedge(w, h, d), mat, x, y, z, parent); },
+      line: function (points, mat, parent) { var n = new Node(); n.line = points; n.mat = makeMaterial(mat, registry); return place(n, 0, 0, 0, parent); },
+      person: function (x, z, parent, o) {
+        o = o || {}; var k = o.h || 1.3, root2 = P.group(x, 0, z, parent); root2.rotation.y = o.yaw || 0;
+        var shirt = o.shirt || '#a8644c', pants = o.pants || '#3f4a5a', skin = o.skin || '#e0b08a', sleeve = o.sleeve || shade(shirt, .8), shoes = o.shoes || '#2b2624';
+        var hips = P.group(0, .36 * k, 0, root2), legs = [], knees = [];
+        [-1, 1].forEach(function (sd) {
+          var leg = P.group(sd * .055 * k, 0, 0, hips); P.box(.09 * k, .19 * k, .11 * k, pants, 0, -.095 * k, 0, leg);
+          var knee = P.group(0, -.18 * k, 0, leg); P.box(.08 * k, .17 * k, .1 * k, pants, 0, -.085 * k, 0, knee);
+          P.box(.09 * k, .05 * k, .15 * k, shoes, 0, -.165 * k, .025 * k, knee); legs.push(leg); knees.push(knee);
+        });
+        var body = P.group(0, 0, 0, hips);
+        P.box(.25 * k, .31 * k, .15 * k, shirt, 0, .165 * k, 0, body);
+        var head = P.group(0, .32 * k, 0, body);
+        P.box(.07 * k, .04 * k, .07 * k, skin, 0, .02 * k, 0, head);
+        P.box(.18 * k, .17 * k, .17 * k, skin, 0, .125 * k, 0, head);
+        var hair = o.hair || '#3b2a20';
+        if (o.hair !== false) { P.box(.19 * k, .06 * k, .18 * k, hair, 0, .22 * k, -.01 * k, head); P.box(.19 * k, .12 * k, .05 * k, hair, 0, .15 * k, -.07 * k, head); }
+        if (o.hat) { P.cyl(.17 * k, .17 * k, .025 * k, o.hat, 0, .235 * k, 0, head, 10); P.cyl(.095 * k, .1 * k, .08 * k, o.hat, 0, .28 * k, 0, head, 8); }
+        var arms = [], elbows = [], hands = [];
+        [-1, 1].forEach(function (sd) {
+          var arm = P.group(sd * .165 * k, .29 * k, 0, body); P.box(.07 * k, .15 * k, .08 * k, sleeve, 0, -.07 * k, 0, arm);
+          var elbow = P.group(0, -.145 * k, 0, arm); P.box(.065 * k, .13 * k, .07 * k, o.bare ? skin : sleeve, 0, -.06 * k, 0, elbow);
+          var hand = P.group(0, -.14 * k, 0, elbow); P.box(.075 * k, .065 * k, .075 * k, skin, 0, 0, 0, hand);
+          arms.push(arm); elbows.push(elbow); hands.push(hand);
+        });
+        return { root: root2, hips: hips, body: body, head: head, armL: arms[0], armR: arms[1], elbowL: elbows[0], elbowR: elbows[1], handL: hands[0], handR: hands[1],
+          legL: legs[0], legR: legs[1], kneeL: knees[0], kneeR: knees[1], k: k };
+      },
+      /* a clear pose for an action; every joint is set, so a tick can call it and then add its own motion on top */
+      pose: function (p, name, s) {
+        s = s == null ? 1 : s; var J = POSES[name] || POSES.stand, k = p.k;
+        ['armL', 'armR', 'elbowL', 'elbowR', 'legL', 'legR', 'kneeL', 'kneeR', 'body', 'head'].forEach(function (j) { var v = J[j] || [0, 0, 0]; p[j].rotation.set(v[0] * s, v[1] * s, v[2] * s); });
+        p.hips.position.y = (J.hips == null ? .36 : J.hips) * k;
+        return p;
+      },
+      tree: function (x, z, parent, o) {
+        o = o || {}; var r = o.r || .7, h = o.h || r * 1.5, g = P.group(x, 0, z, parent), m = o.mat || 'leaf', seed = o.seed || (x * 7 + z * 13);
+        g.rotation.y = o.yaw || 0;
+        P.cyl(r * .11, r * .16, h, o.trunk || 'darkwood', 0, h / 2, 0, g, 7);
+        P.cyl(r * .05, r * .07, r * .6, o.trunk || 'darkwood', r * .25, h * .82, 0, g, 5).rotation.z = -.7;
+        var n = o.clusters || 11;
+        for (var i = 0; i < n; i++) {
+          var a = i * 2.39996 + seed, f = i / (n - 1), rr = r * (.42 + .22 * hash(i, seed | 0)), ring = r * .62 * Math.sin(Math.PI * (.25 + f * .6));
+          P.ball(rr, m, Math.cos(a) * ring, h + r * (.15 + f * .9), Math.sin(a) * ring, g, 7).scale.y = .82;
+        }
+        return g;
+      },
+      bush: function (x, z, parent, o) {
+        o = o || {}; var r = o.r || .35, g = P.group(x, 0, z, parent), m = o.mat || 'leaf', n = o.clusters || 5;
+        for (var i = 0; i < n; i++) { var a = i * 2.39996 + x, d = i ? r * .55 : 0; P.ball(r * (i ? .62 : .8), m, Math.cos(a) * d, r * (i ? .45 : .62), Math.sin(a) * d, g, 7).scale.y = .8; }
+        if (o.flowers) for (var j = 0; j < 7; j++) { var b = j * 2.1 + z; P.box(r * .14, r * .14, r * .14, o.flowers, Math.cos(b) * r * .62, r * (.75 + .3 * hash(j, 3)), Math.sin(b) * r * .62, g); }
+        return g;
+      }
+    };
+    return P;
+  }
+
+  /* ---------- the renderer ---------- */
+  function mount(spec, canvas, opts) {
+    opts = opts || {};
+    var W = spec.width || 320, H = spec.height || 240, N = W * H;
+    canvas.width = W; canvas.height = H;
+    var g2 = canvas.getContext('2d'), img = g2.createImageData(W, H), out = new Uint32Array(img.data.buffer);
+    var registry = { list: [], cache: {}, named: {} };
+    Object.keys(spec.materials || {}).forEach(function (k) { registry.named[k] = spec.materials[k]; });
+    var root = new Node(), P = toolkit(root, registry);
+    var parts = spec.build(P) || {};
+
+    /* camera basis: c points from the scene to the camera, r to screen right, u to screen up */
+    var cam = spec.camera || {}, az = (cam.az == null ? 45 : cam.az) * DEG, el = (cam.el == null ? 30 : cam.el) * DEG;
+    var C = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)], R = [Math.cos(az), 0, -Math.sin(az)], U = [-Math.sin(az) * Math.sin(el), Math.cos(el), -Math.cos(az) * Math.sin(el)];
+    var sun = spec.sun || {}, saz = (sun.az == null ? -40 : sun.az) * DEG, sel = (sun.el == null ? 48 : sun.el) * DEG, AMB = sun.ambient == null ? .34 : sun.ambient;
+    var L = [Math.sin(saz) * Math.cos(sel), Math.sin(sel), Math.cos(saz) * Math.cos(sel)], LR = [Math.cos(saz), 0, -Math.sin(saz)], LU = [-Math.sin(saz) * Math.sin(sel), Math.cos(sel), -Math.cos(saz) * Math.sin(sel)];
+    var dot = function (a, x, y, z) { return a[0] * x + a[1] * y + a[2] * z; };
+    var gr = spec.ground || { rx: 4, rz: 3 }, RX = gr.rx || 4, RZ = gr.rz || 3, TOP = cam.height || 3;
+
+    /* fit: the ground's box and the scene's height into the frame */
+    var corners = [];
+    for (var ca = 0; ca < 48; ca++) { var an = ca / 48 * TAU; corners.push([Math.cos(an) * RX, 0, Math.sin(an) * RZ], [Math.cos(an) * RX * .8, TOP, Math.sin(an) * RZ * .8]); }
+    var minA = 1e9, maxA = -1e9, minB = 1e9, maxB = -1e9;
+    corners.forEach(function (p) { var a = dot(R, p[0], p[1], p[2]), b = dot(U, p[0], p[1], p[2]); minA = Math.min(minA, a); maxA = Math.max(maxA, a); minB = Math.min(minB, b); maxB = Math.max(maxB, b); });
+    var S = cam.scale || Math.min((W - 10) / (maxA - minA), (H - 10) / (maxB - minB));
+    var T = cam.target || [0, 0, 0], OA = cam.target ? dot(R, T[0], T[1], T[2]) : (minA + maxA) / 2, OB = cam.target ? dot(U, T[0], T[1], T[2]) : (minB + maxB) / 2;
+    var CX = W / 2, CY = H / 2;
+
+    /* shadow map over the same box, seen from the sun */
+    var SM = 512, smin = [1e9, 1e9], smax = [-1e9, -1e9];
+    corners.forEach(function (p) { var a = dot(LR, p[0], p[1], p[2]), b = dot(LU, p[0], p[1], p[2]); smin[0] = Math.min(smin[0], a); smax[0] = Math.max(smax[0], a); smin[1] = Math.min(smin[1], b); smax[1] = Math.max(smax[1], b); });
+    var SS = (SM - 4) / Math.max(smax[0] - smin[0], smax[1] - smin[1]), shadow = new Float32Array(SM * SM);
+    /* a top-down height map of the solids: where something stands close above the ground, the ground darkens (contact shadow) */
+    var HMS = 160, HK = (HMS - 2) / (2 * Math.max(RX, RZ) + 1), hmap = new Float32Array(HMS * HMS), HOFF = Math.max(RX, RZ) + .5;
+
+    /* the ground, per screen pixel, once: where the pixel's ray meets y = 0, its zone and whether it survives the dissolve */
+    var gx = new Float32Array(N), gz = new Float32Array(N), gdep = new Float32Array(N), gmat = new Int16Array(N), gfade = new Float32Array(N);
+    var wob = gr.wobble == null ? .3 : gr.wobble, fade = gr.fade == null ? .45 : gr.fade, zone = gr.zone || function () { return 'grass'; };
+    for (var py = 0; py < H; py++) for (var px = 0; px < W; px++) {
+      var i = py * W + px, a = (px + .5 - CX) / S + OA, b = (CY - py - .5) / S + OB;
+      var k = -(U[1] * b) / C[1], wx = R[0] * a + U[0] * b + C[0] * k, wz = R[2] * a + U[2] * b + C[2] * k;
+      gx[i] = wx; gz[i] = wz; gdep[i] = dot(C, wx, 0, wz);
+      var d = Math.sqrt(wx * wx / (RX * RX) + wz * wz / (RZ * RZ)), edge = (1 - d) * Math.min(RX, RZ) + wob * (fbm(wx * .55 + 3, wz * .55 - 7) - .5) * 2.4 + (noise(wx * 3, wz * 3) - .5) * .25;
+      var al = clamp(edge / fade, 0, 1);
+      if (al <= BAYER[(py & 7) * 8 + (px & 7)] * .999 || al <= 0) { gmat[i] = -1; continue; }
+      gfade[i] = 1 - al;
+      var zm = makeMaterial(zone(wx, wz, P), registry); gmat[i] = zm.id;
+    }
+
+    /* per-frame buffers */
+    var depth = new Float32Array(N), tri = new Int32Array(N), wX = new Float32Array(N), wY = new Float32Array(N), wZ = new Float32Array(N), idx = new Int8Array(N), mid = new Int16Array(N);
+    var triN = [], triMat = [], triD = [], triHot = [], triC = [], solids = [], lines = [], stats = { tris: 0, lines: 0, ms: 0, frames: 0, msSum: 0 };
+    function collect() { solids.length = 0; lines.length = 0; (function walk(n, pm, h) { if (!n.visible) return; compose(n, pm); if (n._hot != null) h = n._hot; n._h = h; if (n.geo) solids.push(n); if (n.line) lines.push(n); for (var i = 0; i < n.children.length; i++) walk(n.children[i], n.m, h); })(root, null, -1); }
+
+    var vx = new Float64Array(4096), vy = new Float64Array(4096), vz = new Float64Array(4096);
+    function rasterShadow(ax, ay, az2, bx, by, bz, cx, cy, cz) {
+      var x0 = (dot(LR, ax, ay, az2) - smin[0]) * SS + 2, y0 = (smax[1] - dot(LU, ax, ay, az2)) * SS + 2, d0 = dot(L, ax, ay, az2);
+      var x1 = (dot(LR, bx, by, bz) - smin[0]) * SS + 2, y1 = (smax[1] - dot(LU, bx, by, bz)) * SS + 2, d1 = dot(L, bx, by, bz);
+      var x2 = (dot(LR, cx, cy, cz) - smin[0]) * SS + 2, y2 = (smax[1] - dot(LU, cx, cy, cz)) * SS + 2, d2 = dot(L, cx, cy, cz);
+      var area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0); if (Math.abs(area) < 1e-9) return;
+      var mnx = Math.max(0, Math.floor(Math.min(x0, x1, x2))), mxx = Math.min(SM - 1, Math.ceil(Math.max(x0, x1, x2))), mny = Math.max(0, Math.floor(Math.min(y0, y1, y2))), mxy = Math.min(SM - 1, Math.ceil(Math.max(y0, y1, y2)));
+      var inv = 1 / area;
+      for (var y = mny; y <= mxy; y++) for (var x = mnx; x <= mxx; x++) {
+        var qx = x + .5, qy = y + .5;
+        var w0 = ((x1 - qx) * (y2 - qy) - (x2 - qx) * (y1 - qy)) * inv, w1 = ((x2 - qx) * (y0 - qy) - (x0 - qx) * (y2 - qy)) * inv, w2 = 1 - w0 - w1;
+        if (w0 < -.001 || w1 < -.001 || w2 < -.001) continue;
+        var dd = w0 * d0 + w1 * d1 + w2 * d2, j = y * SM + x; if (dd > shadow[j]) shadow[j] = dd;
+      }
+    }
+    function rasterMain(id, ax, ay, az2, bx, by, bz, cx, cy, cz) {
+      var x0 = (dot(R, ax, ay, az2) - OA) * S + CX, y0 = (OB - dot(U, ax, ay, az2)) * S + CY;
+      var x1 = (dot(R, bx, by, bz) - OA) * S + CX, y1 = (OB - dot(U, bx, by, bz)) * S + CY;
+      var x2 = (dot(R, cx, cy, cz) - OA) * S + CX, y2 = (OB - dot(U, cx, cy, cz)) * S + CY;
+      var area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0); if (Math.abs(area) < 1e-9) return;
+      var d0 = dot(C, ax, ay, az2), d1 = dot(C, bx, by, bz), d2 = dot(C, cx, cy, cz);
+      var mnx = Math.max(0, Math.floor(Math.min(x0, x1, x2))), mxx = Math.min(W - 1, Math.ceil(Math.max(x0, x1, x2))), mny = Math.max(0, Math.floor(Math.min(y0, y1, y2))), mxy = Math.min(H - 1, Math.ceil(Math.max(y0, y1, y2)));
+      var inv = 1 / area;
+      for (var y = mny; y <= mxy; y++) for (var x = mnx; x <= mxx; x++) {
+        var qx = x + .5, qy = y + .5;
+        var w0 = ((x1 - qx) * (y2 - qy) - (x2 - qx) * (y1 - qy)) * inv, w1 = ((x2 - qx) * (y0 - qy) - (x0 - qx) * (y2 - qy)) * inv, w2 = 1 - w0 - w1;
+        if (w0 < -.0001 || w1 < -.0001 || w2 < -.0001) continue;
+        var dd = w0 * d0 + w1 * d1 + w2 * d2, j = y * W + x;
+        if (dd <= depth[j]) continue;
+        depth[j] = dd; tri[j] = id; wX[j] = w0 * ax + w1 * bx + w2 * cx; wY[j] = w0 * ay + w1 * by + w2 * cy; wZ[j] = w0 * az2 + w1 * bz + w2 * cz;
+      }
+    }
+    function rasterTop(ax, ay, az2, bx, by, bz, cx, cy, cz) {
+      var x0 = (ax + HOFF) * HK, y0 = (az2 + HOFF) * HK, x1 = (bx + HOFF) * HK, y1 = (bz + HOFF) * HK, x2 = (cx + HOFF) * HK, y2 = (cz + HOFF) * HK;
+      var area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0); if (Math.abs(area) < 1e-9) return;
+      var mnx = Math.max(0, Math.floor(Math.min(x0, x1, x2))), mxx = Math.min(HMS - 1, Math.ceil(Math.max(x0, x1, x2))), mny = Math.max(0, Math.floor(Math.min(y0, y1, y2))), mxy = Math.min(HMS - 1, Math.ceil(Math.max(y0, y1, y2)));
+      var inv = 1 / area;
+      for (var y = mny; y <= mxy; y++) for (var x = mnx; x <= mxx; x++) {
+        var qx = x + .5, qy = y + .5;
+        var w0 = ((x1 - qx) * (y2 - qy) - (x2 - qx) * (y1 - qy)) * inv, w1 = ((x2 - qx) * (y0 - qy) - (x0 - qx) * (y2 - qy)) * inv, w2 = 1 - w0 - w1;
+        if (w0 < -.02 || w1 < -.02 || w2 < -.02) continue;
+        var hh = Math.min(ay, by, cy), j = y * HMS + x; if (hh < hmap[j] || hmap[j] === 0) hmap[j] = Math.max(hh, .001);
+      }
+    }
+    var AO = [[0, 0], [.16, 0], [-.16, 0], [0, .16], [0, -.16], [.3, .2], [-.3, -.2], [.2, -.3], [-.2, .3]];
+    function occl(x, z) {
+      var o = 0;
+      for (var k = 0; k < AO.length; k++) {
+        var u = Math.floor((x + AO[k][0] + HOFF) * HK), v = Math.floor((z + AO[k][1] + HOFF) * HK);
+        if (u < 0 || v < 0 || u >= HMS || v >= HMS) continue;
+        var h = hmap[v * HMS + u]; if (h > 0 && h < .5) o += (k < 5 ? 1.2 : .7) * (1 - h * 1.6);
+      }
+      return Math.min(1, o / 7);
+    }
+    function lit(x, y, z) {
+      var u = (dot(LR, x, y, z) - smin[0]) * SS + 2, v = (smax[1] - dot(LU, x, y, z)) * SS + 2, d = dot(L, x, y, z) + .035, s = 0;
+      var iu = Math.floor(u - .5), iv = Math.floor(v - .5);
+      for (var oy = 0; oy < 2; oy++) for (var ox = 0; ox < 2; ox++) { var uu = clamp(iu + ox, 0, SM - 1), vv = clamp(iv + oy, 0, SM - 1); if (shadow[vv * SM + uu] <= d) s += .25; }
+      return s;
+    }
+
+    function renderAt(t) {
+      var t0 = performance.now(), dur = spec.duration || 6;
+      ctx.dt = lastT == null ? 0 : clamp(t - lastT, 0, .1); lastT = t; ctx.t = t; ctx.q = phase(t, dur);
+      ctx.hover = hoverIdx >= 0 ? hot[hoverIdx] : null; ctx.active = activeIdx >= 0 ? hot[activeIdx] : null; ctx.read = '';
+      if (spec.tick) spec.tick(ctx);
+      if (opts.onRead) { var line = ctx.hover && ctx.hover.name ? ctx.hover.name : ctx.read || ''; if (line !== lastRead) { lastRead = line; opts.onRead(line); } }
+      collect();
+      depth.fill(-1e9); tri.fill(-1); shadow.fill(-1e9); hmap.fill(0);
+      triN.length = 0; triMat.length = 0; triD.length = 0; triHot.length = 0; triC.length = 0;
+      var id = 0, s, k, n;
+      for (s = 0; s < solids.length; s++) {
+        var node = solids[s], g = node.geo, m = node.m, nv = g.v.length / 3;
+        for (k = 0; k < nv; k++) { var lx = g.v[k * 3], ly = g.v[k * 3 + 1], lz = g.v[k * 3 + 2]; vx[k] = m[0] * lx + m[1] * ly + m[2] * lz + m[3]; vy[k] = m[4] * lx + m[5] * ly + m[6] * lz + m[7]; vz[k] = m[8] * lx + m[9] * ly + m[10] * lz + m[11]; }
+        var c = node.worldPoint(g.c[0], g.c[1], g.c[2]);
+        for (k = 0; k < g.t.length; k += 3) {
+          var a = g.t[k], b = g.t[k + 1], e = g.t[k + 2];
+          var ux = vx[b] - vx[a], uy = vy[b] - vy[a], uz = vz[b] - vz[a], wx2 = vx[e] - vx[a], wy2 = vy[e] - vy[a], wz2 = vz[e] - vz[a];
+          var nx = uy * wz2 - uz * wy2, ny = uz * wx2 - ux * wz2, nz = ux * wy2 - uy * wx2, nl = Math.sqrt(nx * nx + ny * ny + nz * nz); if (nl < 1e-12) continue;
+          nx /= nl; ny /= nl; nz /= nl;
+          var mx = (vx[a] + vx[b] + vx[e]) / 3 - c[0], my = (vy[a] + vy[b] + vy[e]) / 3 - c[1], mz = (vz[a] + vz[b] + vz[e]) / 3 - c[2];
+          if (nx * mx + ny * my + nz * mz < 0) { nx = -nx; ny = -ny; nz = -nz; }
+          var nd = dot(L, nx, ny, nz);
+          if (nd > 0 || node.mat.flat) rasterShadow(vx[a], vy[a], vz[a], vx[b], vy[b], vz[b], vx[e], vy[e], vz[e]);
+          if (ny < -.3) rasterTop(vx[a], vy[a], vz[a], vx[b], vy[b], vz[b], vx[e], vy[e], vz[e]);
+          if (dot(C, nx, ny, nz) <= 0) continue;
+          triN.push(nx, ny, nz); triMat.push(node.mat.id); triD.push(Math.max(0, nd)); triHot.push(node._h); triC.push(c[0], c[1], c[2]);
+          rasterMain(id++, vx[a], vy[a], vz[a], vx[b], vy[b], vz[b], vx[e], vy[e], vz[e]);
+        }
+      }
+      stats.tris = id;
+      /* lines: 1 px, depth tested, shaded as if they faced up */
+      for (s = 0; s < lines.length; s++) {
+        var ln = lines[s], pts = ln.line, lid = id++;
+        triN.push(0, 1, 0); triMat.push(ln.mat.id); triD.push(Math.max(0, L[1])); triHot.push(ln._h); triC.push(0, 0, 0);
+        for (n = 0; n < pts.length - 1; n++) {
+          var p0 = ln.worldPoint(pts[n][0], pts[n][1], pts[n][2]), p1 = ln.worldPoint(pts[n + 1][0], pts[n + 1][1], pts[n + 1][2]);
+          var sx0 = (dot(R, p0[0], p0[1], p0[2]) - OA) * S + CX, sy0 = (OB - dot(U, p0[0], p0[1], p0[2])) * S + CY, sx1 = (dot(R, p1[0], p1[1], p1[2]) - OA) * S + CX, sy1 = (OB - dot(U, p1[0], p1[1], p1[2])) * S + CY;
+          var steps = Math.max(1, Math.ceil(Math.max(Math.abs(sx1 - sx0), Math.abs(sy1 - sy0))));
+          for (k = 0; k <= steps; k++) {
+            var f = k / steps, X = Math.floor(lerp(sx0, sx1, f)), Y = Math.floor(lerp(sy0, sy1, f)); if (X < 0 || Y < 0 || X >= W || Y >= H) continue;
+            var qx = lerp(p0[0], p1[0], f), qy = lerp(p0[1], p1[1], f), qz = lerp(p0[2], p1[2], f), dd = dot(C, qx, qy, qz) + .02, j = Y * W + X;
+            if (dd <= depth[j]) continue; depth[j] = dd; tri[j] = lid; wX[j] = qx; wY[j] = qy; wZ[j] = qz;
+          }
+        }
+      }
+      shade(ctx.q * TAU, Math.floor(ctx.q * dur * 3));
+      g2.putImageData(img, 0, 0);
+      stats.ms = performance.now() - t0; stats.msSum += stats.ms; stats.frames++;
+      return stats.ms;
+    }
+
+    var mats = registry.list, outline = spec.outline !== false;
+    /* textures take the loop's angle (0..2 pi), not seconds, so water comes back to where it started; tick is the sparkle step */
+    function shade(t, tick) {
+      var i, px, py;
+      for (py = 0; py < H; py++) for (px = 0; px < W; px++) {
+        i = py * W + px;
+        var id = tri[i], b = BAYER[(py & 7) * 8 + (px & 7)], m, x, y, z, nx, ny, nz, nd, tone, extra = 0;
+        if (id < 0 || gdep[i] > depth[i] && gmat[i] >= 0) {
+          if (gmat[i] < 0) { mid[i] = -1; continue; }
+          m = mats[gmat[i]]; x = gx[i]; y = 0; z = gz[i]; nx = 0; ny = 1; nz = 0; nd = Math.max(0, L[1]); tri[i] = -1; depth[i] = gdep[i];
+          extra = gfade[i] * .45 - occl(x, z) * .32;
+          if (m.blades && hash(px, py + 1) > .955 && !(hash(px, py) > .955)) extra += .22;
+          else if (m.blades && hash(px, py) > .955) extra -= .1;
+        } else {
+          m = mats[triMat[id]]; x = wX[i]; y = wY[i]; z = wZ[i]; nx = triN[id * 3]; ny = triN[id * 3 + 1]; nz = triN[id * 3 + 2]; nd = triD[id];
+          if (m.round) { var rx = x - triC[id * 3], ry = y - triC[id * 3 + 1], rz = z - triC[id * 3 + 2], rl = Math.sqrt(rx * rx + ry * ry + rz * rz) || 1; nx = rx / rl; ny = ry / rl; nz = rz / rl; nd = Math.max(0, dot(L, nx, ny, nz)); }
+        }
+        var l = AMB + (1 - AMB) * nd * (nd > 0 ? lit(x, y, z) : 0) + .08 * ny;
+        if (m.glow) l = Math.max(l, m.glow);
+        /* planar coordinates of the face, then along/across the grain */
+        var ax2 = Math.abs(nx), ay2 = Math.abs(ny), az2 = Math.abs(nz), u, v, au, av;
+        if (ay2 >= ax2 && ay2 >= az2) { u = x; v = z; au = 'x'; av = 'z'; } else if (ax2 >= az2) { u = z; v = y; au = 'z'; av = 'y'; } else { u = x; v = y; au = 'x'; av = 'y'; }
+        var along = u, across = v;
+        if (m.grain === av) { along = v; across = u; }
+        tone = .08 + .84 * l + m.tex(m, x, y, z, along, across, t, px, py) + extra;
+        var ramp = m.alt && m.stripe && (Math.floor(along / m.stripe) & 1) ? m.alt : m.ramp, nR = ramp.length;
+        var f = tone * (nR - 1) + (b - .5) * m.dither, k = Math.floor(f + .5);
+        if (m.water && hash3(px, py, tick) > .993 && tone > .7) k = nR - 1;
+        idx[i] = k < 0 ? 0 : k >= nR ? nR - 1 : k; mid[i] = m.id * 2 + (ramp === m.alt ? 1 : 0);
+      }
+      /* silhouettes: a solid pixel whose neighbour is far behind it, or the page, steps one shade darker */
+      for (py = 0; py < H; py++) for (px = 0; px < W; px++) {
+        i = py * W + px;
+        if (mid[i] < 0) { out[i] = 0xffffffff; continue; }
+        var mm = mats[mid[i] >> 1], rr = mid[i] & 1 ? mm.alt : mm.ramp, kk = idx[i];
+        if (outline && tri[i] >= 0) {
+          var dz = depth[i], far = .18;
+          if ((px > 0 && (mid[i - 1] < 0 || dz - depth[i - 1] > far)) || (px < W - 1 && (mid[i + 1] < 0 || dz - depth[i + 1] > far)) || (py > 0 && (mid[i - W] < 0 || dz - depth[i - W] > far)) || (py < H - 1 && (mid[i + W] < 0 || dz - depth[i + W] > far))) kk = Math.max(0, kk - 1);
+        }
+        if (hoverIdx >= 0 && tri[i] >= 0 && triHot[tri[i]] === hoverIdx) kk = Math.min(rr.length - 1, kk + 1);
+        out[i] = rr[kk];
+      }
+    }
+
+    /* ---------- the pointer: the hot group under a pixel lights one shade, a press answers ---------- */
+    var hot = parts.hot || [], hoverIdx = -1, activeIdx = -1, lastT = null, lastRead = null, ctx = { parts: parts, P: P, pointer: { x: 0, y: 0, inside: false }, hover: null, pressed: null, pressedAt: -1, active: null, read: '' };
+    hot.forEach(function (g, i) { g._hot = i; });
+    function pick(px, py) { if (px < 0 || py < 0 || px >= W || py >= H) return -1; var id = tri[py * W + px]; return id >= 0 ? triHot[id] : -1; }
+    function point(nx, ny, down) {
+      var px = Math.floor((nx + 1) / 2 * W), py = Math.floor((ny + 1) / 2 * H), h = pick(px, py);
+      ctx.pointer.x = nx; ctx.pointer.y = ny; ctx.pointer.inside = true;
+      var changed = h !== hoverIdx; hoverIdx = h;
+      if (down) { ctx.pressed = h >= 0 ? hot[h] : null; ctx.pressedAt = ctx.t; activeIdx = h >= 0 && h !== activeIdx ? h : -1; changed = true; }
+      if (changed && !running) renderAt(ctx.t || spec.still || 0);
+      return h >= 0 ? hot[h] : null;
+    }
+    function norm(e) { var r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * 2 - 1, (e.clientY - r.top) / r.height * 2 - 1]; }
+    var onMove = function (e) { var q = norm(e); point(q[0], q[1], false); canvas.style.cursor = hoverIdx >= 0 ? 'pointer' : ''; };
+    var onDown = function (e) { var q = norm(e); point(q[0], q[1], true); };
+    var onLeave = function () { ctx.pointer.inside = false; if (hoverIdx >= 0) { hoverIdx = -1; if (!running) renderAt(ctx.t); } };
+    canvas.addEventListener('pointermove', onMove); canvas.addEventListener('pointerdown', onDown); canvas.addEventListener('pointerleave', onLeave);
+
+    /* ---------- the clock: absolute time, a frame cap, asleep offscreen or hidden, still under reduced motion ---------- */
+    var raf = 0, running = false, start = 0, lastDraw = -1e9, cap = spec.fps == null ? 24 : spec.fps, visible = true, onscreen = true;
+    var reduced = opts.reduced != null ? opts.reduced : (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
+    function frame(now) {
+      raf = requestAnimationFrame(frame);
+      if (cap) { var iv = 1000 / cap; if (now - lastDraw < iv - 1) return; lastDraw = now - lastDraw > iv * 3 ? now : lastDraw + iv; }
+      renderAt((now - start) / 1000);
+    }
+    function sync() {
+      var want = !reduced && !opts.still && visible && onscreen;
+      if (want && !running) { running = true; if (!start) start = performance.now() - (spec.still || 0) * 1000; raf = requestAnimationFrame(frame); }
+      else if (!want && running) { running = false; cancelAnimationFrame(raf); }
+    }
+    var io = typeof IntersectionObserver === 'function' ? new IntersectionObserver(function (es) { onscreen = es[es.length - 1].isIntersecting; sync(); }) : null;
+    if (io) io.observe(canvas);
+    var onVis = function () { visible = !document.hidden; sync(); };
+    document.addEventListener('visibilitychange', onVis);
+    var mq = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null, onMq = function () { reduced = mq.matches; if (reduced) renderAt(spec.still || 0); sync(); };
+    if (mq && mq.addEventListener && opts.reduced == null) mq.addEventListener('change', onMq);
+    renderAt(spec.still || 0); sync();
+    return {
+      renderAt: renderAt, parts: parts, P: P,
+      start: function () { opts.still = false; reduced = false; sync(); }, stop: function () { opts.still = true; sync(); },
+      setCap: function (f) { cap = f; },
+      hoverAt: function (x, y) { return point(x, y, false); }, tap: function (x, y) { return point(x, y, true); }, ctx: ctx,
+      stats: function () { return { tris: stats.tris, ms: stats.ms, avgMs: stats.msSum / Math.max(1, stats.frames), frames: stats.frames, width: W, height: H, running: running, cap: cap }; },
+      destroy: function () { running = false; cancelAnimationFrame(raf); if (io) io.disconnect(); document.removeEventListener('visibilitychange', onVis); if (mq && mq.removeEventListener) mq.removeEventListener('change', onMq); canvas.removeEventListener('pointermove', onMove); canvas.removeEventListener('pointerdown', onDown); canvas.removeEventListener('pointerleave', onLeave); }
+    };
+  }
+
+  function scene(spec) { scenes.push(spec); return spec; }
+  return { scene: scene, scenes: scenes, mount: mount, RAMPS: RAMPS, TEX: TEX, noise: noise, fbm: fbm, hash: hash };
+})();
+if (typeof module !== 'undefined' && module.exports) module.exports = Pixel;
+</script>
+<script>
+/* Lunar hop: a white-panelled rocket (same modules as /assets) waits beside a launch
+   tower, the swing arm retracts, the engine lights, dust rolls out and the rocket climbs
+   out of frame leaving a smoke column. It comes back tail-first on a retro-burn and
+   lands on the pad, the arm swings back in: the last frame equals the first. */
+(function () {
+  var DUR = 10, LIFT = 3.0, GONE = 6.2, D0 = 6.6, D1 = 8.8, H = 11.2, BASE = .04, S = .6;
+  var TX = -1.15, TZ = -.55, ARM = -.44;
+  var sm = function (x) { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
+  var lerp = function (a, b, u) { return a + (b - a) * u; };
+  /* rocket height as a pure function of absolute time */
+  function ry(t) {
+    if (t < LIFT) return BASE;
+    if (t < GONE) { var s = t - LIFT; return BASE + .8 * s * s; }
+    if (t < D0) return BASE + H;
+    if (t < D1) { var u = (t - D0) / (D1 - D0); return BASE + H * (1 - u) * (1 - u); }
+    return BASE;
+  }
+  function rx(t) { if (t >= GONE) return 0; var s = Math.max(0, t - LIFT); return .05 * s * s; }
+  var CRATERS = [[-1.9, 1.7, .75], [-.3, -2.6, .55], [3.1, -1.1, .5]];
+
+  Pixel.scene({
+    name: 'launch',
+    title: 'Liftoff from the Moon pad',
+    means: 'A white rocket lifts off a lunar pad past its tower, trailing smoke; it returns on a retro-burn and lands again. Loops seamlessly.',
+    hint: 'Hover the rocket, tower or astronaut; tap the astronaut to wave.',
+    width: 320, height: 240, duration: 10, still: 3.9, fps: 24,
+    camera: { az: 45, el: 30, height: 2.9 },
+    sun: { az: -50, el: 46, ambient: .34 },
+    ground: {
+      rx: 4.3, rz: 3.6, wobble: .35, fade: .45,
+      zone: function (x, z, P) {
+        var d = Math.hypot(x, z);
+        if (d < 1.12) return d > .98 ? 'padring' : 'pad';
+        for (var i = 0; i < CRATERS.length; i++) {
+          var c = CRATERS[i], r = c[2] * (1 + (P.noise(x * 3, z * 3) - .5) * .25), e = Math.hypot(x - c[0], z - c[1]);
+          if (e < r - .1) return 'crater';
+          if (e < r + .1) return 'rim';
+        }
+        return 'moon';
+      }
+    },
+    materials: {
+      moon: { ramp: ['#55556a', '#74748a', '#92929f', '#b0b0bc', '#cfcfd8'], tex: 'sand', ground: true },
+      crater: { ramp: ['#3d3d52', '#55556a', '#6d6d82', '#85859a', '#9b9bad'], tex: 'sand', ground: true },
+      rim: { ramp: ['#8d8da0', '#a9a9b8', '#c4c4cf', '#dcdce4', '#eeeef3'], tex: 'sand', ground: true },
+      pad: { ramp: ['#33364d', '#454963', '#5a5f7c', '#707593', '#8a8fb0'], tex: 'paving', size: .36, ground: true },
+      padring: { ramp: ['#1f6f8f', '#2a96b8', '#22c0e0', '#6ad8ee', '#b4eef8'], tex: 'plain', ground: true, glow: .5 },
+      hull: { ramp: ['#5d6280', '#8c91ad', '#b9bdd1', '#dfe1ec', '#f6f6fb'], tex: 'plain', dither: .5 },
+      panel: { ramp: ['#8a8570', '#b3ad94', '#d6d0b6', '#efe9d0', '#faf6e6'], tex: 'plain', dither: .4 },
+      red: { ramp: ['#6b1f2b', '#9c2c36', '#cf3d3d', '#e8665a', '#f59a86'], tex: 'plain', dither: .5 },
+      orange: { ramp: ['#8a4a14', '#c47a1c', '#f0a02e', '#f7c25a', '#fbdc8e'], tex: 'plain', dither: .4 },
+      glass: { ramp: ['#1f4f8f', '#2f7fc8', '#58c8ee', '#9be3f7', '#d4f4fb'], tex: 'plain', glow: .55, dither: .4 },
+      bell: { ramp: ['#1f2f6b', '#2f4aa8', '#3f6fd0', '#6b94e0', '#9bb8ee'], tex: 'plain', dither: .5 },
+      steel: { ramp: ['#3a3d52', '#555a73', '#737893', '#9499b0', '#b9bdd0'], tex: 'plain', dither: .5 },
+      flame: { ramp: ['#d4501c', '#f08a24', '#f8b83a', '#fbd96a', '#fff2b0'], flat: true, glow: .95 },
+      puff: { ramp: ['#9a9bb0', '#b9bacb', '#d4d5e0', '#e8e9f1', '#f6f6fa'], tex: 'plain', glow: .35, dither: .6 },
+      flagc: { ramp: ['#117e98', '#18a2c0', '#22c0e0', '#6ad8ee', '#b4eef8'], tex: 'cloth', dither: .5 }
+    },
+    build: function (P) {
+      var parts = {}, i;
+      /* ---- rocket, built in 0.75-unit modules (as the sprites) and scaled down ---- */
+      var rk = P.group(0, BASE, 0); rk.scale.set(S, S, S); rk.name = 'rocket · lunar lander'; parts.rk = rk;
+      function faces(y, fn) { [0, Math.PI / 2].forEach(function (r) { var f = P.group(0, y, 0, rk); f.rotation.y = r; fn(f); }); }
+      function studs(f, h) { [-1, 1].forEach(function (sx) { [-1, 1].forEach(function (sy) { P.box(.07, .07, .04, 'red', sx * .3, sy * (h / 2 - .08), .385, f); }); }); }
+      P.box(.75, .6, .75, 'hull', 0, .75, 0, rk);                       // thruster housing
+      faces(.75, function (f) { studs(f, .6); P.box(.5, .2, .04, 'bell', 0, 0, .385, f); P.box(.36, .07, .045, 'red', 0, 0, .39, f); });
+      P.cyl(.2, .38, .45, 'bell', 0, .225, 0, rk, 8);                   // bell
+      [1.05, 1.8].forEach(function (y) {                                // two fuel tanks, orange bars
+        P.box(.75, .75, .75, 'hull', 0, y + .375, 0, rk);
+        faces(y + .375, function (f) { studs(f, .75); P.box(.5, .5, .04, 'panel', 0, 0, .385, f); [-.14, 0, .14].forEach(function (x) { P.box(.08, .38, .045, 'orange', x, 0, .39, f); }); });
+      });
+      P.box(.75, .75, .75, 'hull', 0, 2.925, 0, rk);                    // cockpit, cyan window
+      faces(2.925, function (f) { studs(f, .75); P.box(.5, .5, .04, '#1f5fa8', 0, 0, .385, f); P.box(.4, .4, .05, 'glass', 0, 0, .39, f); });
+      P.cyl(.38, .39, .08, 'steel', 0, 3.34, 0, rk, 8);                 // nose
+      P.cone(.4, .8, 'red', 0, 3.78, 0, rk, 8);
+      [-1, 1].forEach(function (s) {                                    // wings
+        var w = P.wedge(.62, .85, .1, 'red', s * .68, 1.05, 0, rk); w.rotation.z = s * Math.PI / 2; w.rotation.y = 0;
+        P.box(.07, .07, .05, 'hull', s * .5, 1.2, .08, rk);
+      });
+      [[1, 1], [-1, 1], [1, -1], [-1, -1]].forEach(function (c) {       // landing legs
+        P.line([[c[0] * .3, .75, c[1] * .3], [c[0] * .8, .05, c[1] * .8]], '#6b6f85', rk);
+        P.cyl(.13, .13, .05, 'steel', c[0] * .8, .03, c[1] * .8, rk, 8);
+      });
+      parts.flame = P.group(0, 0, 0, rk);
+      P.cone(.2, 1.7, 'flame', 0, -.85, 0, parts.flame, 8).rotation.z = Math.PI;
+      P.cone(.1, 1.1, '#fff2b0', 0, -.55, 0, parts.flame, 6).rotation.z = Math.PI;
+
+      /* ---- launch tower + swing arm ---- */
+      var tw = P.group(TX, 0, TZ); tw.name = 'launch tower · swing arm'; parts.tw = tw;
+      [-1, 1].forEach(function (a) { [-1, 1].forEach(function (b) { P.box(.06, 2.7, .06, 'hull', a * .13, 1.35, b * .13, tw); }); });
+      for (i = 0; i < 6; i++) { var y = .3 + i * .45; P.box(.32, .035, .035, 'steel', 0, y, .13, tw); P.box(.32, .035, .035, 'steel', 0, y, -.13, tw); P.box(.035, .035, .32, 'steel', .13, y, 0, tw); P.box(.035, .035, .32, 'steel', -.13, y, 0, tw); }
+      P.box(.34, .3, .34, 'red', 0, .15, 0, tw);
+      parts.beacon = P.ball(.06, '#ff6a5a', 0, 2.82, 0, tw, 6);
+      parts.arm = P.group(TX, 1.55, TZ);
+      P.box(1.05, .07, .1, 'hull', .55, 0, 0, parts.arm); P.box(.1, .16, .16, 'red', 1.08, 0, 0, parts.arm);
+
+      /* ---- fuel depot ---- */
+      P.ball(.3, 'hull', -2.4, .34, -1.4, null, 10); P.cyl(.2, .26, .1, 'steel', -2.4, .05, -1.4, null, 8);
+      P.ball(.24, 'hull', -1.8, .28, -2.0, null, 10); P.cyl(.16, .2, .1, 'steel', -1.8, .05, -2.0, null, 8);
+      P.box(1.5, .07, .07, 'steel', -1.78, .1, -.98, null).rotation.y = 2.54;
+      parts.steam = [0, 1, 2].map(function (k) { return P.ball(1, 'puff', -2.4, .7, -1.4, null, 6); });
+
+      /* ---- astronaut watching the launch ---- */
+      var ast = P.person(1.5, -1.8, null, { shirt: '#eceef5', pants: '#c9ccd8', skin: '#c99a78', hair: '#eceef5', shoes: '#8a8ea3', yaw: -.69 });
+      ast.root.name = 'astronaut · tap to wave'; parts.ast = ast;
+      P.ball(.17, 'hull', 0, .02, 0, ast.head, 8); P.box(.2, .1, .06, 'glass', 0, .03, .15, ast.head);
+      P.box(.22, .28, .1, 'steel', 0, -.2, -.1, ast.body);
+
+      /* ---- rover, flag, rocks ---- */
+      var rv = P.group(2.7, 0, 1.0); rv.rotation.y = -.5;
+      P.box(.7, .15, .4, 'hull', 0, .27, 0, rv); P.box(.4, .1, .3, 'glass', -.04, .39, 0, rv); P.box(.7, .04, .42, 'red', 0, .2, 0, rv);
+      [-.26, .26].forEach(function (x) { [-.25, .25].forEach(function (z) { P.cyl(.11, .11, .08, 'steel', x, .11, z, rv, 8).rotation.x = Math.PI / 2; }); });
+      P.cyl(.02, .02, .3, 'steel', .2, .5, 0, rv, 5); parts.dish = P.group(.2, .68, 0, rv); P.cyl(.12, .12, .03, 'hull', 0, 0, .04, parts.dish, 10).rotation.x = Math.PI / 2.4;
+      var pole = P.group(.8, 0, 1.7); P.cyl(.02, .02, 1.1, 'hull', 0, .55, 0, pole, 5);
+      parts.flag = []; var prev = P.group(0, 1.0, 0, pole);
+      for (i = 0; i < 3; i++) { var sg = P.group(i ? .13 : .02, 0, 0, prev); P.box(.13, .28, .02, 'flagc', .065, -.14, 0, sg); parts.flag.push(sg); prev = sg; }
+      [[-3.0, 0], [-3.4, 1.4], [2.6, -2.6], [3.4, .1], [.2, 2.4], [-.8, 2.9], [-3.0, -2.2]].forEach(function (p, k) { P.ball(.14 + (k % 3) * .05, k % 2 ? 'rim' : 'moon', p[0], .05, p[1], null, 6).scale.y = .55; });
+
+      /* ---- effects: smoke column, ground dust ---- */
+      parts.smoke = []; for (i = 0; i < 34; i++) parts.smoke.push(P.ball(1, 'puff', 0, 0, 0, null, 6));
+      parts.dust = []; for (i = 0; i < 24; i++) parts.dust.push(P.ball(1, 'puff', 0, .07, 0, null, 6));
+      parts.hot = [tw, rk, ast.root];
+      return parts;
+    },
+    tick: function (c) {
+      var t = c.t, p = c.parts, P = c.P, TAU = P.TAU, i;
+      /* arm, rocket */
+      var th = ARM - 1.2 * (sm((t - 2) / .7) - sm((t - 9.2) / .7));
+      p.arm.rotation.y = th;
+      var y = ry(t), s = Math.max(0, Math.min(GONE, t) - LIFT);
+      var shake = (t > 2.5 && t < LIFT) ? .012 * Math.sin(t * 70) : 0;
+      p.rk.position.set(rx(t) + shake, y, 0);
+      p.rk.rotation.z = -.14 * sm(s / 3) * (t < GONE ? 1 : 0);
+      p.rk.visible = y < 9;
+      var up = sm((t - 2.5) / .5) * (t < GONE ? 1 : 0) * (1 + Math.min(1.6, s * .7));
+      var dn = sm((t - 6.9) / .3) * (1 - sm((t - 8.7) / .25)) * (1.9 - .9 * sm((t - D0) / (D1 - D0)));   // retro-burn
+      var fl = (up + dn) * (1 + .18 * Math.sin(t * 38)) / (1 + .18 * 0);
+      p.flame.scale.set(1, .001 + fl, 1);
+      p.flame.visible = fl > .02;
+      /* smoke column from where the rocket was */
+      var L = 2.4;
+      p.smoke.forEach(function (b, j) {
+        var ts = LIFT + j * .1, age = t - ts;
+        if (age < 0 || age > L) { b.visible = false; return; }
+        var u = age / L, near = Math.max(0, 1 - ry(ts) / 1.5), side = ((j * 37) % 7 - 3) * .05;
+        b.visible = true;
+        b.position.set(rx(ts) + age * (.1 + side) + near * age * (j % 2 ? .6 : -.6) * .5, Math.max(.1, ry(ts) - .15 + age * .05), near * (((j * 13) % 5) - 2) * .12);
+        var r = (.1 + .3 * Math.pow(u, .6)) * (1 - sm((u - .65) / .35)); b.scale.set(r, r, r);
+      });
+      p.dust.forEach(function (b, k) {
+        var ph = k < 12 ? LIFT : 8.45, age = ((t - ph) % DUR + DUR) % DUR, a = (k % 12) / 12 * TAU + .3 + (k < 12 ? 0 : .26) + ((k * 53) % 7 - 3) * .07, jr = .8 + ((k * 31) % 9) / 22;
+        if (age < 0 || age > 2.2) { b.visible = false; return; }
+        var rad = ((k < 12 ? .45 : .4) + 1.6 * (1 - Math.pow(1 - age / 2.2, 2))) * jr;
+        b.visible = true; b.position.set(Math.cos(a) * rad, .08 + .05 * age, Math.sin(a) * rad);
+        var r = (.1 + ((k * 17) % 5) * .025) * (1 - age / 2.2) * (age < .3 ? age / .3 : 1); b.scale.set(r * 1.3, r * .7, r * 1.3);
+      });
+      /* fuel vents breathe while the rocket waits (period 1.25 s divides the loop) */
+      var env = (t < 2.7 ? 1 : t < 3 ? 1 - sm((t - 2.7) / .3) : t < 8.9 ? 0 : sm((t - 8.9) / .4));
+      p.steam.forEach(function (b, k) {
+        var f = P.phase(t, 1.25, k / 3), r = env * Math.sin(f * Math.PI) * (.07 + .09 * f);
+        b.position.set(-2.4 + f * .12, .65 + f * .55, -1.4); b.scale.set(r + .001, r + .001, r + .001);
+      });
+      /* astronaut watches, waves at liftoff; a tap waves too */
+      var since = c.pressed === p.ast.root ? t - c.pressedAt : 9, press = since < 2 ? Math.sin(Math.min(1, since / 2) * Math.PI) : 0;
+      var w = Math.max(press, sm((t - 3.6) / .4) * (1 - sm((t - 5.8) / .4)), sm((t - 8.9) / .3) * (1 - sm((t - 9.7) / .3)));
+      P.pose(p.ast, 'stand'); P.pose(p.ast, 'wave', w);
+      p.ast.armR.rotation.z += .35 * Math.sin(t * 10) * w;
+      p.ast.root.position.y = .5 * press * press * (2 - press) * .5;   // low-gravity hop on a tap
+      p.ast.head.rotation.x = -.1 - .6 * (sm((t - 3) / 1.5) - sm((t - 8.2) / .8));
+      /* life: beacon, rover dish, flag */
+      p.beacon.visible = P.phase(t, 1.25) < .5;
+      p.dish.rotation.y = c.q * TAU;
+      p.flag.forEach(function (sg, k) { sg.rotation.y = .22 * Math.sin(c.q * TAU * 2 - k * .9) * (k ? 1 : .4); });
+      c.read = press > 0 ? 'astronaut · waving' : t < 2.5 ? 'rocket · T-minus, all systems go' : t < GONE ? 'rocket · liftoff!' : t < D1 ? 'rocket · retro-burn, coming home' : 'rocket · touchdown';
+    }
+  });
+})();
+</script>
+<script>
+(function () {
+  var spec = Pixel.scenes[Pixel.scenes.length - 1], canvas = document.getElementById('stage');
+  var q = new URLSearchParams(location.search), embed = q.has('embed');
+  if (embed) document.documentElement.className = 'embed';
+  document.getElementById('title').textContent = spec.title || spec.name;
+  document.getElementById('means').textContent = spec.means || '';
+  document.getElementById('hint').textContent = spec.hint || '';
+  var read = document.getElementById('read');
+  canvas.setAttribute('aria-label', spec.means || spec.title || spec.name);
+  var rt = Pixel.mount(spec, canvas, { still: q.has('still'), reduced: q.has('reduced') ? true : undefined, onRead: function (line) { read.textContent = line; } });
+  /* whole-number enlargement so every pixel is the same size */
+  function fit() {
+    if (embed) return;
+    var avail = Math.min(document.documentElement.clientWidth - 32, 1100), k = Math.max(1, Math.floor(avail / canvas.width));
+    if (avail < canvas.width) { canvas.style.width = avail + 'px'; return; }
+    canvas.style.width = canvas.width * k + 'px';
+  }
+  fit(); addEventListener('resize', fit);
+  window.__pixel = { spec: spec, runtime: rt };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,855 @@
+{
+  "scene": "moonbase",
+  "bytes": 770400,
+  "checks": [
+    {
+      "name": "offline HTML",
+      "pass": true,
+      "details": []
+    },
+    {
+      "name": "seek is independent of frame history",
+      "pass": true,
+      "details": 0
+    },
+    {
+      "name": "loop transform seam",
+      "pass": true,
+      "details": {
+        "maxDelta": 9.190020476279592e-7,
+        "epsilonSeconds": 0.000001
+      }
+    },
+    {
+      "name": "contact at 1.500s",
+      "pass": true,
+      "details": [
+        {
+          "label": "left palm on flagpole",
+          "a": [
+            1.5500000000000003,
+            0.98,
+            0.35000000000000003
+          ],
+          "b": [
+            1.55,
+            0.9800000000000001,
+            0.35
+          ]
+        },
+        {
+          "label": "right palm on flagpole",
+          "a": [
+            1.5500000000000003,
+            1.2,
+            0.35000000000000003
+          ],
+          "b": [
+            1.55,
+            1.2,
+            0.35
+          ]
+        }
+      ]
+    },
+    {
+      "name": "contact at 4.500s",
+      "pass": true,
+      "details": [
+        {
+          "label": "left palm on flagpole",
+          "a": [
+            1.55,
+            0.98,
+            0.3499999999999999
+          ],
+          "b": [
+            1.55,
+            0.9800000000000001,
+            0.35
+          ]
+        },
+        {
+          "label": "right palm on flagpole",
+          "a": [
+            1.5500000000000003,
+            1.2,
+            0.35000000000000003
+          ],
+          "b": [
+            1.55,
+            1.2,
+            0.35
+          ]
+        }
+      ]
+    },
+    {
+      "name": "contact at 0.600s",
+      "pass": true,
+      "details": [
+        {
+          "label": "left palm on flagpole",
+          "a": [
+            1.5371610394555464,
+            1.129923682994376,
+            0.3499999999999999
+          ],
+          "b": [
+            1.5371610394555464,
+            1.1299236829943762,
+            0.35
+          ]
+        },
+        {
+          "label": "right palm on flagpole",
+          "a": [
+            1.5345456956409353,
+            1.349908136937675,
+            0.34999999999999987
+          ],
+          "b": [
+            1.5345456956409356,
+            1.349908136937675,
+            0.35
+          ]
+        }
+      ]
+    },
+    {
+      "name": "contact at 3.600s",
+      "pass": true,
+      "details": [
+        {
+          "label": "left palm on flagpole",
+          "a": [
+            1.5371610394555464,
+            1.129923682994376,
+            0.34999999999999987
+          ],
+          "b": [
+            1.5371610394555464,
+            1.1299236829943762,
+            0.35
+          ]
+        },
+        {
+          "label": "right palm on flagpole",
+          "a": [
+            1.5345456956409353,
+            1.3499081369376749,
+            0.3499999999999998
+          ],
+          "b": [
+            1.5345456956409356,
+            1.349908136937675,
+            0.35
+          ]
+        }
+      ]
+    },
+    {
+      "name": "scene actually moves",
+      "pass": true,
+      "details": 1.3570081004945758
+    },
+    {
+      "name": "draw budget (250 including shadows and post)",
+      "pass": true,
+      "details": {
+        "time": 3.5999999999999996,
+        "duration": 6,
+        "finish": "miniature",
+        "speed": 1,
+        "paused": true,
+        "reduced": false,
+        "running": false,
+        "frames": 13,
+        "draws": 103,
+        "triangles": 18134,
+        "width": 1052,
+        "height": 789,
+        "buffer": [
+          1052,
+          789
+        ],
+        "geometries": 22,
+        "textures": 9
+      }
+    },
+    {
+      "name": "triangle budget (100k)",
+      "pass": true,
+      "details": 18134
+    },
+    {
+      "name": "miniature: switch preserves time",
+      "pass": true
+    },
+    {
+      "name": "miniature: white negative space",
+      "pass": true
+    },
+    {
+      "name": "miniature: resolution policy",
+      "pass": true,
+      "details": [
+        1052,
+        789
+      ]
+    },
+    {
+      "name": "miniature: visible scene",
+      "pass": true,
+      "details": {
+        "fraction": 0.19271790922654858,
+        "bounds": [
+          135,
+          190,
+          926,
+          732
+        ],
+        "width": 1052,
+        "height": 790
+      }
+    },
+    {
+      "name": "miniature: no edge clipping",
+      "pass": true,
+      "details": {
+        "fraction": 0.19271790922654858,
+        "bounds": [
+          135,
+          190,
+          926,
+          732
+        ],
+        "width": 1052,
+        "height": 790
+      }
+    },
+    {
+      "name": "pixel: switch preserves time",
+      "pass": true
+    },
+    {
+      "name": "pixel: white negative space",
+      "pass": true
+    },
+    {
+      "name": "pixel: resolution policy",
+      "pass": true,
+      "details": [
+        351,
+        263
+      ]
+    },
+    {
+      "name": "pixel: visible scene",
+      "pass": true,
+      "details": {
+        "fraction": 0.1926709823362372,
+        "bounds": [
+          135,
+          190,
+          925,
+          732
+        ],
+        "width": 1052,
+        "height": 790
+      }
+    },
+    {
+      "name": "pixel: no edge clipping",
+      "pass": true,
+      "details": {
+        "fraction": 0.1926709823362372,
+        "bounds": [
+          135,
+          190,
+          925,
+          732
+        ],
+        "width": 1052,
+        "height": 790
+      }
+    },
+    {
+      "name": "halftone: switch preserves time",
+      "pass": true
+    },
+    {
+      "name": "halftone: white negative space",
+      "pass": true
+    },
+    {
+      "name": "halftone: resolution policy",
+      "pass": true,
+      "details": [
+        1052,
+        789
+      ]
+    },
+    {
+      "name": "halftone: visible scene",
+      "pass": true,
+      "details": {
+        "fraction": 0.19381888626846994,
+        "bounds": [
+          135,
+          190,
+          926,
+          732
+        ],
+        "width": 1052,
+        "height": 790
+      }
+    },
+    {
+      "name": "halftone: no edge clipping",
+      "pass": true,
+      "details": {
+        "fraction": 0.19381888626846994,
+        "bounds": [
+          135,
+          190,
+          926,
+          732
+        ],
+        "width": 1052,
+        "height": 790
+      }
+    },
+    {
+      "name": "blueprint: switch preserves time",
+      "pass": true
+    },
+    {
+      "name": "blueprint: white negative space",
+      "pass": true
+    },
+    {
+      "name": "blueprint: resolution policy",
+      "pass": true,
+      "details": [
+        1052,
+        789
+      ]
+    },
+    {
+      "name": "blueprint: visible scene",
+      "pass": true,
+      "details": {
+        "fraction": 0.19381888626846994,
+        "bounds": [
+          135,
+          190,
+          926,
+          732
+        ],
+        "width": 1052,
+        "height": 790
+      }
+    },
+    {
+      "name": "blueprint: no edge clipping",
+      "pass": true,
+      "details": {
+        "fraction": 0.19381888626846994,
+        "bounds": [
+          135,
+          190,
+          926,
+          732
+        ],
+        "width": 1052,
+        "height": 790
+      }
+    },
+    {
+      "name": "four visually distinct finishes",
+      "pass": true
+    },
+    {
+      "name": "unknown finish rejected without state change",
+      "pass": true
+    },
+    {
+      "name": "no frame-dependent GPU allocations",
+      "pass": true,
+      "details": {
+        "before": {
+          "time": 1.62,
+          "duration": 6,
+          "finish": "miniature",
+          "speed": 1,
+          "paused": true,
+          "reduced": false,
+          "running": false,
+          "frames": 43,
+          "draws": 103,
+          "triangles": 18134,
+          "width": 1052,
+          "height": 789,
+          "buffer": [
+            1052,
+            789
+          ],
+          "geometries": 22,
+          "textures": 9
+        },
+        "after": {
+          "time": 0,
+          "duration": 6,
+          "finish": "miniature",
+          "speed": 1,
+          "paused": true,
+          "reduced": false,
+          "running": false,
+          "frames": 103,
+          "draws": 103,
+          "triangles": 18134,
+          "width": 1052,
+          "height": 789,
+          "buffer": [
+            1052,
+            789
+          ],
+          "geometries": 22,
+          "textures": 9
+        }
+      }
+    },
+    {
+      "name": "wall-clock speed independent of FPS",
+      "pass": true,
+      "details": {
+        "simulated": 0.6666000000000007,
+        "wallSeconds": 0.6609000000003725
+      }
+    },
+    {
+      "name": "play advances clock",
+      "pass": true,
+      "details": {
+        "time": 1.0425000000011178,
+        "duration": 6,
+        "finish": "miniature",
+        "speed": 1,
+        "paused": false,
+        "reduced": false,
+        "running": true,
+        "frames": 134,
+        "draws": 103,
+        "triangles": 18134,
+        "width": 1052,
+        "height": 789,
+        "buffer": [
+          1052,
+          789
+        ],
+        "geometries": 22,
+        "textures": 9
+      }
+    },
+    {
+      "name": "pause stops rendering",
+      "pass": true,
+      "details": {
+        "paused": {
+          "time": 1.1092000000011177,
+          "duration": 6,
+          "finish": "miniature",
+          "speed": 1,
+          "paused": true,
+          "reduced": false,
+          "running": false,
+          "frames": 136,
+          "draws": 103,
+          "triangles": 18134,
+          "width": 1052,
+          "height": 789,
+          "buffer": [
+            1052,
+            789
+          ],
+          "geometries": 22,
+          "textures": 9
+        },
+        "idle": {
+          "time": 1.1092000000011177,
+          "duration": 6,
+          "finish": "miniature",
+          "speed": 1,
+          "paused": true,
+          "reduced": false,
+          "running": false,
+          "frames": 136,
+          "draws": 103,
+          "triangles": 18134,
+          "width": 1052,
+          "height": 789,
+          "buffer": [
+            1052,
+            789
+          ],
+          "geometries": 22,
+          "textures": 9
+        }
+      }
+    },
+    {
+      "name": "reduced motion stays at declared still",
+      "pass": true,
+      "details": {
+        "time": 1.62,
+        "duration": 6,
+        "finish": "miniature",
+        "speed": 1,
+        "paused": false,
+        "reduced": true,
+        "running": false,
+        "frames": 137,
+        "draws": 103,
+        "triangles": 18134,
+        "width": 1052,
+        "height": 789,
+        "buffer": [
+          1052,
+          789
+        ],
+        "geometries": 22,
+        "textures": 9
+      }
+    },
+    {
+      "name": "offscreen suspends rendering",
+      "pass": true,
+      "details": {
+        "off": {
+          "time": 1.819699999999628,
+          "duration": 6,
+          "finish": "miniature",
+          "speed": 1,
+          "paused": false,
+          "reduced": false,
+          "running": false,
+          "frames": 144,
+          "draws": 103,
+          "triangles": 18134,
+          "width": 1052,
+          "height": 789,
+          "buffer": [
+            1052,
+            789
+          ],
+          "geometries": 22,
+          "textures": 9
+        },
+        "offAgain": {
+          "time": 1.819699999999628,
+          "duration": 6,
+          "finish": "miniature",
+          "speed": 1,
+          "paused": false,
+          "reduced": false,
+          "running": false,
+          "frames": 144,
+          "draws": 103,
+          "triangles": 18134,
+          "width": 1052,
+          "height": 789,
+          "buffer": [
+            1052,
+            789
+          ],
+          "geometries": 22,
+          "textures": 9
+        }
+      }
+    },
+    {
+      "name": "onscreen resumes rendering",
+      "pass": true,
+      "details": {
+        "time": 2.1612999999996276,
+        "duration": 6,
+        "finish": "miniature",
+        "speed": 1,
+        "paused": false,
+        "reduced": false,
+        "running": true,
+        "frames": 155,
+        "draws": 103,
+        "triangles": 18134,
+        "width": 1052,
+        "height": 789,
+        "buffer": [
+          1052,
+          789
+        ],
+        "geometries": 22,
+        "textures": 9
+      }
+    },
+    {
+      "name": "batched intersections stop on newest offscreen state",
+      "pass": true
+    },
+    {
+      "name": "batched intersections resume on newest onscreen state",
+      "pass": true
+    },
+    {
+      "name": "hidden-document handler stops loop",
+      "pass": true
+    },
+    {
+      "name": "visible-document handler resumes loop",
+      "pass": true
+    },
+    {
+      "name": "miniature: mobile layout",
+      "pass": true,
+      "details": {
+        "time": 1.62,
+        "duration": 6,
+        "finish": "miniature",
+        "speed": 1,
+        "paused": true,
+        "reduced": false,
+        "running": false,
+        "frames": 176,
+        "draws": 103,
+        "triangles": 18134,
+        "width": 358,
+        "height": 358,
+        "buffer": [
+          358,
+          358
+        ],
+        "geometries": 22,
+        "textures": 9
+      }
+    },
+    {
+      "name": "miniature: mobile framing",
+      "pass": true,
+      "details": {
+        "fraction": 0.23682326761177075,
+        "bounds": [
+          9,
+          89,
+          351,
+          325
+        ],
+        "width": 358,
+        "height": 359
+      }
+    },
+    {
+      "name": "pixel: mobile layout",
+      "pass": true,
+      "details": {
+        "time": 1.62,
+        "duration": 6,
+        "finish": "pixel",
+        "speed": 1,
+        "paused": true,
+        "reduced": false,
+        "running": false,
+        "frames": 180,
+        "draws": 103,
+        "triangles": 18134,
+        "width": 358,
+        "height": 358,
+        "buffer": [
+          179,
+          179
+        ],
+        "geometries": 22,
+        "textures": 9
+      }
+    },
+    {
+      "name": "pixel: mobile framing",
+      "pass": true,
+      "details": {
+        "fraction": 0.23725120990958745,
+        "bounds": [
+          8,
+          90,
+          353,
+          325
+        ],
+        "width": 358,
+        "height": 359
+      }
+    },
+    {
+      "name": "halftone: mobile layout",
+      "pass": true,
+      "details": {
+        "time": 1.62,
+        "duration": 6,
+        "finish": "halftone",
+        "speed": 1,
+        "paused": true,
+        "reduced": false,
+        "running": false,
+        "frames": 184,
+        "draws": 103,
+        "triangles": 18134,
+        "width": 358,
+        "height": 358,
+        "buffer": [
+          358,
+          358
+        ],
+        "geometries": 22,
+        "textures": 9
+      }
+    },
+    {
+      "name": "halftone: mobile framing",
+      "pass": true,
+      "details": {
+        "fraction": 0.23818490219573302,
+        "bounds": [
+          9,
+          89,
+          351,
+          325
+        ],
+        "width": 358,
+        "height": 359
+      }
+    },
+    {
+      "name": "blueprint: mobile layout",
+      "pass": true,
+      "details": {
+        "time": 1.62,
+        "duration": 6,
+        "finish": "blueprint",
+        "speed": 1,
+        "paused": true,
+        "reduced": false,
+        "running": false,
+        "frames": 188,
+        "draws": 103,
+        "triangles": 18134,
+        "width": 358,
+        "height": 358,
+        "buffer": [
+          358,
+          358
+        ],
+        "geometries": 22,
+        "textures": 9
+      }
+    },
+    {
+      "name": "blueprint: mobile framing",
+      "pass": true,
+      "details": {
+        "fraction": 0.23818490219573302,
+        "bounds": [
+          9,
+          89,
+          351,
+          325
+        ],
+        "width": 358,
+        "height": 359
+      }
+    },
+    {
+      "name": "dispose detaches canvas and stops rendering",
+      "pass": true,
+      "details": {
+        "time": 1.62,
+        "duration": 6,
+        "finish": "blueprint",
+        "speed": 1,
+        "paused": true,
+        "reduced": false,
+        "running": false,
+        "frames": 188,
+        "draws": 103,
+        "triangles": 18134,
+        "width": 358,
+        "height": 358,
+        "buffer": [
+          358,
+          358
+        ],
+        "geometries": 0,
+        "textures": 1
+      }
+    },
+    {
+      "name": "initial reduced-motion mount offline",
+      "pass": true,
+      "details": {
+        "time": 1.62,
+        "duration": 6,
+        "finish": "miniature",
+        "speed": 1,
+        "paused": false,
+        "reduced": true,
+        "running": false,
+        "frames": 2,
+        "draws": 103,
+        "triangles": 18134,
+        "width": 358,
+        "height": 358,
+        "buffer": [
+          358,
+          358
+        ],
+        "geometries": 22,
+        "textures": 9
+      }
+    },
+    {
+      "name": "missing WebGL has readable fallback",
+      "pass": true
+    },
+    {
+      "name": "no browser errors",
+      "pass": true,
+      "details": []
+    }
+  ],
+  "errors": [],
+  "network": [],
+  "images": [
+    "moonbase-miniature-still.png",
+    "moonbase-miniature-start.png",
+    "moonbase-miniature-quarter.png",
+    "moonbase-miniature-half.png",
+    "moonbase-miniature-late.png",
+    "moonbase-pixel-still.png",
+    "moonbase-pixel-start.png",
+    "moonbase-pixel-quarter.png",
+    "moonbase-pixel-half.png",
+    "moonbase-pixel-late.png",
+    "moonbase-halftone-still.png",
+    "moonbase-halftone-start.png",
+    "moonbase-halftone-quarter.png",
+    "moonbase-halftone-half.png",
+    "moonbase-halftone-late.png",
+    "moonbase-blueprint-still.png",
+    "moonbase-blueprint-start.png",
+    "moonbase-blueprint-quarter.png",
+    "moonbase-blueprint-half.png",
+    "moonbase-blueprint-late.png",
+    "moonbase-miniature-mobile.png",
+    "moonbase-pixel-mobile.png",
+    "moonbase-halftone-mobile.png",
+    "moonbase-blueprint-mobile.png"
+  ],
+  "visualReview": "Pending: open saved images and record findings; metrics do not prove visual quality.",
+  "passed": true
+}
