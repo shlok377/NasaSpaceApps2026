@@ -5,6 +5,7 @@ import { currentMission, Mission, MissionContext, newlyCompleted, rocketCost } f
 import {
   ActiveProblem,
   Checkpoint,
+  isStableOrbit,
   onImpactCourse,
   PHASE_INFO,
   PhaseEvent,
@@ -339,10 +340,15 @@ export class FlightScene extends Phaser.Scene {
     const run = dryRun(this.vehicle);
     const warn = !r.finStable ? `  ·  needs ${FINS.minimumForStability} fins` : run.tips ? '  ·  unbalanced, will tip' : run.finsDropped ? '  ·  fins drop off with the boosters' : '';
     const v = CONFIG.launchVerdict;
+    // What the payload's own mission needs: the satellite just orbits, the rover orbits and drops, the crew lands too.
+    const mission = {
+      SATELLITE: { need: v.orbitOnly, goal: 'orbit + eject' },
+      ROVER: { need: v.orbitAndRover, goal: 'orbit + rover drop' },
+      CREW: { need: v.allPhases, goal: 'orbit + landing' }
+    }[this.payload];
     if (run.reachesMoon) {
-      if (run.deltaVLeft >= v.allPhases) return [`Fuel for all 3 phases${warn}`, UI.greenText];
-      if (run.deltaVLeft >= v.orbitAndRover) return [`Reaches the Moon: fuel for orbit + rover, tight for landing${warn}`, '#a3e635'];
-      if (run.deltaVLeft >= v.orbitOnly) return [`Reaches the Moon: fuel for orbit only${warn}`, '#fbbf24'];
+      if (run.deltaVLeft >= mission.need) return [`Fuel for the whole mission: ${mission.goal}${warn}`, UI.greenText];
+      if (run.deltaVLeft >= v.orbitOnly) return [`Reaches the Moon: fuel to orbit it, tight for ${mission.goal}${warn}`, '#a3e635'];
       return [`Barely reaches the Moon: add fuel to orbit it${warn}`, '#fbbf24'];
     }
     if (run.maxAltitude >= WORLD.atmosphereTop) return [`Reaches space (~${formatDistance(run.maxAltitude)}): add fuel for the Moon${warn}`, '#7dd3fc'];
@@ -667,7 +673,7 @@ export class FlightScene extends Phaser.Scene {
         case 'ROVER_LANDED':
           if (e.angle !== null) this.landedRovers.push(e.angle);
           this.showBanner(
-            e.inZone ? 'The rover bounced down in the zone!' : e.sparesLeft > 0 ? 'Missed the zone! One spare rover left: wait for the next pass' : 'Missed the zone again…',
+            e.inZone ? 'The rover bounced down in the zone!' : e.sparesLeft > 0 ? 'Missed the zone! One spare rover left: wait for the next pass' : 'The rover missed the zone!',
             e.inZone ? UI.greenText : '#fca5a5'
           );
           break;
@@ -676,8 +682,12 @@ export class FlightScene extends Phaser.Scene {
           this.showBanner(`⚠ ${PROBLEM_INFO.BOULDERS.title}: ${PROBLEM_INFO.BOULDERS.howTo}`, '#fca5a5');
           break;
         case 'COMPLETE':
-          if (e.onSite) this.celebrate({ id: 'BULLSEYE', label: 'ON THE SITE', points: 1_000 });
-          this.showBanner(e.onSite ? 'The crew landed right on the site!' : 'The crew is down safely!', UI.greenText);
+          // The rover already got its own banner when it landed; the satellite and the crew get theirs here.
+          if (this.payload === 'SATELLITE') this.showBanner('Satellite deployed: mission complete!', UI.greenText);
+          else if (this.payload === 'CREW') {
+            if (e.onSite) this.celebrate({ id: 'BULLSEYE', label: 'ON THE SITE', points: 1_000 });
+            this.showBanner(e.onSite ? 'The crew landed right on the site!' : 'The crew is down safely!', UI.greenText);
+          }
           break;
         case 'FAILED':
           this.showBanner(e.reason, '#fca5a5');
@@ -897,9 +907,10 @@ export class FlightScene extends Phaser.Scene {
     if (r.phase === 'ROVER') {
       if (r.problem) return 'Deal with the problem!';
       if (r.rover && !r.rover.landed) return 'Rover falling…';
-      if (r.dropReady) return `Drop the rover in the green zone  ·  spares: ${r.sparesLeft}`;
+      if (r.dropReady) return r.sparesLeft > 0 ? `Drop the rover in the green zone  ·  spares: ${r.sparesLeft}` : 'Drop the rover in the green zone: one shot';
       return 'Orbiting… stay alert';
     }
+    if (r.phase === 'DEPLOY') return isStableOrbit(t) ? 'Press SPACE to eject the satellite' : 'Get the LOW and HIGH points into the green band to eject';
     return onImpactCourse(t) ? 'Land upright, under 10 m/s, on the blue site' : 'Burn backwards to drop out of orbit: aim the white ✕ at the blue site';
   }
 
@@ -945,6 +956,7 @@ export class FlightScene extends Phaser.Scene {
       if (r.rover && !r.rover.landed) return 'Rover falling… watch where it lands';
       return 'Stay in orbit: problems can happen any moment';
     }
+    if (r.phase === 'DEPLOY') return isStableOrbit(t) ? 'SPACE: eject the satellite from your stable orbit' : 'Fix your orbit (A / D turn  ·  W burn) until it is stable, then press SPACE';
     if (onImpactCourse(t)) return 'Point along dashed arrow and burn W to slow down  ·  land upright (< 10 m/s)';
     return 'Turn to face backwards (against the arrow), then burn W to drop out of orbit';
   }

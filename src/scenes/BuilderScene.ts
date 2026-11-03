@@ -116,6 +116,9 @@ export class BuilderScene extends Phaser.Scene {
   private shellTipId: string | null = null;
   private shellTipNote = '';
   private shellTipSig = '';
+  /** RCS the player has already hovered: their "!" badge is gone for good. */
+  private seenShells = new Set<string>();
+  private shellBadges = new Map<string, Phaser.GameObjects.Container>();
 
   // HUD objects
   private statValues: Record<'mass' | 'thrust' | 'fuel' | 'twr', Phaser.GameObjects.Text> = {} as never;
@@ -1034,6 +1037,7 @@ export class BuilderScene extends Phaser.Scene {
     const sig = id ? `${id}|${this.rocketTree.getSeparationKey(id)}|${this.rocketTree.shellWarning(id)}` : '';
     if (id === this.shellTipId && sig === this.shellTipSig) return;
     if (id !== this.shellTipId) this.shellTipNote = '';
+    if (id) this.markShellSeen(id);
     this.shellTipId = id;
     this.shellTipSig = sig;
     this.drawShellTip();
@@ -1237,6 +1241,7 @@ export class BuilderScene extends Phaser.Scene {
         this.tweens.killTweensOf(container);
         container.destroy();
         this.blockDisplayMap.delete(id);
+        this.shellBadges.delete(id);
       }
     }
 
@@ -1260,7 +1265,11 @@ export class BuilderScene extends Phaser.Scene {
       .setDisplaySize(size, size)
       .setAngle(rcsAngle(node.type, node.finOrientation));
     blockContainer.add(sprite);
-    if (node.type === 'RCS') blockContainer.add(this.shellBadge(size));
+    if (node.type === 'RCS' && !this.seenShells.has(node.id)) {
+      const badge = this.shellBadge(size);
+      blockContainer.add(badge);
+      this.shellBadges.set(node.id, badge);
+    }
     this.blocksContainer.add(blockContainer);
     this.blockDisplayMap.set(node.id, blockContainer);
   }
@@ -1274,8 +1283,17 @@ export class BuilderScene extends Phaser.Scene {
     g.fillRect(-10, -10, 20, 20);
     const mark = pixelTitle(this, 0, 1, '!', 16, '#1a1020').setOrigin(0.5);
     const badge = this.add.container(size / 2 - 12, -size / 2 + 12, [g, mark]);
-    this.tweens.add({ targets: badge, scale: 1.15, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    const pulse = this.tweens.add({ targets: badge, scale: 1.15, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    badge.once(Phaser.GameObjects.Events.DESTROY, () => pulse.remove());
     return badge;
+  }
+
+  /** First hover over an RCS: the player has found its key tooltip, so its "!" badge goes away. */
+  private markShellSeen(id: string): void {
+    if (this.seenShells.has(id)) return;
+    this.seenShells.add(id);
+    this.shellBadges.get(id)?.destroy();
+    this.shellBadges.delete(id);
   }
 
   private renderAvailableSockets(): void {
