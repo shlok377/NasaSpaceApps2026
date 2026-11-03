@@ -251,6 +251,7 @@ describe('objectives by payload', () => {
     expect(run.phase).toBe('DEPLOY');
     expect(run.complete).toBe(false);
     expect(run.deploySatellite(sim)).toBe(true);
+    expect(run.satellite).not.toBeNull();
     expect(run.complete).toBe(true);
     expect(run.drainEvents().some(e => e.kind === 'SATELLITE_DEPLOYED')).toBe(true);
   });

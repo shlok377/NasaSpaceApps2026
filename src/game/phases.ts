@@ -393,6 +393,8 @@ export class PhaseRunner {
   public readonly chain: PhaseId[];
   /** The satellite can be ejected (stable orbit held, SPACE does it). */
   public deployReady = false;
+  /** The ejected satellite, drifting on its own in orbit. */
+  public satellite: RoverCapsule | null = null;
 
   private queue: ProblemId[] = [];
   private gap = 0;
@@ -455,6 +457,7 @@ export class PhaseRunner {
   public deploySatellite(sim: FlightSim): boolean {
     if (this.phase !== 'DEPLOY' || !this.deployReady || sim.phase !== 'FLYING' || this.over) return false;
     if (!isStableOrbit(sim.getTelemetry())) return false;
+    this.satellite = { x: sim.state.x, y: sim.state.y, vx: sim.state.vx, vy: sim.state.vy, landed: false, angle: null, inZone: false };
     this.events.push({ kind: 'SATELLITE_DEPLOYED' });
     this.finishPhase(sim);
     return true;

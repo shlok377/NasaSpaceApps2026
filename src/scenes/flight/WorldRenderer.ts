@@ -90,6 +90,8 @@ export interface MissionOverlay {
   site: SurfaceZone | null;
   boulders: boolean;
   rover: RoverCapsule | null;
+  /** The ejected satellite, if any. */
+  satellite?: RoverCapsule | null;
   landedRovers: number[];
   /** Predicted landing point of the rover if dropped now. */
   dropMarker: { x: number; y: number } | null;
@@ -150,6 +152,8 @@ export class WorldRenderer {
   private readonly skyMoonSprite: Phaser.GameObjects.Image;
   private readonly mapMoonSprite: Phaser.GameObjects.Image;
   private readonly roverFlagSprite: Phaser.GameObjects.Image;
+  /** The rover falling to the Moon or the ejected satellite (they never show together). */
+  private readonly payloadSprite: Phaser.GameObjects.Image;
   private readonly landingFlagSprite: Phaser.GameObjects.Image;
   private readonly smokeSpritesContainer: Phaser.GameObjects.Container;
   private readonly smokeSpritesPool: Phaser.GameObjects.Image[] = [];
@@ -225,6 +229,9 @@ export class WorldRenderer {
     this.mapMoonSprite?.setOrigin?.(0.5, 0.5);
     this.mapMoonSprite?.setVisible?.(false);
     this.mapMoonSprite?.setDepth?.(-2);
+    this.payloadSprite = scene.add.image(0, 0, GAME_ASSETS.PART_ROVER.key);
+    this.payloadSprite?.setVisible?.(false);
+    this.payloadSprite?.setDepth?.(6);
     this.roverFlagSprite = scene.add.image(0, 0, GAME_ASSETS.FLAG_GREEN.key);
     this.roverFlagSprite?.setOrigin?.(0.08, 0.97);
     this.roverFlagSprite?.setVisible?.(false);
@@ -491,6 +498,7 @@ export class WorldRenderer {
     } else if (this.camera.mode === 'ASCENT') {
       this.mapMoonSprite?.setVisible?.(false);
       this.roverFlagSprite?.setVisible?.(false);
+      this.payloadSprite?.setVisible?.(false);
       this.landingFlagSprite?.setVisible?.(false);
       this.drawAscent(sim, t, rocks, runnerState);
     } else {
@@ -1153,11 +1161,11 @@ export class WorldRenderer {
     }
 
     // Rover capsule on its way down.
-    if (overlay.rover && !overlay.rover.landed) {
-      const p = this.toScreen(overlay.rover.x, overlay.rover.y);
-      g.fillStyle(WORLD_COLORS.rover, 1);
-      g.fillRect(p.x - 4, p.y - 4, 8, 8);
-    }
+    const body = overlay.rover && !overlay.rover.landed ? { b: overlay.rover, key: GAME_ASSETS.PART_ROVER.key } : overlay.satellite && !overlay.satellite.landed ? { b: overlay.satellite, key: GAME_ASSETS.PART_SATELLITE.key } : null;
+    if (body) {
+      const p = this.toScreen(body.b.x, body.b.y);
+      this.payloadSprite?.setTexture?.(body.key)?.setDisplaySize?.(22, 22)?.setPosition?.(p.x, p.y)?.setVisible?.(true);
+    } else this.payloadSprite?.setVisible?.(false);
 
     // Direction of travel.
     const s = sim.state;
@@ -1212,6 +1220,7 @@ export class WorldRenderer {
       this.label(top.x, top.y - 12, 'ROVER ZONE', '#4ade80', 12);
     } else {
       this.roverFlagSprite?.setVisible?.(false);
+      this.payloadSprite?.setVisible?.(false);
     }
     for (const angle of overlay.landedRovers) {
       const p = moonSurfacePoint(angle, map ? 0 : 0.8);

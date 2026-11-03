@@ -10,6 +10,7 @@ import {
   PhaseEvent,
   PhaseId,
   PhaseRunner,
+  stepRover,
   phaseNumber,
   stepsDone,
   predictRoverLanding,
@@ -486,6 +487,7 @@ export class FlightScene extends Phaser.Scene {
         else this.sim.state.vy += (cruise - this.sim.state.vy) * (1 - Math.exp(-dt * 6));
       }
 
+      if (this.runner.satellite) stepRover(this.runner.satellite, gameDt);
       if (this.launched) this.runner.update(this.sim, gameDt, { repairPressed: this.repairPressed, relightHeld: this.keys.E.isDown });
       this.repairPressed = false;
       const events = this.sim.drainEvents();
@@ -561,6 +563,7 @@ export class FlightScene extends Phaser.Scene {
       site: landing ? r.site : null,
       boulders: r.bouldersSeen,
       rover: r.rover,
+      satellite: r.satellite,
       landedRovers: this.landedRovers,
       dropMarker: this.dropMarker,
       debrisRing: problem?.id === 'DEBRIS' ? problem.data.ringRadius : null,
