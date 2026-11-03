@@ -133,8 +133,8 @@ export interface FlightSnapshot {
   stats: FlightStats;
   startFuel: number;
   initialVehicle: FlightVehicle;
-  /** RCS shells already off. */
-  separated: boolean;
+  /** Ids of RCS shells already cracked open. */
+  openShells: string[];
 }
 
 export interface FlightState {
@@ -243,32 +243,51 @@ export class FlightSim {
     return kg;
   }
 
-  /** RCS shells still on (separation not done yet). */
-  public separated = false;
+  /** RCS shells already cracked open (by their key, in any phase of flight). */
+  public openShells = new Set<string>();
 
-  /** The rocket carries RCS thrusters whose shells haven't come off yet. */
-  public get canSeparate(): boolean {
-    return this.phase === 'FLYING' && !this.separated && this.vehicle.rcsCount > 0;
+  /** A shell is open once separated, or from the start if nothing hangs on it. */
+  private shellOpen(rcsId: string): boolean {
+    return this.openShells.has(rcsId) || !this.vehicle.parts.some(p => p.parentId === rcsId);
   }
 
-  /** RCS can steer: shells off, thrusters aboard and cold gas left. */
+  /** RCS thrusters that can fire: shell open and still aboard. */
+  public get activeRcsCount(): number {
+    return this.vehicle.parts.filter(p => p.type === 'RCS' && this.shellOpen(p.id)).length;
+  }
+
+  /** At least one RCS is free to steer (used by the renderer and hints). */
+  public get separated(): boolean {
+    return this.activeRcsCount > 0;
+  }
+
+  /** Some RCS shell with parts hanging on it is still closed. */
+  public get canSeparate(): boolean {
+    return this.phase === 'FLYING' && this.vehicle.parts.some(p => p.type === 'RCS' && !this.shellOpen(p.id));
+  }
+
+  /** RCS can steer: a shell open, thrusters aboard and cold gas left. */
   public get rcsReady(): boolean {
-    return this.separated && this.vehicle.rcsCount > 0 && this.coldGas > 1e-9;
+    return this.activeRcsCount > 0 && this.coldGas > 1e-9;
   }
 
   /**
-   * Phase separation: every RCS shell cracks open, and whatever hangs below a shell
-   * falls away and tumbles back down. The RCS thrusters can then steer in space.
+   * Shell separation, any time in flight. Every closed RCS shell bound to `key` (all of them with no key)
+   * cracks open: whatever hangs on it falls away and tumbles back down, the RCS thruster stays.
    */
-  public separate(): boolean {
-    if (!this.canSeparate) return false;
-    for (const rcs of this.vehicle.parts.filter(p => p.type === 'RCS')) {
+  public separate(key?: string): boolean {
+    if (this.phase !== 'FLYING') return false;
+    const shells = this.vehicle.parts.filter(
+      p => p.type === 'RCS' && !this.shellOpen(p.id) && (key === undefined || (p.separationKey ?? 'B') === key.toUpperCase())
+    );
+    if (shells.length === 0) return false;
+    for (const rcs of shells) {
+      this.openShells.add(rcs.id);
       for (const child of this.vehicle.parts.filter(p => p.parentId === rcs.id)) {
         if (this.vehicle.parts.some(p => p.id === child.id)) this.detach(subtreeIds(this.vehicle.parts, child.id), 2);
       }
     }
-    this.separated = true;
-    this.emit('SEPARATION', 'SEPARATION — shells off, RCS ready (A / D)');
+    this.emit('SEPARATION', 'SEPARATION — shell off, RCS ready (A / D)');
     return true;
   }
 
@@ -428,10 +447,10 @@ export class FlightSim {
     // In space the boosters can't steer at all: only RCS thrusters (shells off, cold gas left) can.
     const inSpace = rho <= 0;
     const rcsOn = inSpace && this.rcsReady && steer !== 0;
-    if (rcsOn) this.drawFuel(Math.abs(steer) * CONFIG.rcs.gasPerSecond * v.rcsCount * dt, false);
+    if (rcsOn) this.drawFuel(Math.abs(steer) * CONFIG.rcs.gasPerSecond * this.activeRcsCount * dt, false);
     const steerAuthority = inSpace
       ? rcsOn
-        ? CONFIG.rcs.torque * v.rcsCount
+        ? CONFIG.rcs.torque * this.activeRcsCount
         : 0
       : (v.hasCommandModule ? AIRFRAME.reactionWheelTorque + (thrust === 0 ? STEERING.rcsTorque : 0) : 0) +
         thrust * Math.sin(ENGINE.gimbalRange) * gimbalArm +
@@ -441,7 +460,7 @@ export class FlightSim {
     const rcsAeroAtten = Math.max(0.25, 1 - q / 2000);
     const rcs = inSpace
       ? rcsOn
-        ? steer * CONFIG.rcs.accel * v.rcsCount * mass
+        ? steer * CONFIG.rcs.accel * this.activeRcsCount * mass
         : 0
       : v.hasCommandModule
         ? steer * STEERING.rcsAcceleration * mass * rcsAeroAtten
@@ -858,7 +877,7 @@ export class FlightSim {
       stats: { ...this.stats },
       startFuel: this.startFuel,
       initialVehicle: this.initialVehicle,
-      separated: this.separated
+      openShells: [...this.openShells]
     };
   }
 
@@ -871,7 +890,7 @@ export class FlightSim {
     sim.onGround = snap.onGround;
     sim.hasLeftGround = snap.hasLeftGround;
     sim.stats = { ...snap.stats };
-    sim.separated = snap.separated;
+    sim.openShells = new Set(snap.openShells);
     sim.version = 1;
     return sim;
   }

@@ -13,6 +13,7 @@ import {
   predictRoverLanding,
   PROBLEM_INFO
 } from '../game/phases';
+import { normalizeKey } from '../core/separationKeys';
 import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, objectiveBonus, PlayerProgress, saveProgress } from '../game/progress';
 import { anchorBelt, checkBelt, Combo, generateBelt, generateLaneWaves, Rock, runnerSpeedAt } from '../game/rocks';
 import { createEvasiveRunnerState, EvasiveRunnerState, updateEvasiveRunner, RUNNER_CONFIG } from '../game/evasiveRunner';
@@ -351,7 +352,6 @@ export class FlightScene extends Phaser.Scene {
     this.keys.SPACE.on('down', () => {
       if (this.sim.phase === 'PRELAUNCH') this.startCountdown();
       else if (this.runnerState.promptActive) this.spacePressedThisFrame = true;
-      else if (this.separatePromptShown && this.sim.separate()) this.separatePromptShown = false;
       else if (this.runner.deploySatellite(this.sim)) this.fx.ring(this.world.rocketScreen(this.sim).x, this.world.rocketScreen(this.sim).y, WORLD_COLORS.rover, 50, 0.5);
       else if (this.runner.dropRover(this.sim)) this.fx.ring(this.world.rocketScreen(this.sim).x, this.world.rocketScreen(this.sim).y, WORLD_COLORS.rover, 50, 0.5);
     });
@@ -374,6 +374,14 @@ export class FlightScene extends Phaser.Scene {
       if (!this.result && this.launched) this.finishMission();
     });
     this.keys.ESC.on('down', () => this.returnToBuilder());
+    // Each RCS shell has its own key from the lab; it can be pressed any time in flight.
+    this.input.keyboard!.on('keydown', (e: KeyboardEvent) => {
+      if (this.result || !this.launched || e.repeat) return;
+      const key = normalizeKey(e.key.length === 1 ? e.key : '');
+      if (!key || !this.sim.separate(key)) return;
+      const at = this.world.rocketScreen(this.sim);
+      this.fx.ring(at.x, at.y, WORLD_COLORS.rover, 70, 0.5);
+    });
     this.keys.B.on('down', () => {
       if (this.result) this.returnToBuilder();
     });
@@ -879,19 +887,25 @@ export class FlightScene extends Phaser.Scene {
     return onImpactCourse(t) ? 'Land upright, under 10 m/s, on the blue site' : 'Burn backwards to drop out of orbit: aim the white ✕ at the blue site';
   }
 
+  /** Keys of the shells still closed, e.g. "B / G". */
+  private shellKeys(): string {
+    const keys = this.sim.vehicle.parts.filter(p => p.type === 'RCS' && this.sim.vehicle.parts.some(c => c.parentId === p.id) && !this.sim.openShells.has(p.id)).map(p => p.separationKey ?? 'B');
+    return [...new Set(keys)].join(' / ') || 'B';
+  }
+
   /** Offer SEPARATE once the rocket is in space or its boosters are dry. */
   private checkSeparatePrompt(t: FlightTelemetry): void {
     if (this.separatePromptShown || !this.sim.canSeparate) return;
     if (t.airDensity > 0 && this.sim.boosterFuel > 1e-9) return;
     this.separatePromptShown = true;
-    this.showBanner('SEPARATE! Press SPACE to crack the shells and wake the RCS', '#7dff66');
+    this.showBanner(`SEPARATE! Press ${this.shellKeys()} to crack the shells and wake the RCS`, '#7dff66');
   }
 
   /** One plain-language hint for right now. */
   private hint(t: FlightTelemetry): string {
     const r = this.runner;
     const mode = this.world.camera.mode;
-    if (this.separatePromptShown && this.sim.canSeparate) return 'SPACE: SEPARATE — drop the shells and steer with RCS (A / D)';
+    if (this.separatePromptShown && this.sim.canSeparate) return `${this.shellKeys()}: SEPARATE — drop the shells and steer with RCS (A / D)`;
     if (t.airDensity <= 0 && !this.sim.rcsReady) {
       if (this.sim.separated) return 'RCS out of cold gas: no steering in space';
       if (this.sim.vehicle.rcsCount === 0) return 'Boosters can’t steer in space: add RCS + cold gas next time  ·  W / S throttle';
