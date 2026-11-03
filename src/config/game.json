@@ -208,7 +208,8 @@
     "recoveryRefund": 0.5
   },
   "hazards": {
-    "_note": "Trouble on the way to the Moon (flights with a chosen payload). At each altitude (m above Earth) the dice roll: with chance `chance` one hazard from that band's list strikes. The seed comes from the flight, so every flight differs.",
+    "_note": "Switch: with enabled=false no hazard strikes (neither on the way up nor on the Moon landing) until they are tuned. Trouble on the way to the Moon (flights with a chosen payload). At each altitude (m above Earth) the dice roll: with chance `chance` one hazard from that band's list strikes. The seed comes from the flight, so every flight differs.",
+    "enabled": false,
     "chance": 0.6,
     "stages": [
       { "altitude": 1200, "band": "AIR" },

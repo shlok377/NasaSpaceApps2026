@@ -312,11 +312,26 @@ describe('phase numbering', () => {
 });
 
 describe('hazards on the way to the Moon', () => {
+  // Hazards are switched off in the config for now; these tests flip them on.
+  const hazardsOn = <T>(fn: () => T): T => {
+    CONFIG.hazards.enabled = true;
+    try {
+      return fn();
+    } finally {
+      CONFIG.hazards.enabled = false;
+    }
+  };
+
+  it('stays quiet while the config switch is off', () => {
+    expect(CONFIG.hazards.enabled).toBe(false);
+    expect(planHazards(() => 0.3)).toEqual([]);
+  });
+
   it('rolls a seeded plan: sure strikes pick from the stage band, a high roll means a quiet flight', () => {
-    const plan = planHazards(() => 0.3);
+    const plan = hazardsOn(() => planHazards(() => 0.3));
     expect(plan.map(h => h.altitude)).toEqual([...plan.map(h => h.altitude)].sort((a, b) => a - b));
     expect(plan.every(h => h.id !== null)).toBe(true);
-    expect(planHazards(() => 0.95).every(h => h.id === null)).toBe(true);
+    expect(hazardsOn(() => planHazards(() => 0.95)).every(h => h.id === null)).toBe(true);
   });
 
   it('strikes when the rocket reaches the stage altitude, only on a chosen-payload flight', () => {
@@ -325,8 +340,8 @@ describe('hazards on the way to the Moon', () => {
       sim.launch();
       sim.onGround = false;
       sim.state.y = 1_300;
-      const run = new PhaseRunner('ORBIT', 0, () => 0.3, payload);
-      run.update(sim, 1 / 120);
+      const run = hazardsOn(() => new PhaseRunner('ORBIT', 0, () => 0.3, payload));
+      hazardsOn(() => run.update(sim, 1 / 120));
       return run;
     };
     expect(fly('CREW').problem).not.toBeNull();

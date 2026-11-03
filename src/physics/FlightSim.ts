@@ -256,13 +256,13 @@ export class FlightSim {
   public openShells = new Set<string>();
 
   /** A shell is open once separated, or from the start if nothing hangs on it. */
-  private shellOpen(rcsId: string): boolean {
+  public isShellOpen(rcsId: string): boolean {
     return this.openShells.has(rcsId) || !this.vehicle.parts.some(p => p.parentId === rcsId);
   }
 
   /** RCS thrusters that can fire: shell open and still aboard. */
   public get activeRcsCount(): number {
-    return this.vehicle.parts.filter(p => p.type === 'RCS' && this.shellOpen(p.id)).length;
+    return this.vehicle.parts.filter(p => p.type === 'RCS' && this.isShellOpen(p.id)).length;
   }
 
   /** At least one RCS is free to steer (used by the renderer and hints). */
@@ -272,13 +272,13 @@ export class FlightSim {
 
   /** Keys of the RCS shells still closed (parts hang on them), without repeats. */
   public get closedShellKeys(): string[] {
-    const keys = this.vehicle.parts.filter(p => p.type === 'RCS' && !this.shellOpen(p.id)).map(p => p.separationKey ?? DEFAULT_SEPARATION_KEY);
+    const keys = this.vehicle.parts.filter(p => p.type === 'RCS' && !this.isShellOpen(p.id)).map(p => p.separationKey ?? DEFAULT_SEPARATION_KEY);
     return [...new Set(keys)];
   }
 
   /** Some RCS shell with parts hanging on it is still closed. */
   public get canSeparate(): boolean {
-    return this.phase === 'FLYING' && this.vehicle.parts.some(p => p.type === 'RCS' && !this.shellOpen(p.id));
+    return this.phase === 'FLYING' && this.vehicle.parts.some(p => p.type === 'RCS' && !this.isShellOpen(p.id));
   }
 
   /** RCS can steer: a shell open, thrusters aboard and cold gas left. */
@@ -293,7 +293,7 @@ export class FlightSim {
   public separate(key?: string): boolean {
     if (this.phase !== 'FLYING') return false;
     const shells = this.vehicle.parts.filter(
-      p => p.type === 'RCS' && !this.shellOpen(p.id) && (key === undefined || (p.separationKey ?? DEFAULT_SEPARATION_KEY) === key.toUpperCase())
+      p => p.type === 'RCS' && !this.isShellOpen(p.id) && (key === undefined || (p.separationKey ?? DEFAULT_SEPARATION_KEY) === key.toUpperCase())
     );
     if (shells.length === 0) return false;
     for (const rcs of shells) {

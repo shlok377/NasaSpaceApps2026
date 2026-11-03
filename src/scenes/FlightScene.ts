@@ -223,7 +223,7 @@ export class FlightScene extends Phaser.Scene {
     this.checkpoint = null;
     this.landedRovers = [];
     this.phasePaid = 0;
-    this.mission = currentMission(this.progress.completedMissions);
+    this.mission = currentMission(this.progress.completedMissions, this.payload);
     this.stunts = new StuntTracker();
     this.rocks = generateBelt(Math.floor(Math.random() * 1e9));
     this.combo = new Combo();

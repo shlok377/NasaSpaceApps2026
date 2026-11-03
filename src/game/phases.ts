@@ -375,6 +375,7 @@ export interface Checkpoint {
 /** Roll this flight's hazards: at each stage's altitude, `chance` of one from the stage's band. */
 export function planHazards(random: () => number): PhaseRunner['hazardPlan'] {
   const cfg = CONFIG.hazards;
+  if (!cfg.enabled) return [];
   return cfg.stages.map(stage => {
     const band = cfg.bands[stage.band as keyof typeof cfg.bands] as OrbitProblemId[];
     const strikes = random() < cfg.chance;
@@ -619,7 +620,7 @@ export class PhaseRunner {
 
   private updateLandingPhase(sim: FlightSim, t: FlightTelemetry, dt: number, input: ProblemInput): void {
     if (this.problem) this.runProblem(sim, dt, input);
-    if (!onImpactCourse(t)) return;
+    if (!onImpactCourse(t) || !CONFIG.hazards.enabled) return;
     const order: LandingProblemId[] = ['BOULDERS', 'FLAMEOUT', 'RADAR_FAILURE'];
     for (const id of order) {
       if (this.triggered.has(id) || this.problem) continue;

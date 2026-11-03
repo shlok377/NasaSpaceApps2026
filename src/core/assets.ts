@@ -76,7 +76,7 @@ export function preloadGameAssets(scene: Phaser.Scene): void {
  */
 export function getPartTextureKey(
   type: PartType,
-  finOrientation?: 'LEFT' | 'RIGHT',
+  finOrientation?: 'LEFT' | 'RIGHT' | 'TOP',
   fuel?: number,
   kind?: FuelKind | PayloadKind,
   /** RCS only: true once the shell has cracked off. */

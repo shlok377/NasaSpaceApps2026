@@ -128,6 +128,10 @@ describe('shell separation by key', () => {
     expect(blocks()).toBe(1);
     expect(sim.openShells.has(left.id)).toBe(true);
     expect(sim.openShells.has(right.id)).toBe(false);
+    // Each RCS reports its own shell, and only the cracked one fires.
+    expect(sim.isShellOpen(left.id)).toBe(true);
+    expect(sim.isShellOpen(right.id)).toBe(false);
+    expect(sim.activeRcsCount).toBe(1);
     expect(sim.separate('G')).toBe(false);
     expect(sim.separate('H')).toBe(true);
     expect(blocks()).toBe(0);

@@ -45,8 +45,8 @@ const VARIANTS: Record<VariantPart, Array<{ kind: PartKind; label: string; color
     }
   ]
 };
-/** RCS thrusters sit on the sides with their nozzle facing outward. */
-const rcsAngle = (type: PartType, side?: 'LEFT' | 'RIGHT') => (type !== 'RCS' ? 0 : side === 'RIGHT' ? -90 : 90);
+/** RCS thrusters face their nozzle outward: left, right or up (the art points down at 0). */
+const rcsAngle = (type: PartType, side?: 'LEFT' | 'RIGHT' | 'TOP') => (type !== 'RCS' ? 0 : side === 'TOP' ? 180 : side === 'RIGHT' ? -90 : 90);
 const isVariantPart = (type: PartType): type is VariantPart => type in VARIANTS;
 /** Variant swatches on a slot, in slot-local coordinates (centre of the slot is 0,0). */
 const CHIP = 12;
@@ -567,7 +567,12 @@ export class BuilderScene extends Phaser.Scene {
     if (grant > 0) saveProgress(progress);
     this.money = progress.money;
     this.unlockedFuels = progress.unlockedFuels;
-    const mission = currentMission(progress.completedMissions);
+    this.showMission(progress.completedMissions, grant);
+  }
+
+  /** The mission panel follows the chosen payload, so swapping it updates the goal and reward at once. */
+  private showMission(completed: readonly string[], grant = 0): void {
+    const mission = currentMission(completed, this.rocketTree.getRootNode().payload ?? 'CREW');
     this.missionText.setText(mission ? mission.goal : 'All missions complete — chase the high score!');
     const reward = mission ? `REWARD +$${mission.reward}` : '';
     this.rewardText.setText(grant > 0 ? `GRANT +$${grant}!  ${reward}` : reward);
@@ -641,9 +646,13 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   /** Texture for a part in its current look; falls back to the plain sprite if that art isn't loaded. */
-  private partTexture(type: PartType, finOrientation?: 'LEFT' | 'RIGHT', kind?: PartKind): string {
+  private partTexture(type: PartType, finOrientation?: 'LEFT' | 'RIGHT' | 'TOP', kind?: PartKind): string {
     const look = kind ?? (isVariantPart(type) ? this.partKinds[type] : undefined);
-    if (type === 'ENGINE' && look === 'RCS') return this.partTexture('RCS', finOrientation);
+    // The picker shows the bare engine; the shell only appears once it is bolted onto the rocket.
+    if (type === 'ENGINE' && look === 'RCS') {
+      const bare = getPartTextureKey('RCS', finOrientation, undefined, undefined, true);
+      return this.textures.exists(bare) ? bare : this.partTexture('RCS', finOrientation);
+    }
     const key = getPartTextureKey(type, finOrientation, undefined, look as FuelKind | PayloadKind | undefined);
     return this.textures.exists(key) ? key : getPartTextureKey(type, finOrientation);
   }
@@ -854,6 +863,7 @@ export class BuilderScene extends Phaser.Scene {
       this.payloadTag = tag;
       this.tweens.add({ targets: tag, y: -18, alpha: 0, delay: 1600, duration: 500, onComplete: () => tag.destroy() });
     }
+    this.showMission(loadProgress().completedMissions);
     this.syncExportableState();
   }
 
@@ -1035,17 +1045,24 @@ export class BuilderScene extends Phaser.Scene {
     const node = this.shellTipId ? this.rocketTree.getAllNodes().find(n => n.id === this.shellTipId) : undefined;
     if (!node) return;
     const size = BuilderScene.CELL_SIZE;
-    const warning = this.shellTipNote || this.rocketTree.shellWarning(node.id) || '';
+    // Only a refused key shows a note; an RCS with nothing on it just works (its key does nothing).
+    const warning = this.shellTipNote;
     const w = 250;
-    const h = warning ? 92 : 58;
+    const h = warning ? 112 : 86;
     const x = Math.min(this.gridOriginX + node.gridX * size + size / 2 - w / 2, this.scale.width - w - 8);
     const y = this.gridOriginY + node.gridY * size - h - 10;
     const g = this.add.graphics();
     drawPixelPanel(g, 0, 0, w, h);
-    const key = pixelTitle(this, 12, 10, `SHELL KEY: [${this.rocketTree.getSeparationKey(node.id)}]`, 9, PX.text.accent);
-    const how = pixelBody(this, 12, 30, 'Press a key to rebind', 16, PX.text.muted);
-    const items: Phaser.GameObjects.GameObject[] = [g, key, how];
-    if (warning) items.push(pixelBody(this, 12, 54, warning, 15, '#ff8a8a').setWordWrapWidth(w - 24));
+    const title = pixelTitle(this, 12, 10, 'SEPARATION KEY', 9, PX.text.accent);
+    // The bound key in a big framed box, so it reads at a glance.
+    g.fillStyle(0x01020a, 1);
+    g.fillRect(12, 30, 46, 46);
+    g.lineStyle(2, PX.accent, 1);
+    g.strokeRect(13, 31, 44, 44);
+    const key = pixelTitle(this, 35, 54, this.rocketTree.getSeparationKey(node.id), 26, PX.text.cream).setOrigin(0.5);
+    const how = pixelBody(this, 70, 40, 'Press a key\nto rebind', 18, PX.text.muted);
+    const items: Phaser.GameObjects.GameObject[] = [g, title, key, how];
+    if (warning) items.push(pixelBody(this, 12, 84, warning, 15, '#ff8a8a').setWordWrapWidth(w - 24));
     this.shellTip = this.add.container(Math.max(8, x), Math.max(8, y), items).setDepth(60);
   }
 
@@ -1067,7 +1084,7 @@ export class BuilderScene extends Phaser.Scene {
     this.ghostGfx.clear();
     this.ghostText.setText('');
     this.ghostSprite.setVisible(false);
-    const showGhost = (finOrientation: 'LEFT' | 'RIGHT', alpha: number) =>
+    const showGhost = (finOrientation: 'LEFT' | 'RIGHT' | 'TOP', alpha: number) =>
       this.ghostSprite.setTexture(this.partTexture(type, finOrientation)).setDisplaySize(size, size).setAngle(rcsAngle(type, finOrientation)).setAlpha(alpha).setVisible(true);
 
     if (inside) {
@@ -1243,8 +1260,22 @@ export class BuilderScene extends Phaser.Scene {
       .setDisplaySize(size, size)
       .setAngle(rcsAngle(node.type, node.finOrientation));
     blockContainer.add(sprite);
+    if (node.type === 'RCS') blockContainer.add(this.shellBadge(size));
     this.blocksContainer.add(blockContainer);
     this.blockDisplayMap.set(node.id, blockContainer);
+  }
+
+  /** A small "!" on an RCS: hover it to set the key that separates its shell. */
+  private shellBadge(size: number): Phaser.GameObjects.Container {
+    const g = this.add.graphics();
+    g.fillStyle(0x01020a, 1);
+    g.fillRect(-12, -12, 24, 24);
+    g.fillStyle(PX.accent, 1);
+    g.fillRect(-10, -10, 20, 20);
+    const mark = pixelTitle(this, 0, 1, '!', 16, '#1a1020').setOrigin(0.5);
+    const badge = this.add.container(size / 2 - 12, -size / 2 + 12, [g, mark]);
+    this.tweens.add({ targets: badge, scale: 1.15, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    return badge;
   }
 
   private renderAvailableSockets(): void {

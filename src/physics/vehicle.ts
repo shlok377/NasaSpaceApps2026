@@ -11,7 +11,7 @@ export interface FlightPart {
   separationKey?: string;
   gridX: number;
   gridY: number;
-  finOrientation?: 'LEFT' | 'RIGHT';
+  finOrientation?: 'LEFT' | 'RIGHT' | 'TOP';
   /** The part this one is bolted to (null for the command module). */
   parentId: string | null;
   /** Joints between this part and the command module. */

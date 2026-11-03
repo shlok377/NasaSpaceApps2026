@@ -488,7 +488,7 @@ export class WorldRenderer {
 
   public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, overlay: MissionOverlay, runnerState?: EvasiveRunnerState): void {
     this.labelIndex = 0;
-    this.rcsRevealed = sim.separated;
+    this.openRcs = new Set(sim.vehicle.parts.filter(p => p.type === 'RCS' && sim.isShellOpen(p.id)).map(p => p.id));
     this.drawSky(sim, t);
     const g = this.worldGfx;
     g.clear();
@@ -1377,8 +1377,8 @@ export class WorldRenderer {
     }
   }
 
-  /** RCS thrusters show their launch shell until separation cracks it off. */
-  private rcsRevealed = false;
+  /** RCS thrusters show their launch shell until their own separation cracks it off. */
+  private openRcs = new Set<string>();
 
   private renderPartSprite(p: FlightPart, sx: number, sy: number, rot: number, cellPx: number, alpha: number, fuelRemaining?: number): void {
     let img = this.partSpritesPool[this.activeSpriteCount];
@@ -1389,11 +1389,11 @@ export class WorldRenderer {
     }
     this.activeSpriteCount++;
 
-    const texKey = getPartTextureKey(p.type, p.finOrientation, fuelRemaining, p.fuelKind, this.rcsRevealed);
+    const texKey = getPartTextureKey(p.type, p.finOrientation, fuelRemaining, p.fuelKind, this.openRcs.has(p.id));
     img.setTexture(texKey);
     img.setPosition(sx, sy);
     // RCS nozzles face outward from the side they hang on.
-    img.setRotation(rot + (p.type === 'RCS' ? (p.finOrientation === 'RIGHT' ? -Math.PI / 2 : Math.PI / 2) : 0));
+    img.setRotation(rot + (p.type === 'RCS' ? (p.finOrientation === 'TOP' ? Math.PI : p.finOrientation === 'RIGHT' ? -Math.PI / 2 : Math.PI / 2) : 0));
     img.setDisplaySize(cellPx, cellPx);
     img.setAlpha(alpha);
     img.setVisible(true);

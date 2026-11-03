@@ -29,6 +29,8 @@ export interface Mission {
   /** One plain-language line for the pad and the builder. */
   goal: string;
   reward: number;
+  /** Only this payload can finish it; it is skipped for the others. */
+  payload?: PayloadKind;
   check(ctx: MissionContext): boolean;
 }
 
@@ -43,15 +45,16 @@ export const MISSIONS: Mission[] = [
   { id: 'rock-dodger', title: 'Rock dodger', goal: 'Get 3 near misses in the rock belt', reward: 50, check: c => nearMisses(c) >= 3 },
   { id: 'moon-soi', title: 'Moonbound', goal: 'Reach the Moon’s gravity', reward: 60, check: c => c.stats.reachedMoonSoi },
   { id: 'orbiter', title: 'Phase 1: Lunar orbiter', goal: 'Get into a stable orbit around the Moon', reward: 80, check: c => c.phasesDone >= 1 },
-  { id: 'satellite', title: 'Satellite out', goal: 'Eject a satellite from a stable lunar orbit', reward: 80, check: c => c.payload === 'SATELLITE' && c.objectiveDone },
-  { id: 'rover', title: 'Rover delivered', goal: 'Crash a rover onto its landing zone', reward: 100, check: c => c.payload === 'ROVER' && c.objectiveDone },
-  { id: 'crew', title: 'Human landing', goal: 'Land the crew on the Moon', reward: 150, check: c => c.payload === 'CREW' && c.objectiveDone },
+  { id: 'satellite', title: 'Satellite out', goal: 'Eject a satellite from a stable lunar orbit', reward: 80, payload: 'SATELLITE', check: c => c.payload === 'SATELLITE' && c.objectiveDone },
+  { id: 'rover', title: 'Rover delivered', goal: 'Crash a rover onto its landing zone', reward: 100, payload: 'ROVER', check: c => c.payload === 'ROVER' && c.objectiveDone },
+  { id: 'crew', title: 'Human landing', goal: 'Land the crew on the Moon', reward: 150, payload: 'CREW', check: c => c.payload === 'CREW' && c.objectiveDone },
   { id: 'cool-head', title: 'Cool head', goal: 'Finish any mission without a single problem going wrong', reward: 200, check: c => c.objectiveDone && c.problemsFailed === 0 },
-  { id: 'lean-lander', title: 'Lean lander', goal: 'Land the crew with a rocket costing $120 or less', reward: 250, check: c => c.payload === 'CREW' && c.objectiveDone && c.cost <= 120 }
+  { id: 'lean-lander', title: 'Lean lander', goal: 'Land the crew with a rocket costing $120 or less', reward: 250, payload: 'CREW', check: c => c.payload === 'CREW' && c.objectiveDone && c.cost <= 120 }
 ];
 
-export function currentMission(completed: readonly string[]): Mission | null {
-  return MISSIONS.find(m => !completed.includes(m.id)) ?? null;
+/** The first mission not yet done that the chosen payload can actually finish. */
+export function currentMission(completed: readonly string[], payload?: PayloadKind): Mission | null {
+  return MISSIONS.find(m => !completed.includes(m.id) && (!payload || !m.payload || m.payload === payload)) ?? null;
 }
 
 /** Missions newly completed by this flight. */
