@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done (branch fixing_gameplay)
 
 - [ ] Attach validation: RCS only on EAST/WEST ports of other parts
 - [ ] RCS exposes four ports

@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** done (branch fixing_gameplay)
 
 - [ ] Binding stored with the rocket
 - [ ] Reserved keys rejected

@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done (branch fixing_gameplay)
 
 - [ ] Payload masses in game.json: SATELLITE < ROVER < COCKPIT, counted in rocket mass/TWR
 - [ ] Objective per payload exists as data (satellite: orbit+eject, rover: orbit+sprite crash-land, crew: soft landing on site)

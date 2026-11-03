@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done (branch fixing_gameplay)
 
 - [ ] Each payload ends the flight on its own success/fail condition
 - [ ] Result screen shows the objective outcome

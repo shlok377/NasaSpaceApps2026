@@ -372,6 +372,16 @@ export interface Checkpoint {
   awardCount: number;
 }
 
+/** Roll this flight's hazards: at each stage's altitude, `chance` of one from the stage's band. */
+export function planHazards(random: () => number): PhaseRunner['hazardPlan'] {
+  const cfg = CONFIG.hazards;
+  return cfg.stages.map(stage => {
+    const band = cfg.bands[stage.band as keyof typeof cfg.bands] as OrbitProblemId[];
+    const strikes = random() < cfg.chance;
+    return { altitude: stage.altitude, id: strikes ? band[Math.min(band.length - 1, Math.floor(random() * band.length))] : null };
+  });
+}
+
 export class PhaseRunner {
   public phase: PhaseId;
   public phasesDone: number;
@@ -396,6 +406,9 @@ export class PhaseRunner {
   /** The ejected satellite, drifting on its own in orbit. */
   public satellite: RoverCapsule | null = null;
 
+  /** Hazards still to come on the way to the Moon, in altitude order (id null = the dice said no). */
+  public hazardPlan: Array<{ altitude: number; id: OrbitProblemId | LandingProblemId | null }> = [];
+
   private queue: ProblemId[] = [];
   private gap = 0;
   private triggered = new Set<LandingProblemId>();
@@ -407,6 +420,7 @@ export class PhaseRunner {
     if (payload === 'ROVER') this.sparesLeft = 0;
     this.phase = start;
     this.phasesDone = phasesDone;
+    if (payload && start === 'ORBIT') this.hazardPlan = planHazards(random);
     this.enter(start);
   }
 
@@ -518,6 +532,7 @@ export class PhaseRunner {
 
     switch (this.phase) {
       case 'ORBIT':
+        if (this.payload) this.updateHazards(sim, t, dt, input);
         this.stableFor = isStableOrbit(t) ? this.stableFor + dt : 0;
         if (this.stableFor >= ORBIT_CFG.holdSeconds) this.finishPhase(sim);
         break;
@@ -542,6 +557,20 @@ export class PhaseRunner {
     else this.failedProblems++;
     this.events.push({ kind: 'PROBLEM_END', problem: p });
     this.problem = null;
+  }
+
+  /** Trouble on the way up: run the active hazard, or start the next one when its altitude is reached. */
+  private updateHazards(sim: FlightSim, t: FlightTelemetry, dt: number, input: ProblemInput): void {
+    if (this.problem) {
+      this.runProblem(sim, dt, input);
+      return;
+    }
+    const next = this.hazardPlan[0];
+    if (!next || t.moonOrbit || t.earthAltitude < next.altitude) return;
+    this.hazardPlan.shift();
+    if (!next.id) return;
+    this.problem = startProblem(next.id, sim, this.random);
+    this.events.push({ kind: 'PROBLEM_START', problem: this.problem });
   }
 
   private updateRoverPhase(sim: FlightSim, t: FlightTelemetry, dt: number, input: ProblemInput): void {

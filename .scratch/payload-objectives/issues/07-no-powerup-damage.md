@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done (branch fixing_gameplay)
 
 - [ ] Aids removed
 - [ ] Hull integrity bar and failure at 0

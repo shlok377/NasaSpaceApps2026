@@ -6,7 +6,7 @@ import { moonAngleOf, surfaceDistance } from '../physics/bodies';
 import { MOON, MOON_CENTER } from '../physics/constants';
 import { ControlInput, FlightSim } from '../physics/FlightSim';
 import { buildFlightVehicle } from '../physics/vehicle';
-import { chainFor, isStableOrbit, phaseNumber, stepsDone, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, updateProblem } from './phases';
+import { chainFor, isStableOrbit, phaseNumber, planHazards, stepsDone, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, updateProblem } from './phases';
 
 type Layout = Array<[number, number, PartType, FuelKind?]>;
 const STAGED: Layout = [
@@ -308,5 +308,28 @@ describe('phase numbering', () => {
     expect(phaseNumber(chainFor('CREW'), 'LANDING')).toBe(2);
     expect(stepsDone(chainFor('ROVER'), 'ROVER', false)).toBe(1);
     expect(stepsDone(chainFor('ROVER'), 'ROVER', true)).toBe(2);
+  });
+});
+
+describe('hazards on the way to the Moon', () => {
+  it('rolls a seeded plan: sure strikes pick from the stage band, a high roll means a quiet flight', () => {
+    const plan = planHazards(() => 0.3);
+    expect(plan.map(h => h.altitude)).toEqual([...plan.map(h => h.altitude)].sort((a, b) => a - b));
+    expect(plan.every(h => h.id !== null)).toBe(true);
+    expect(planHazards(() => 0.95).every(h => h.id === null)).toBe(true);
+  });
+
+  it('strikes when the rocket reaches the stage altitude, only on a chosen-payload flight', () => {
+    const fly = (payload?: 'CREW') => {
+      const sim = new FlightSim(vehicle(STAGED));
+      sim.launch();
+      sim.onGround = false;
+      sim.state.y = 1_300;
+      const run = new PhaseRunner('ORBIT', 0, () => 0.3, payload);
+      run.update(sim, 1 / 120);
+      return run;
+    };
+    expect(fly('CREW').problem).not.toBeNull();
+    expect(fly().problem).toBeNull();
   });
 });

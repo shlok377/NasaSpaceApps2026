@@ -207,6 +207,19 @@
     "padBonus": 100,
     "recoveryRefund": 0.5
   },
+  "hazards": {
+    "_note": "Trouble on the way to the Moon (flights with a chosen payload). At each altitude (m above Earth) the dice roll: with chance `chance` one hazard from that band's list strikes. The seed comes from the flight, so every flight differs.",
+    "chance": 0.6,
+    "stages": [
+      { "altitude": 1200, "band": "AIR" },
+      { "altitude": 4600, "band": "SPACE" },
+      { "altitude": 5400, "band": "SPACE" }
+    ],
+    "bands": {
+      "AIR": ["STUCK_THRUSTER", "FUEL_LEAK", "FLAMEOUT"],
+      "SPACE": ["STUCK_THRUSTER", "FUEL_LEAK"]
+    }
+  },
   "hull": {
     "_note": "Hull integrity is 100 at launch; every part knocked or snapped off costs perPart. At 0 the flight is lost.",
     "perPart": 25

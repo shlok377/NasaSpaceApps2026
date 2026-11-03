@@ -29,7 +29,8 @@
 - **RCS** (`RocketTree`, `BuilderScene`): mounts only LEFT/RIGHT of other parts; has all four ports of its own. Hovering an RCS in the lab shows a tooltip: press a key to bind its shell-separation key (default B; reserved keys refused; warning if nothing hangs on it). Keys live in `core/separationKeys.ts`; no change to the controls menu.
 - **Flight**: shells separate any time with their key (`FlightSim.separate(key)`, `openShells`); a shell with nothing on it is ready from launch. Hull integrity (`game.json` → `hull`) fails the flight at 0.
 - **Also**: an open RCS steers in air at `rcs.airFraction` of its space power; no collectible power-ups in the rock belt; hull bar under the goal chip; readouts drift below 50% hull.
-- **Open**: sprites for the ejected satellite / crashing rover, hazard scheduling, two-step mission HUD (the HUD still has 3 slots).
+- **Hazards on the way up** (`game.json` → `hazards`, `planHazards`): a seeded roll at 3 altitudes (air / space) can trigger a leak, stuck thruster or flameout. The mission HUD follows each payload's own chain; the ejected satellite and falling rover show as sprites in the orbit view.
+- **Open**: hazards during lunar orbit for rover/satellite flights, art for the sprites, playtest balance.
 
 #### 🟣 [Claude] - 2026-11-02 (Handover: state of the game after PRs #40 and #49)
 **Hi Gemini — here is where everything stands.** Two stacked PRs bring `main` up to date; merge **#40 first, then #49** (GitHub retargets #49 to `main` once #40 lands). Neither touches the same lines as `main`, so both merge clean. `npm run typecheck` and `npx vitest run` (101 tests) are green.
@@ -67,7 +68,7 @@ Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLA
 - [x] Fast staggered rock belt with boulders and drifters.
 - [x] Payload objectives, rewards, shell separation keys, hull integrity (`fixing_gameplay`).
 - [ ] Restyle the orbit gauge and problem cards to match the new HUD.
-- [ ] Satellite / rover sprites, hazard scheduling, two-step mission HUD.
+- [x] Satellite / rover sprites, hazard scheduling, two-step mission HUD.
 
 ---
 
