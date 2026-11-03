@@ -181,3 +181,23 @@ describe('payload mass', () => {
     expect(root()).toBe(PAYLOADS.CREW.mass);
   });
 });
+
+describe('RCS mounting', () => {
+  it('bolts only to the left or right of another part', () => {
+    const tree = new RocketTree(7, 5);
+    expect(tree.attachPart(7, 6, 'RCS').success).toBe(false); // below the cockpit
+    expect(tree.attachPart(7, 4, 'RCS').success).toBe(false); // above it
+    expect(tree.attachPart(8, 5, 'RCS').success).toBe(true);
+    expect(tree.attachPart(6, 5, 'RCS').success).toBe(true);
+  });
+
+  it('lets other parts hang on its top, bottom and free side', () => {
+    const tree = new RocketTree(7, 5);
+    const rcs = tree.attachPart(8, 5, 'RCS').node!;
+    const open = tree.getAvailablePorts().filter(p => p.nodeId === rcs.id).map(p => p.direction).sort();
+    expect(open).toEqual(['EAST', 'NORTH', 'SOUTH']);
+    expect(tree.attachPart(8, 4, 'STRUCTURAL').success).toBe(true);
+    expect(tree.attachPart(8, 6, 'FUEL_TANK').success).toBe(true);
+    expect(tree.attachPart(9, 5, 'STRUCTURAL').success).toBe(true);
+  });
+});

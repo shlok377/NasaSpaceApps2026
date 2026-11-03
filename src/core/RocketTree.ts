@@ -94,8 +94,8 @@ export class RocketTree {
       if (node.type === 'COCKPIT' || node.type === 'FUEL_TANK' || node.type === 'STRUCTURAL') {
         exposedDirections.push('NORTH', 'SOUTH', 'EAST', 'WEST');
       }
-      // Parts can hang below an RCS shell; they fall away when the shell separates.
-      if (node.type === 'RCS') exposedDirections.push('SOUTH');
+      // Parts can hang on any free side of an RCS shell; they fall away when the shell separates.
+      if (node.type === 'RCS') exposedDirections.push('NORTH', 'SOUTH', 'EAST', 'WEST');
 
       for (const dir of exposedDirections) {
         // If this port is connected to parent, it's not open

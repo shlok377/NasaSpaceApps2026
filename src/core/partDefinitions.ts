@@ -78,8 +78,8 @@ export const PART_DEFINITIONS: Record<PartType, PartDefinition> = {
   RCS: {
     type: 'RCS',
     label: 'RCS',
-    // Bolts to the side of the rocket; parts can hang below its shell.
-    defaultPorts: ['EAST', 'WEST', 'SOUTH'],
+    // Bolts to the left or right of another part; parts can hang on any other side of its shell.
+    defaultPorts: ['NORTH', 'SOUTH', 'EAST', 'WEST'],
     ...stats('RCS'),
     color: 0x9fe8ff,
     textureKey: 'tex_rcs'
