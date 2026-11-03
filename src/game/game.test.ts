@@ -381,3 +381,9 @@ describe('payout breakdown', () => {
     expect(objectiveBonus(true, 400, 0, 10)).toBe(b.clean + b.cheap);
   });
 });
+
+describe('no power-ups', () => {
+  it('the rock belt holds nothing to collect', () => {
+    expect(generateBelt(7).filter(r => r.kind !== 'ROCK')).toHaveLength(0);
+  });
+});

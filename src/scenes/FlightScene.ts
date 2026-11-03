@@ -24,7 +24,8 @@ import { ENGINE, FINS, G0, LIMITS, ROCK_BELT, WORLD } from '../physics/constants
 import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physics/FlightSim';
 import { evaluateMission, MAX_STARS, MissionResult, OUTCOME_PAYOUT } from '../physics/mission';
 import { analyzeVehicle, buildFlightVehicle, FlightVehicle, VehicleReport } from '../physics/vehicle';
-import { GoalChip, HeightLadder, hudFrame, InstrumentChip, MoneyChip } from '../ui/CornerHud';
+import { distortedReading } from '../physics/damage';
+import { GoalChip, HeightLadder, HullBar, hudFrame, InstrumentChip, MoneyChip } from '../ui/CornerHud';
 import { SkyCards } from '../ui/SkyCards';
 import { Milestone } from '../ui/JourneyArc';
 import { LaunchButton } from '../ui/LaunchButton';
@@ -120,6 +121,7 @@ export class FlightScene extends Phaser.Scene {
 
   // HUD
   private goalChip!: GoalChip;
+  private hullBar!: HullBar;
   private orbitGauge!: OrbitGauge;
   private problemCard!: ProblemCard;
   private ladder!: HeightLadder;
@@ -265,6 +267,7 @@ export class FlightScene extends Phaser.Scene {
 
   private createHud(): void {
     this.goalChip = new GoalChip(this);
+    this.hullBar = new HullBar(this);
     this.orbitGauge = new OrbitGauge(this);
     this.problemCard = new ProblemCard(this);
     this.ladder = new HeightLadder(
@@ -798,7 +801,9 @@ export class FlightScene extends Phaser.Scene {
     const onPad = this.sim.phase === 'PRELAUNCH' && this.countdown === null;
 
     this.goalChip.setVisible(!onPad && !this.result);
-    this.goalChip.update(r.phase, r.phasesDone, this.objective(t) + (this.sim.hull < 100 ? `  ·  HULL ${this.sim.hull}%` : ''));
+    this.goalChip.update(r.phase, r.phasesDone, this.objective(t));
+    this.hullBar.setVisible(!onPad && !this.result);
+    this.hullBar.update(this.sim.hull);
 
     const ascent = mode === 'ASCENT';
     this.ladder.setVisible(ascent && !this.result);
@@ -847,10 +852,14 @@ export class FlightScene extends Phaser.Scene {
       if (r.problem?.id === 'RADAR_FAILURE') {
         this.readoutText.setPosition(p.x + 60, p.y).setColor('#f87171').setText('RADAR OUT\n— — —');
       } else {
+        // A damaged hull makes the numbers drift (the colours still use the true speed).
+        const wobble = Math.sin(this.sim.state.time * 5.3) * Math.cos(this.sim.state.time * 1.7);
+        const shownSpeed = distortedReading(t.speed, this.sim.hull, wobble);
+        const shownAlt = distortedReading(Math.max(0, t.altitude), this.sim.hull, -wobble);
         const color = t.speed <= LIMITS.crashSpeed ? UI.greenText : t.speed <= LIMITS.bounceSpeed ? '#fbbf24' : '#f87171';
         const verdict = t.speed <= LIMITS.crashSpeed ? 'SAFE' : t.speed <= LIMITS.bounceSpeed ? 'BOUNCY' : 'TOO FAST';
         const tilt = Math.abs(t.pitchFromVertical) > LIMITS.maxLandingTilt && t.altitude < 40 ? '  ·  TILTED!' : '';
-        this.readoutText.setPosition(p.x + 60, p.y).setColor(color).setText(`${Math.round(t.speed)} m/s  ${verdict}${tilt}\n${formatDistance(Math.max(0, t.altitude))} to go`);
+        this.readoutText.setPosition(p.x + 60, p.y).setColor(color).setText(`${Math.round(shownSpeed)} m/s  ${verdict}${tilt}\n${formatDistance(shownAlt)} to go`);
       }
     }
 

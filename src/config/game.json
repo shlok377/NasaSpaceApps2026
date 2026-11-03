@@ -91,7 +91,7 @@
     "densityTop": 3.5,
     "nearMissMargin": 6,
     "comboWindow": 10,
-    "fuelCans": 3,
+    "fuelCans": 0,
     "fuelCanRefill": 0.12,
     "rockRadiusMin": 1.5,
     "rockRadiusMax": 5,

@@ -133,6 +133,43 @@ export class GoalChip {
 }
 
 // ---------------------------------------------------------------------------
+// Under the goal: hull integrity
+// ---------------------------------------------------------------------------
+
+/** A slim bar that drains as parts are lost: green, then amber, then red. */
+export class HullBar {
+  private readonly gfx: Phaser.GameObjects.Graphics;
+  private readonly label: Phaser.GameObjects.Text;
+  private readonly container: Phaser.GameObjects.Container;
+  private shown = -1;
+
+  constructor(scene: Phaser.Scene, private readonly x = 20, private readonly y = 120, private readonly w = 220) {
+    this.gfx = scene.add.graphics();
+    this.label = scene.add.text(x + 8, y + 1, 'HULL', title(6, PX.text.muted));
+    this.container = scene.add.container(0, 0, [this.gfx, this.label]).setDepth(20);
+  }
+
+  public setVisible(v: boolean): void {
+    this.container.setVisible(v);
+  }
+
+  public update(hull: number): void {
+    if (hull === this.shown) return;
+    this.shown = hull;
+    const { x, y, w } = this;
+    const g = this.gfx;
+    g.clear();
+    hudFrame(g, x, y, w, 22, PX.border, 0.55);
+    well(g, x + 52, y + 6, w - 62, 10);
+    const color = hull > 60 ? UI.green : hull > 30 ? UI.gold : 0xf04a3a;
+    g.fillStyle(color, 1);
+    g.fillRect(x + 52, y + 6, Math.round(((w - 62) * hull) / 100), 10);
+    g.fillStyle(0xffffff, 0.3);
+    g.fillRect(x + 52, y + 6, Math.round(((w - 62) * hull) / 100), 2);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Top-right: money
 // ---------------------------------------------------------------------------
 
