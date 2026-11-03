@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { CONFIG } from '../config';
-import { ActiveProblem, PHASE_INFO, PHASES, PhaseId, PROBLEM_INFO } from '../game/phases';
+import { ActiveProblem, PHASE_INFO, PHASES, phaseSlot, PhaseId, PROBLEM_INFO } from '../game/phases';
 import { OrbitElements } from '../physics/orbit';
 import { drawPixelPanel } from './pixel';
 import { formatDistance, hudPanel, hudWell, TEXT_STYLE, UI } from './theme';
@@ -52,7 +52,7 @@ export class PhaseStrip {
     PHASES.forEach((_, i) => {
       const x = this.x + i * (this.w + this.gap);
       const isDone = i < done;
-      const isNow = PHASES.indexOf(current) === i && done < 3;
+      const isNow = phaseSlot(current) === i && done < 3;
       if (i > 0) {
         g.fillStyle(i <= done ? UI.green : UI.dim, 1);
         g.fillRect(x - this.gap, this.y + 13, this.gap, 4);

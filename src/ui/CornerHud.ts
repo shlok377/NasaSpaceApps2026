@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { GAME_ASSETS } from '../core/assets';
 import { FUEL_KINDS } from '../core/partDefinitions';
 import { FuelKind } from '../core/types';
-import { PHASE_INFO, PHASES, PhaseId } from '../game/phases';
+import { PHASE_INFO, PHASES, PhaseId, phaseSlot } from '../game/phases';
 import { PX } from './pixel';
 import { formatDistance, UI } from './theme';
 
@@ -102,7 +102,7 @@ export class GoalChip {
   }
 
   public update(current: PhaseId, done: number, goal: string): void {
-    const now = PHASES.indexOf(current);
+    const now = phaseSlot(current);
     const key = `${now}|${done}|${goal}`;
     if (key === this.key) return;
     this.key = key;

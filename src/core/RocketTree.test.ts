@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { RocketTree } from './RocketTree';
 import { CONFIG } from '../config';
+import { PAYLOADS } from './partDefinitions';
 
 describe('RocketTree', () => {
   it('initializes with immovable Cockpit as root node at Col 7, Row 5', () => {
@@ -165,5 +166,18 @@ describe('RocketTree Full Lifecycle & Telemetry', () => {
     const southPort = availablePorts.find(p => p.direction === 'SOUTH' && p.nodeId === '0');
     expect(southPort).toBeDefined();
     expect(southPort?.targetGridY).toBe(6);
+  });
+});
+
+describe('payload mass', () => {
+  it('SATELLITE < ROVER < CREW and the root mass follows the payload', () => {
+    expect(PAYLOADS.SATELLITE.mass).toBeLessThan(PAYLOADS.ROVER.mass);
+    expect(PAYLOADS.ROVER.mass).toBeLessThan(PAYLOADS.CREW.mass);
+    const tree = new RocketTree();
+    const root = () => tree.getRootNode().mass;
+    tree.setPayload('SATELLITE');
+    expect(root()).toBe(PAYLOADS.SATELLITE.mass);
+    tree.setPayload('CREW');
+    expect(root()).toBe(PAYLOADS.CREW.mass);
   });
 });

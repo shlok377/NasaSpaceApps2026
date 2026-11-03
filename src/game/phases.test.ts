@@ -5,7 +5,7 @@ import { moonAngleOf, surfaceDistance } from '../physics/bodies';
 import { MOON, MOON_CENTER } from '../physics/constants';
 import { ControlInput, FlightSim } from '../physics/FlightSim';
 import { buildFlightVehicle } from '../physics/vehicle';
-import { isStableOrbit, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, updateProblem } from './phases';
+import { chainFor, isStableOrbit, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, updateProblem } from './phases';
 
 type Layout = Array<[number, number, PartType, FuelKind?]>;
 const STAGED: Layout = [
@@ -215,5 +215,52 @@ describe('the whole mission', () => {
     expect(back.state.x).toBeCloseTo(snap.state.x, 6);
     expect(back.fuel).toBeCloseTo(new FlightSim(vehicle(STAGED)).fuel, 6);
     expect(back.vehicle.parts.length).toBe(snap.parts.length);
+  });
+});
+
+describe('objectives by payload', () => {
+  const holdOrbit = (run: PhaseRunner, sim: FlightSim, seconds = 4) => {
+    for (let i = 0; i < 120 * seconds; i++) {
+      sim.step(1 / 120, { throttle: 0, steer: 0 });
+      run.update(sim, 1 / 120);
+    }
+  };
+
+  it('each payload has its own chain of phases', () => {
+    expect(chainFor('SATELLITE')).toEqual(['ORBIT', 'DEPLOY']);
+    expect(chainFor('ROVER')).toEqual(['ORBIT', 'ROVER']);
+    expect(chainFor('CREW')).toEqual(['ORBIT', 'LANDING']);
+  });
+
+  it('a satellite is done once it is ejected from a stable orbit', () => {
+    const sim = inOrbit(400);
+    const run = new PhaseRunner('ORBIT', 0, Math.random, 'SATELLITE');
+    holdOrbit(run, sim);
+    expect(run.phase).toBe('DEPLOY');
+    expect(run.complete).toBe(false);
+    expect(run.deploySatellite(sim)).toBe(true);
+    expect(run.complete).toBe(true);
+    expect(run.drainEvents().some(e => e.kind === 'SATELLITE_DEPLOYED')).toBe(true);
+  });
+
+  it('the satellite cannot be ejected before the orbit phase is done', () => {
+    const run = new PhaseRunner('ORBIT', 0, Math.random, 'SATELLITE');
+    expect(run.deploySatellite(inOrbit(400))).toBe(false);
+  });
+
+  it('a chosen rover is ready right after the orbit, with no spare', () => {
+    const sim = inOrbit(400);
+    const run = new PhaseRunner('ORBIT', 0, Math.random, 'ROVER');
+    holdOrbit(run, sim, 6);
+    expect(run.phase).toBe('ROVER');
+    expect(run.dropReady).toBe(true);
+    expect(run.sparesLeft).toBe(0);
+  });
+
+  it('a crew rocket goes from orbit straight to the landing', () => {
+    const sim = inOrbit(400);
+    const run = new PhaseRunner('ORBIT', 0, Math.random, 'CREW');
+    holdOrbit(run, sim);
+    expect(run.phase).toBe('LANDING');
   });
 });

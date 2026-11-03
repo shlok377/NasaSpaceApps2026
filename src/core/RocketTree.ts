@@ -1,4 +1,4 @@
-import { FUEL_STATS, isBoosterFuel, PART_DEFINITIONS } from './partDefinitions';
+import { FUEL_STATS, isBoosterFuel, PART_DEFINITIONS, PAYLOADS } from './partDefinitions';
 import { FuelKind, HierarchicalRocketNode, PartType, PayloadKind, PortDirection, RocketNode, RocketTelemetry } from './types';
 
 export interface AvailablePort {
@@ -37,7 +37,7 @@ export class RocketTree {
       parentId: null,
       parentPort: null,
       childrenIds: [],
-      mass: cockpitDef.mass,
+      mass: PAYLOADS.CREW.mass,
       fuel: cockpitDef.fuel,
       thrust: cockpitDef.thrust
     };
@@ -231,7 +231,9 @@ export class RocketTree {
   /** Swap what sits in the root slot (crew cockpit, satellite or rover). */
   public setPayload(payload: PayloadKind): void {
     const root = this.nodes.get(this.rootId);
-    if (root) root.payload = payload;
+    if (!root) return;
+    root.payload = payload;
+    root.mass = PAYLOADS[payload].mass;
   }
 
   public removeNode(id: string): { success: boolean; reason?: string } {

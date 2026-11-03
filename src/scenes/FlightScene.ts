@@ -237,7 +237,7 @@ export class FlightScene extends Phaser.Scene {
     this.vehicle = buildFlightVehicle(this.tree);
     this.report = analyzeVehicle(this.vehicle);
     this.sim = new FlightSim(this.vehicle);
-    this.runner = new PhaseRunner();
+    this.runner = new PhaseRunner('ORBIT', 0, Math.random, this.tree.payload ?? 'CREW');
     this.runner.drainEvents();
     this.cost = rocketCost(flattenParts(this.tree));
     this.exposeForDebug();
@@ -352,6 +352,7 @@ export class FlightScene extends Phaser.Scene {
       if (this.sim.phase === 'PRELAUNCH') this.startCountdown();
       else if (this.runnerState.promptActive) this.spacePressedThisFrame = true;
       else if (this.separatePromptShown && this.sim.separate()) this.separatePromptShown = false;
+      else if (this.runner.deploySatellite(this.sim)) this.fx.ring(this.world.rocketScreen(this.sim).x, this.world.rocketScreen(this.sim).y, WORLD_COLORS.rover, 50, 0.5);
       else if (this.runner.dropRover(this.sim)) this.fx.ring(this.world.rocketScreen(this.sim).x, this.world.rocketScreen(this.sim).y, WORLD_COLORS.rover, 50, 0.5);
     });
     const onLeftDown = () => {
@@ -693,7 +694,7 @@ export class FlightScene extends Phaser.Scene {
       saveProgress(this.progress);
     }
     this.sim = FlightSim.restore(cp.snapshot);
-    this.runner = new PhaseRunner(cp.phase, cp.phasesDone);
+    this.runner = new PhaseRunner(cp.phase, cp.phasesDone, Math.random, this.tree.payload ?? 'CREW');
     this.runner.sparesLeft = cp.sparesLeft;
     // Problems that went wrong before the checkpoint still count.
     this.runner.solved = cp.solved;

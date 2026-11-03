@@ -48,6 +48,12 @@
     "isp": 70,
     "gimbalDegrees": 5
   },
+  "payloads": {
+    "_note": "Total mass (kg) of the root slot for each payload. Heavier payloads need a bigger rocket.",
+    "CREW": { "mass": 60 },
+    "ROVER": { "mass": 45 },
+    "SATELLITE": { "mass": 30 }
+  },
   "fuelTypes": {
     "_note": "Per fuel: kg per litre (a tank holds parts.FUEL_TANK.fuelLiters), and multipliers on a booster's efficiency (isp) and push (thrust) while it burns this fuel. COLD_GAS only feeds RCS thrusters. unlockCost: one-time price to unlock the fuel in the lab (0 = open from the start).",
     "KEROSENE": { "density": 1.0, "isp": 1.0, "thrust": 1.0, "unlockCost": 0 },
@@ -183,6 +189,7 @@
     "phaseRewards": {
       "ORBIT": 220,
       "ROVER": 250,
+      "DEPLOY": 250,
       "LANDING": 400
     },
     "partialRewards": {

@@ -15,10 +15,10 @@ export const isBoosterFuel = (kind: FuelKind | undefined): boolean => (kind ?? '
 export const fuelUnlockCost = (kind: FuelKind): number => CONFIG.fuelTypes[kind].unlockCost;
 
 /** Payload choices for the root slot, in picker order. `extraCost` is added to the cockpit's base price. */
-export const PAYLOADS: Record<PayloadKind, { label: string; color: number; extraCost: number; description: string }> = {
-  CREW: { label: 'CREW', color: 0xe8e4f0, extraCost: 0, description: 'Seats for a brave crew.' },
-  SATELLITE: { label: 'SATELLITE', color: 0x4fa3ff, extraCost: 10, description: 'No crew. Goes into orbit.' },
-  ROVER: { label: 'ROVER', color: 0xf0c040, extraCost: 15, description: 'Drives on the Moon.' }
+export const PAYLOADS: Record<PayloadKind, { label: string; color: number; extraCost: number; description: string; mass: number }> = {
+  CREW: { label: 'CREW', color: 0xe8e4f0, extraCost: 0, mass: CONFIG.payloads.CREW.mass, description: 'WIN: land softly on the marked site.' },
+  SATELLITE: { label: 'SATELLITE', color: 0x4fa3ff, extraCost: 10, mass: CONFIG.payloads.SATELLITE.mass, description: 'WIN: reach a stable orbit, then SPACE to eject it.' },
+  ROVER: { label: 'ROVER', color: 0xf0c040, extraCost: 15, mass: CONFIG.payloads.ROVER.mass, description: 'WIN: orbit, then drop the rover onto the target.' }
 };
 
 /** How each fuel behaves: kg per litre, and multipliers on engine efficiency and push while burning it. */
