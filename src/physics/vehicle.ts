@@ -1,3 +1,4 @@
+import { FUEL_STATS, isBoosterFuel } from '../core/partDefinitions';
 import { FuelKind, HierarchicalRocketNode, PartType } from '../core/types';
 import { AIRFRAME, ENGINE, FINS, G0, PROPELLANT_DENSITY, WORLD } from './constants';
 
@@ -48,7 +49,14 @@ export interface FlightVehicle {
   wetMass: number;
   engineCount: number;
   thrust: number; // N, all engines at full throttle
-  maxMassFlow: number; // kg/s at full throttle
+  /** Booster kg/s at full throttle, burning kerosene (hydrogen scales it, see `fuelFactors`). */
+  maxMassFlow: number;
+  /** Booster fuel (kerosene + hydrogen) when full, kg. */
+  boosterFuelCapacity: number;
+  /** Cold gas for the RCS thrusters when full, kg. */
+  coldGasCapacity: number;
+  /** RCS thrusters on board (they steer in space once their shells separate). */
+  rcsCount: number;
   /** Thrust line, in body frame. */
   thrustU: number;
   thrustA: number;
@@ -110,8 +118,8 @@ export function partsFromTree(tree: HierarchicalRocketNode): FlightPart[] {
     u: (node.gridX - tree.gridX) * AIRFRAME.columnSpacing,
     a: -(node.gridY - tree.gridY) * AIRFRAME.cellLength,
     dryMass: node.mass,
-    fuelCapacity: node.fuel * PROPELLANT_DENSITY,
-    ...(node.fuel > 0 ? { fuelKind: node.fuelKind ?? 'STANDARD' } : {}),
+    fuelCapacity: node.fuel * PROPELLANT_DENSITY * (node.fuel > 0 ? FUEL_STATS[node.fuelKind ?? 'KEROSENE'].density : 1),
+    ...(node.fuel > 0 ? { fuelKind: node.fuelKind ?? 'KEROSENE' } : {}),
     thrust: node.thrust * G0,
     normalForceCoeff: normalForceFor(node.type)
   }));
@@ -125,9 +133,17 @@ export function buildVehicle(parts: FlightPart[], rootGridX: number, rootGridY: 
   let thrustU = 0;
   let thrustA = 0;
   let engineCount = 0;
+  let boosterFuelCapacity = 0;
+  let coldGasCapacity = 0;
+  let rcsCount = 0;
   for (const p of parts) {
     dryMass += p.dryMass;
     fuelCapacity += p.fuelCapacity;
+    if (p.fuelCapacity > 0) {
+      if (isBoosterFuel(p.fuelKind)) boosterFuelCapacity += p.fuelCapacity;
+      else coldGasCapacity += p.fuelCapacity;
+    }
+    if (p.type === 'RCS') rcsCount++;
     if (p.thrust > 0) {
       thrust += p.thrust;
       thrustU += p.u * p.thrust;
@@ -168,6 +184,9 @@ export function buildVehicle(parts: FlightPart[], rootGridX: number, rootGridY: 
     engineCount,
     thrust,
     maxMassFlow: thrust / (ENGINE.isp * G0),
+    boosterFuelCapacity,
+    coldGasCapacity,
+    rcsCount,
     thrustU,
     thrustA,
     dragArea,
@@ -184,6 +203,30 @@ export function buildVehicle(parts: FlightPart[], rootGridX: number, rootGridY: 
     finStable: finCount >= FINS.minimumForStability,
     hasCommandModule: parts.some(p => p.type === 'COCKPIT')
   };
+}
+
+/**
+ * The push and efficiency multipliers of a set of booster tanks (cold gas ignored), weighted
+ * by the fuel each holds (kerosene = 1, 1). Used for whatever tanks are feeding the boosters now.
+ */
+export function fuelFactors(parts: readonly FlightPart[], fuelOf: (p: FlightPart) => number): { isp: number; thrust: number } {
+  let kg = 0;
+  let isp = 0;
+  let thrust = 0;
+  for (const p of parts) {
+    const f = fuelOf(p);
+    if (f <= 0 || !isBoosterFuel(p.fuelKind)) continue;
+    const s = FUEL_STATS[p.fuelKind ?? 'KEROSENE'];
+    kg += f;
+    isp += f * s.isp;
+    thrust += f * s.thrust;
+  }
+  return kg > 0 ? { isp: isp / kg, thrust: thrust / kg } : { isp: 1, thrust: 1 };
+}
+
+/** The fuel mix of a full vehicle, for headline numbers like Δv and liftoff push. */
+export function averageFuel(vehicle: FlightVehicle): { isp: number; thrust: number } {
+  return fuelFactors(vehicle.parts, p => p.fuelCapacity);
 }
 
 export function buildFlightVehicle(tree: HierarchicalRocketNode): FlightVehicle {
@@ -251,7 +294,7 @@ export function momentOfInertia(vehicle: FlightVehicle, tanks: TankFuel, com: Ce
  */
 export function boosterStages(vehicle: FlightVehicle): string[] {
   return vehicle.parts
-    .filter(p => p.fuelCapacity > 0 && p.depth > 0)
+    .filter(p => p.fuelCapacity > 0 && p.depth > 0 && isBoosterFuel(p.fuelKind))
     .filter(p => {
       const ids = subtreeIds(vehicle.parts, p.id);
       return vehicle.parts.some(q => ids.has(q.id) && q.thrust > 0);
@@ -279,14 +322,19 @@ function worstThrustOffset(vehicle: FlightVehicle): number {
 
 export function analyzeVehicle(vehicle: FlightVehicle): VehicleReport {
   const weight = vehicle.wetMass * WORLD.surfaceGravity;
+  const fuel = averageFuel(vehicle);
   return {
     partCount: vehicle.parts.length,
     wetMass: vehicle.wetMass,
     dryMass: vehicle.dryMass,
     fuelMass: vehicle.fuelCapacity,
-    liftoffTwr: weight > 0 ? vehicle.thrust / weight : 0,
-    deltaV: vehicle.dryMass > 0 && vehicle.thrust > 0 ? ENGINE.isp * G0 * Math.log(vehicle.wetMass / vehicle.dryMass) : 0,
-    burnTime: vehicle.maxMassFlow > 0 ? vehicle.fuelCapacity / vehicle.maxMassFlow : 0,
+    liftoffTwr: weight > 0 ? (vehicle.thrust * fuel.thrust) / weight : 0,
+    // Only booster fuel drives Δv; the cold gas rides along as dead weight until the RCS uses it.
+    deltaV:
+      vehicle.dryMass > 0 && vehicle.thrust > 0
+        ? ENGINE.isp * fuel.isp * G0 * Math.log(vehicle.wetMass / (vehicle.wetMass - vehicle.boosterFuelCapacity))
+        : 0,
+    burnTime: vehicle.maxMassFlow > 0 ? vehicle.boosterFuelCapacity / ((vehicle.maxMassFlow * fuel.thrust) / fuel.isp) : 0,
     thrustOffset: worstThrustOffset(vehicle),
     finCount: vehicle.finCount,
     finStable: vehicle.finStable,

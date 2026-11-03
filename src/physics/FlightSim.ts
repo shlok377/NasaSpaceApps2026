@@ -1,3 +1,5 @@
+import { CONFIG } from '../config';
+import { isBoosterFuel } from '../core/partDefinitions';
 import { AIRFRAME, ENGINE, FINS, G0, LIMITS, MOON, MOON_CENTER, STEERING, WORLD } from './constants';
 import { OrbitElements, orbitFromState } from './orbit';
 import { airDensity, machDragFactor } from './atmosphere';
@@ -12,7 +14,8 @@ import {
   fullTanks,
   momentOfInertia,
   subtreeIds,
-  totalFuel
+  totalFuel,
+  fuelFactors
 } from './vehicle';
 import { windAt } from './wind';
 
@@ -40,7 +43,8 @@ export type FlightEventKind =
   | 'MOON_SOI'
   | 'BOUNCE'
   | 'LANDED'
-  | 'CRASH';
+  | 'CRASH'
+  | 'SEPARATION';
 
 export interface FlightEvent {
   kind: FlightEventKind;
@@ -129,6 +133,8 @@ export interface FlightSnapshot {
   stats: FlightStats;
   startFuel: number;
   initialVehicle: FlightVehicle;
+  /** RCS shells already off. */
+  separated: boolean;
 }
 
 export interface FlightState {
@@ -216,6 +222,54 @@ export class FlightSim {
 
   public get fuel(): number {
     return totalFuel(this.tanks);
+  }
+
+  /** Kerosene + hydrogen left for the boosters (kg). */
+  public get boosterFuel(): number {
+    return this.tankFuel(true);
+  }
+
+  /** Cold gas left for the RCS thrusters (kg). */
+  public get coldGas(): number {
+    return this.tankFuel(false);
+  }
+
+  private tankFuel(booster: boolean): number {
+    let kg = 0;
+    for (const [id, f] of this.tanks) {
+      const p = this.vehicle.parts.find(q => q.id === id);
+      if (p && isBoosterFuel(p.fuelKind) === booster) kg += f;
+    }
+    return kg;
+  }
+
+  /** RCS shells still on (separation not done yet). */
+  public separated = false;
+
+  /** The rocket carries RCS thrusters whose shells haven't come off yet. */
+  public get canSeparate(): boolean {
+    return this.phase === 'FLYING' && !this.separated && this.vehicle.rcsCount > 0;
+  }
+
+  /** RCS can steer: shells off, thrusters aboard and cold gas left. */
+  public get rcsReady(): boolean {
+    return this.separated && this.vehicle.rcsCount > 0 && this.coldGas > 1e-9;
+  }
+
+  /**
+   * Phase separation: every RCS shell cracks open, and whatever hangs below a shell
+   * falls away and tumbles back down. The RCS thrusters can then steer in space.
+   */
+  public separate(): boolean {
+    if (!this.canSeparate) return false;
+    for (const rcs of this.vehicle.parts.filter(p => p.type === 'RCS')) {
+      for (const child of this.vehicle.parts.filter(p => p.parentId === rcs.id)) {
+        if (this.vehicle.parts.some(p => p.id === child.id)) this.detach(subtreeIds(this.vehicle.parts, child.id), 2);
+      }
+    }
+    this.separated = true;
+    this.emit('SEPARATION', 'SEPARATION — shells off, RCS ready (A / D)');
+    return true;
   }
 
   private _cachedCom: CenterOfMass | null = null;
@@ -318,11 +372,13 @@ export class FlightSim {
     let thrust = 0;
     const d = this.disturbance;
     if (d.leakRate > 0) this.drawFuel(d.leakRate * dt);
-    if (fuel > 0 && s.throttle > 0 && v.engineCount > 0 && !d.engineOut) {
-      const want = v.maxMassFlow * s.throttle * dt;
+    if (this.boosterFuel > 0 && s.throttle > 0 && v.engineCount > 0 && !d.engineOut) {
+      // The fuel feeding the boosters right now sets their push and how fast they drink.
+      const f = this.feedingFuel();
+      const want = ((v.maxMassFlow * f.thrust) / f.isp) * s.throttle * dt;
       const burned = this.drawFuel(want);
-      thrust = v.thrust * s.throttle * (burned / want);
-      if (this.fuel <= 1e-9 && !this.mecoAnnounced) {
+      thrust = v.thrust * f.thrust * s.throttle * (burned / want);
+      if (this.boosterFuel <= 1e-9 && !this.mecoAnnounced) {
         this.mecoAnnounced = true;
         this.emit('MECO', 'Out of fuel!');
       }
@@ -369,14 +425,27 @@ export class FlightSim {
     const steer = clamp(input.steer, -1, 1);
     const gimbalArm = Math.abs(v.thrustA - com.a);
     const qA = q * v.referenceArea;
-    const steerAuthority =
-      (v.hasCommandModule ? AIRFRAME.reactionWheelTorque + (thrust === 0 ? STEERING.rcsTorque : 0) : 0) +
-      thrust * Math.sin(ENGINE.gimbalRange) * gimbalArm +
-      FINS.controlAuthority * v.finCount * qA * v.length * 0.5;
+    // In space the boosters can't steer at all: only RCS thrusters (shells off, cold gas left) can.
+    const inSpace = rho <= 0;
+    const rcsOn = inSpace && this.rcsReady && steer !== 0;
+    if (rcsOn) this.drawFuel(Math.abs(steer) * CONFIG.rcs.gasPerSecond * v.rcsCount * dt, false);
+    const steerAuthority = inSpace
+      ? rcsOn
+        ? CONFIG.rcs.torque * v.rcsCount
+        : 0
+      : (v.hasCommandModule ? AIRFRAME.reactionWheelTorque + (thrust === 0 ? STEERING.rcsTorque : 0) : 0) +
+        thrust * Math.sin(ENGINE.gimbalRange) * gimbalArm +
+        FINS.controlAuthority * v.finCount * qA * v.length * 0.5;
     const controlTorque = steer * steerAuthority;
     // Small side thrusters push the way you steer (diminished by aerodynamic dynamic pressure in thick air).
     const rcsAeroAtten = Math.max(0.25, 1 - q / 2000);
-    const rcs = v.hasCommandModule ? steer * STEERING.rcsAcceleration * mass * rcsAeroAtten : 0;
+    const rcs = inSpace
+      ? rcsOn
+        ? steer * CONFIG.rcs.accel * v.rcsCount * mass
+        : 0
+      : v.hasCommandModule
+        ? steer * STEERING.rcsAcceleration * mass * rcsAeroAtten
+        : 0;
 
     // --- Integrate --------------------------------------------------------------
     const g = gravityAt(s.x, s.y);
@@ -420,18 +489,36 @@ export class FlightSim {
     if (!this.isFinished) this.updateStats(q);
   }
 
-  /** Burn from the outermost tanks first (deepest in the tree), evenly among equals. */
-  private drawFuel(want: number): number {
+  /** Push and efficiency multipliers of the booster tanks being drained now (the outermost ones with fuel). */
+  private feedingFuel(): { isp: number; thrust: number } {
+    const depth = this.drainDepth(true);
+    return fuelFactors(this.vehicle.parts, p => (p.depth === depth ? this.tanks.get(p.id) ?? 0 : 0));
+  }
+
+  /** Deepest tree depth that still has fuel of the given kind (booster fuel or cold gas); -1 if none. */
+  private drainDepth(booster: boolean): number {
+    let depth = -1;
+    for (const [id, kg] of this.tanks) {
+      if (kg <= 0) continue;
+      const p = this.vehicle.parts.find(q => q.id === id);
+      if (p && isBoosterFuel(p.fuelKind) === booster && p.depth > depth) depth = p.depth;
+    }
+    return depth;
+  }
+
+  /**
+   * Burn from the outermost tanks first (deepest in the tree), evenly among equals: booster fuel
+   * (kerosene / hydrogen) for the boosters and leaks, or cold gas for the RCS.
+   */
+  private drawFuel(want: number, booster = true): number {
     let remaining = want;
     while (remaining > 1e-12) {
-      let depth = -1;
-      for (const [id, kg] of this.tanks) {
-        if (kg <= 0) continue;
-        const p = this.vehicle.parts.find(q => q.id === id);
-        if (p && p.depth > depth) depth = p.depth;
-      }
+      const depth = this.drainDepth(booster);
       if (depth < 0) break;
-      const group = [...this.tanks].filter(([id, kg]) => kg > 0 && this.vehicle.parts.find(q => q.id === id)?.depth === depth);
+      const group = [...this.tanks].filter(([id, kg]) => {
+        const p = this.vehicle.parts.find(q => q.id === id);
+        return kg > 0 && p?.depth === depth && isBoosterFuel(p.fuelKind) === booster;
+      });
       const share = remaining / group.length;
       let taken = 0;
       for (const [id, kg] of group) {
@@ -456,7 +543,7 @@ export class FlightSim {
       if (stageFuel > 1e-9) continue;
       const rest = this.vehicle.parts.filter(p => !ids.has(p.id));
       const restHasEngine = rest.some(p => p.thrust > 0);
-      const restFuel = rest.reduce((sum, p) => sum + (this.tanks.get(p.id) ?? 0), 0);
+      const restFuel = rest.reduce((sum, p) => sum + (isBoosterFuel(p.fuelKind) ? this.tanks.get(p.id) ?? 0 : 0), 0);
       if (!restHasEngine || restFuel <= 1e-9) continue;
       this.detach(ids, 2);
       this.stats.stagesDropped++;
@@ -708,17 +795,19 @@ export class FlightSim {
    */
   public predictApex(coastOnly = false): { altitude: number; reachesMoon: boolean } {
     let { x, y, vx, vy } = this.state;
-    let fuel = coastOnly ? 0 : this.fuel;
+    let fuel = coastOnly ? 0 : this.boosterFuel;
     const v = this.vehicle;
     const dir = { x: Math.cos(this.state.theta), y: Math.sin(this.state.theta) };
     const dt = 0.1;
     let maxY = y;
     for (let i = 0; i < 4000; i++) {
-      const mass = v.dryMass + (coastOnly ? this.fuel : fuel);
+      const mass = v.dryMass + this.coldGas + (coastOnly ? this.boosterFuel : fuel);
       let thrust = 0;
       if (fuel > 0 && this.state.throttle > 0 && v.engineCount > 0) {
-        const burn = Math.min(fuel, v.maxMassFlow * this.state.throttle * dt);
-        thrust = (v.thrust * this.state.throttle * burn) / (v.maxMassFlow * this.state.throttle * dt);
+        const f = this.feedingFuel();
+        const flow = ((v.maxMassFlow * f.thrust) / f.isp) * this.state.throttle;
+        const burn = Math.min(fuel, flow * dt);
+        thrust = (v.thrust * f.thrust * this.state.throttle * burn) / (flow * dt);
         fuel -= burn;
       }
       const sp = Math.hypot(vx, vy);
@@ -768,7 +857,8 @@ export class FlightSim {
       hasLeftGround: this.hasLeftGround,
       stats: { ...this.stats },
       startFuel: this.startFuel,
-      initialVehicle: this.initialVehicle
+      initialVehicle: this.initialVehicle,
+      separated: this.separated
     };
   }
 
@@ -781,6 +871,7 @@ export class FlightSim {
     sim.onGround = snap.onGround;
     sim.hasLeftGround = snap.hasLeftGround;
     sim.stats = { ...snap.stats };
+    sim.separated = snap.separated;
     sim.version = 1;
     return sim;
   }

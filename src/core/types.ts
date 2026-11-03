@@ -6,13 +6,14 @@ export type PartType =
   | 'ENGINE'
   | 'NOSE_CONE'
   | 'FIN'
+  | 'RCS'
   | 'STRUCTURAL';
 
-/** Cosmetic fuel choice for a tank (builder UI only for now). */
-export type FuelKind = 'STANDARD' | 'GREEN' | 'PURPLE';
-
-/** Cosmetic engine choice (builder UI only for now). */
-export type EngineKind = 'STANDARD' | 'TWIN' | 'LANDER';
+/**
+ * What a tank holds. Kerosene and liquid hydrogen feed the boosters (ENGINE parts);
+ * cold gas only feeds the RCS thrusters that steer in space.
+ */
+export type FuelKind = 'KEROSENE' | 'HYDROGEN' | 'COLD_GAS';
 
 /** What sits in the root slot in place of the crew cockpit (builder UI only for now). */
 export type PayloadKind = 'CREW' | 'SATELLITE' | 'ROVER';
@@ -40,7 +41,6 @@ export interface RocketNode {
   childrenIds: string[];
   finOrientation?: 'LEFT' | 'RIGHT';
   fuelKind?: FuelKind;
-  engineKind?: EngineKind;
   payload?: PayloadKind;
   mass: number;
   fuel: number;
@@ -57,6 +57,12 @@ export interface RocketTelemetry {
   totalMass: number;
   totalThrust: number;
   totalFuel: number;
+  /** Fuel on board in kg (litres × each fuel's density). */
+  totalFuelMass: number;
+  /** Total push at liftoff, after each fuel's push multiplier. */
+  liftoffThrust: number;
   twr: number;
+  /** Why the rocket can't fly yet (empty when it can). */
+  missing: string;
   tree: HierarchicalRocketNode;
 }

@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { RocketTree } from '../core/RocketTree';
-import { PartType } from '../core/types';
+import { FuelKind, PartType } from '../core/types';
 import { moonAngleOf, surfaceDistance } from '../physics/bodies';
 import { MOON, MOON_CENTER } from '../physics/constants';
 import { ControlInput, FlightSim } from '../physics/FlightSim';
 import { buildFlightVehicle } from '../physics/vehicle';
 import { isStableOrbit, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, updateProblem } from './phases';
 
-type Layout = Array<[number, number, PartType]>;
+type Layout = Array<[number, number, PartType, FuelKind?]>;
 const STAGED: Layout = [
-  [7, 7, 'NOSE_CONE'],
+  // Cold gas above the cockpit feeds the RCS pair that steers in space.
+  [7, 7, 'FUEL_TANK', 'COLD_GAS'],
+  [7, 6, 'NOSE_CONE'],
   [7, 9, 'FUEL_TANK'],
   [7, 10, 'ENGINE'],
   [6, 9, 'FUEL_TANK'],
@@ -17,12 +19,14 @@ const STAGED: Layout = [
   [6, 10, 'ENGINE'],
   [8, 10, 'ENGINE'],
   [5, 9, 'FIN'],
-  [9, 9, 'FIN']
+  [9, 9, 'FIN'],
+  [6, 8, 'RCS'],
+  [8, 8, 'RCS']
 ];
 
 function vehicle(parts: Layout) {
   const tree = new RocketTree(7, 8);
-  for (const [x, y, type] of parts) tree.attachPart(x, y, type);
+  for (const [x, y, type, kind] of parts) tree.attachPart(x, y, type, kind);
   return buildFlightVehicle(tree.getTelemetry().tree);
 }
 
@@ -33,6 +37,7 @@ function inOrbit(alt: number): FlightSim {
   const sim = new FlightSim(vehicle(STAGED));
   sim.launch();
   sim.onGround = false;
+  sim.separate();
   const r = MOON.radius + alt;
   const v = Math.sqrt(MOON.mu / r);
   // Below the Moon, moving right (counter-clockwise), pointing along the orbit.
@@ -49,6 +54,7 @@ function pilot(sim: FlightSim, run: PhaseRunner, state: { cut: boolean; deorbite
   const steerTo = (target: number) => Math.max(-1, Math.min(1, wrap(target - t.pitchFromVertical) * 4 - sim.state.omega * 2));
   const aligned = (target: number) => Math.abs(wrap(target - t.pitchFromVertical)) < 0.3;
   const o = t.moonOrbit;
+  if (sim.canSeparate && t.airDensity <= 0) sim.separate();
   if (!o) {
     if (!state.cut && sim.predictApex(true).reachesMoon) state.cut = true;
     return { throttle: state.cut ? 0 : 1, steer: steerTo(-0.12) };
@@ -75,7 +81,8 @@ function pilot(sim: FlightSim, run: PhaseRunner, state: { cut: boolean; deorbite
   if (!state.deorbited) {
     const hit = sim.predictMoonImpact();
     const ahead = wrap((LANDING_SITE.angle - moonAngleOf(sim.state.x, sim.state.y)) * o.direction);
-    if (hit && surfaceDistance(hit.angle, run.site.angle) < 80) state.deorbited = true;
+    // Already coming down (the site may have moved): stop waiting for the perfect deorbit and land.
+    if (hit && (surfaceDistance(hit.angle, run.site.angle) < 80 || t.moonAltitude < 800)) state.deorbited = true;
     return { throttle: ahead > 0.6 && ahead < 1.6 && aligned(retro) ? 1 : 0, steer: steerTo(retro) };
   }
   const g = MOON.mu / (t.moonAltitude + MOON.radius) ** 2;
@@ -186,7 +193,10 @@ describe('the whole mission', () => {
     const kinds: string[] = [];
     sim.launch();
     for (let i = 0; i < 120 * 900 && !run.over; i++) {
-      sim.step(1 / 120, pilot(sim, run, state));
+      // Spare the cold gas: tiny corrections aren't worth a puff of RCS.
+      const input = pilot(sim, run, state);
+      if (run.phase !== 'LANDING' && sim.getTelemetry().airDensity <= 0 && Math.abs(input.steer) < 0.25) input.steer = 0;
+      sim.step(1 / 120, input);
       const p = run.problem;
       run.update(sim, 1 / 120, { repairPressed: p?.id === 'FUEL_LEAK' && Math.abs(p.data.needle - p.data.greenAt) < 0.05, relightHeld: true });
       for (const e of run.drainEvents()) kinds.push(e.kind === 'PHASE_DONE' ? `DONE:${e.phase}` : e.kind);

@@ -8,6 +8,10 @@ export interface PlayerProgress {
   /** Highest altitude ever reached (m). */
   bestHeight: number;
   completedMissions: string[];
+  /** Launches flown so far. */
+  flights: number;
+  /** Fuels bought in the lab (liquid hydrogen has a one-time unlock price). */
+  unlockedFuels: string[];
 }
 
 /** Minimal slice of the Web Storage API, so tests can pass a fake. */
@@ -21,7 +25,7 @@ export const STARTING_MONEY = CONFIG.economy.startingMoney;
 /** If you're broke, the agency tops you up to this so you can always fly something. */
 export const GRANT_FLOOR = CONFIG.economy.grantFloor;
 
-const fresh = (): PlayerProgress => ({ money: STARTING_MONEY, bestHeight: 0, completedMissions: [] });
+const fresh = (): PlayerProgress => ({ money: STARTING_MONEY, bestHeight: 0, completedMissions: [], flights: 0, unlockedFuels: [] });
 
 /** Cash for in-flight awards. */
 const AWARD_CASH: Partial<Record<Award['id'], number>> = {
@@ -49,7 +53,9 @@ export function loadProgress(storage: ProgressStorage | null = defaultStorage())
     return {
       money: Number.isFinite(parsed.money) ? Math.max(0, Number(parsed.money)) : base.money,
       bestHeight: Number.isFinite(parsed.bestHeight) ? Math.max(0, Number(parsed.bestHeight)) : 0,
-      completedMissions: Array.isArray(parsed.completedMissions) ? parsed.completedMissions.filter(m => typeof m === 'string') : []
+      completedMissions: Array.isArray(parsed.completedMissions) ? parsed.completedMissions.filter(m => typeof m === 'string') : [],
+      flights: Number.isFinite(parsed.flights) ? Math.max(0, Math.floor(Number(parsed.flights))) : 0,
+      unlockedFuels: Array.isArray(parsed.unlockedFuels) ? parsed.unlockedFuels.filter(f => typeof f === 'string') : []
     };
   } catch {
     return fresh();

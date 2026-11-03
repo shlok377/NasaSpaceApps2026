@@ -23,12 +23,13 @@ import { ENGINE, FINS, G0, LIMITS, ROCK_BELT, WORLD } from '../physics/constants
 import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physics/FlightSim';
 import { evaluateMission, MAX_STARS, MissionResult } from '../physics/mission';
 import { analyzeVehicle, buildFlightVehicle, FlightVehicle, VehicleReport } from '../physics/vehicle';
-import { GoalChip, HeightLadder, InstrumentChip, MoneyChip } from '../ui/CornerHud';
+import { GoalChip, HeightLadder, hudFrame, InstrumentChip, MoneyChip } from '../ui/CornerHud';
 import { SkyCards } from '../ui/SkyCards';
 import { Milestone } from '../ui/JourneyArc';
 import { LaunchButton } from '../ui/LaunchButton';
+import { drawPixelPanel, pixelBody, pixelTitle, PX } from '../ui/pixel';
 import { OrbitGauge, ProblemCard } from '../ui/PhaseHud';
-import { CLASSIC, CLASSIC_TEXT_STYLE, formatDistance, TEXT_STYLE, TITLE_STYLE, UI } from '../ui/theme';
+import { formatDistance, TEXT_STYLE, TITLE_STYLE, UI } from '../ui/theme';
 import { preloadGameAssets } from '../core/assets';
 import { Effects } from './flight/Effects';
 import { CameraMode, MissionOverlay, WorldRenderer, WORLD_COLORS } from './flight/WorldRenderer';
@@ -129,6 +130,8 @@ export class FlightScene extends Phaser.Scene {
   private timeOfDay: TimeOfDay = 'DAWN';
   private skyCards!: SkyCards;
   private hintText!: Phaser.GameObjects.Text;
+  /** SEPARATE has been offered (reached space or boosters ran dry); SPACE now cracks the shells. */
+  private separatePromptShown = false;
   private bannerText!: Phaser.GameObjects.Text;
   private phaseTitle!: Phaser.GameObjects.Text;
   private phaseGoal!: Phaser.GameObjects.Text;
@@ -210,6 +213,7 @@ export class FlightScene extends Phaser.Scene {
     this.runnerEntryVy = 0;
     this.progress = loadProgress();
     this.progressBeforeFinish = null;
+    this.separatePromptShown = false;
     this.checkpoint = null;
     this.landedRovers = [];
     this.phasePaid = 0;
@@ -347,6 +351,7 @@ export class FlightScene extends Phaser.Scene {
     this.keys.SPACE.on('down', () => {
       if (this.sim.phase === 'PRELAUNCH') this.startCountdown();
       else if (this.runnerState.promptActive) this.spacePressedThisFrame = true;
+      else if (this.separatePromptShown && this.sim.separate()) this.separatePromptShown = false;
       else if (this.runner.dropRover(this.sim)) this.fx.ring(this.world.rocketScreen(this.sim).x, this.world.rocketScreen(this.sim).y, WORLD_COLORS.rover, 50, 0.5);
     });
     const onLeftDown = () => {
@@ -385,7 +390,7 @@ export class FlightScene extends Phaser.Scene {
       return;
     }
     // Pay for the rocket.
-    this.progress = { ...this.progress, money: this.progress.money - this.cost };
+    this.progress = { ...this.progress, money: this.progress.money - this.cost, flights: this.progress.flights + 1 };
     saveProgress(this.progress);
     this.countdown = COUNTDOWN_SECONDS;
     this.countdownText.setVisible(true);
@@ -598,6 +603,13 @@ export class FlightScene extends Phaser.Scene {
         continue;
       }
       if (e.kind === 'LANDED' || e.kind === 'CRASH') continue; // the phase runner reports these
+      if (e.kind === 'SEPARATION') {
+        const at = this.world.rocketScreen(this.sim);
+        this.fx.ring(at.x, at.y, 0x36ff12, 70, 0.6);
+        this.cameras.main.shake(250, 0.01);
+        this.showBanner(e.message, '#7dff66');
+        continue;
+      }
       this.showBanner(e.message);
     }
   }
@@ -792,7 +804,7 @@ export class FlightScene extends Phaser.Scene {
         tanks: this.sim.vehicle.parts
           .filter(p => p.fuelCapacity > 0)
           .sort((a, b) => a.u - b.u)
-          .map(p => ({ id: p.id, kind: p.fuelKind ?? 'STANDARD', capacity: p.fuelCapacity, fraction: (this.sim.tanks.get(p.id) ?? 0) / p.fuelCapacity })),
+          .map(p => ({ id: p.id, kind: p.fuelKind ?? 'KEROSENE', capacity: p.fuelCapacity, fraction: (this.sim.tanks.get(p.id) ?? 0) / p.fuelCapacity })),
         fuel: t.fuelFraction,
         twr: t.twr,
         burning: t.thrust > 0,
@@ -815,6 +827,7 @@ export class FlightScene extends Phaser.Scene {
     const comboOn = this.combo.active(this.sim.state.time) && this.combo.count > 1;
     this.comboText.setVisible(comboOn && flying && ascent).setText(`COMBO ×${this.combo.count}`);
 
+    if (flying && this.launched) this.checkSeparatePrompt(t);
     this.hintText.setText(flying && this.launched ? this.hint(t) : '');
 
     // Speed + height next to the rocket, only when landing matters.
@@ -865,10 +878,23 @@ export class FlightScene extends Phaser.Scene {
     return onImpactCourse(t) ? 'Land upright, under 10 m/s, on the blue site' : 'Burn backwards to drop out of orbit: aim the white ✕ at the blue site';
   }
 
+  /** Offer SEPARATE once the rocket is in space or its boosters are dry. */
+  private checkSeparatePrompt(t: FlightTelemetry): void {
+    if (this.separatePromptShown || !this.sim.canSeparate) return;
+    if (t.airDensity > 0 && this.sim.boosterFuel > 1e-9) return;
+    this.separatePromptShown = true;
+    this.showBanner('SEPARATE! Press SPACE to crack the shells and wake the RCS', '#7dff66');
+  }
+
   /** One plain-language hint for right now. */
   private hint(t: FlightTelemetry): string {
     const r = this.runner;
     const mode = this.world.camera.mode;
+    if (this.separatePromptShown && this.sim.canSeparate) return 'SPACE: SEPARATE — drop the shells and steer with RCS (A / D)';
+    if (t.airDensity <= 0 && !this.sim.rcsReady) {
+      if (this.sim.separated) return 'RCS out of cold gas: no steering in space';
+      if (this.sim.vehicle.rcsCount === 0) return 'Boosters can’t steer in space: add RCS + cold gas next time  ·  W / S throttle';
+    }
     if (this.sim.onGround) return 'Too heavy to climb: go back (ESC) and add engines';
     if (r.problem?.id === 'FLAMEOUT') return 'ENGINE OUT: HOLD E to relight!';
     if (r.problem) return PROBLEM_INFO[r.problem.id].howTo;
@@ -942,99 +968,165 @@ export class FlightScene extends Phaser.Scene {
   }
 
   private showResultPanel(result: MissionResult): void {
-    const w = 660;
-    const h = 520;
+    const w = 460;
+    const h = 330;
     const x = (1280 - w) / 2;
-    const y = (720 - h) / 2;
-    const items: Phaser.GameObjects.GameObject[] = [];
-    const bg = this.add.graphics();
-    bg.fillStyle(0x000000, 0.55);
-    bg.fillRect(0, 0, 1280, 720);
-    bg.fillStyle(0x0b1020, 0.96);
-    bg.fillRoundedRect(x, y, w, h, 18);
-    bg.lineStyle(2, 0x334155, 1);
-    bg.strokeRoundedRect(x, y, w, h, 18);
-    items.push(bg);
-
-    const titleColor: Record<MissionResult['outcome'], string> = {
-      CREW_LANDED: CLASSIC.goldText,
-      ROVER_DEPLOYED: CLASSIC.greenText,
-      IN_ORBIT: CLASSIC.greenText,
-      MOON_SOI: '#a3e635',
-      SPACE: '#7dd3fc',
-      SKY: '#fbbf24',
-      FAILED: '#f87171'
+    const y = (720 - h) / 2 + 10;
+    const cx = x + w / 2;
+    const accent: Record<MissionResult['outcome'], number> = {
+      CREW_LANDED: PX.gold,
+      ROVER_DEPLOYED: PX.green,
+      IN_ORBIT: PX.green,
+      MOON_SOI: 0xa3e635,
+      SPACE: 0x7dd3fc,
+      SKY: PX.accent,
+      FAILED: PX.red
     };
-    items.push(this.add.text(640, y + 20, result.title, CLASSIC_TEXT_STYLE(28, titleColor[result.outcome])).setOrigin(0.5, 0));
-    items.push(this.add.text(640, y + 58, '★'.repeat(result.stars) + '☆'.repeat(MAX_STARS - result.stars), CLASSIC_TEXT_STYLE(24, CLASSIC.goldText)).setOrigin(0.5, 0));
+    const tone = accent[result.outcome];
+    const items: Phaser.GameObjects.GameObject[] = [];
+    // Clear the big phase title so nothing shows through the see-through card.
+    this.titleTimer = 0;
+    this.phaseTitle.setAlpha(0);
+    this.phaseGoal.setAlpha(0);
 
-    // The three phases, ticked off.
+    // Same see-through frame as the flight HUD, bordered in the outcome's colour.
+    const g = this.add.graphics();
+    hudFrame(g, x, y, w, h, tone, 0.55);
+    items.push(g);
+
+    // Title ribbon on the top edge.
+    const title = pixelTitle(this, cx, y, result.title.toUpperCase(), 14, '#ffffff').setOrigin(0.5).setShadow(2, 2, '#01020a', 0, false, true);
+    const rw = Math.ceil(title.width) + 40;
+    g.fillStyle(0x07060b, 1);
+    g.fillRect(cx - rw / 2 - 2, y - 17, rw + 4, 34);
+    g.fillStyle(tone, 1);
+    g.fillRect(cx - rw / 2, y - 15, rw, 30);
+    g.fillStyle(0xffffff, 0.35);
+    g.fillRect(cx - rw / 2, y - 15, rw, 3);
+    g.fillStyle(0x000000, 0.3);
+    g.fillRect(cx - rw / 2, y + 12, rw, 3);
+    items.push(title);
+
+    // Pixel stars.
+    const STAR = ['...#...', '..###..', '#######', '.#####.', '.##.##.', '#.....#'];
+    const cell = 4;
+    const starW = STAR[0].length * cell;
+    for (let i = 0; i < MAX_STARS; i++) {
+      const sx = cx - (MAX_STARS * (starW + 12) - 12) / 2 + i * (starW + 12);
+      const lit = i < result.stars;
+      STAR.forEach((row, r) =>
+        [...row].forEach((ch, c) => {
+          if (ch !== '#') return;
+          g.fillStyle(0x07060b, 1);
+          g.fillRect(sx + c * cell + 2, y + 32 + r * cell + 2, cell, cell);
+          g.fillStyle(lit ? (r < 2 ? 0xfff1a8 : PX.gold) : PX.borderDim, 1);
+          g.fillRect(sx + c * cell, y + 32 + r * cell, cell, cell);
+        })
+      );
+    }
+
+    // Phase track: three nodes on a line, lit as far as you got.
     const done = this.runner.phasesDone;
-    const phaseLine = (['ORBIT', 'ROVER', 'LANDING'] as PhaseId[])
-      .map((p, i) => `${i < done ? '✓' : i === done && this.runner.failure ? '✗' : '·'} ${PHASE_INFO[p].title}`)
-      .join('     ');
-    items.push(this.add.text(640, y + 92, phaseLine, CLASSIC_TEXT_STYLE(14, done >= 3 ? CLASSIC.greenText : CLASSIC.text)).setOrigin(0.5, 0));
-    items.push(this.add.text(640, y + 118, result.summary, CLASSIC_TEXT_STYLE(14)).setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w - 60));
-
-    const e = this.earnings!;
-    const cells: Array<[string, string, string]> = [
-      ['EARNED', `+$${e.total + this.phasePaid}`, CLASSIC.greenText],
-      ['SCORE', result.score.toLocaleString(), '#ffffff'],
-      ['PROBLEMS FIXED', `${this.runner.solved}`, '#7dd3fc'],
-      ['BANK', `$${this.progress.money}`, CLASSIC.goldText]
-    ];
-    cells.forEach(([label, value, color], i) => {
-      const cx = x + 85 + i * 163;
-      items.push(this.add.text(cx, y + 172, label, CLASSIC_TEXT_STYLE(11, CLASSIC.textMuted)).setOrigin(0.5, 0));
-      items.push(this.add.text(cx, y + 190, value, CLASSIC_TEXT_STYLE(22, color)).setOrigin(0.5, 0));
+    const trackY = y + 92;
+    const nodeX = (i: number) => cx - 140 + i * 140;
+    for (let i = 0; i < 2; i++) {
+      g.fillStyle(0x07060b, 1);
+      g.fillRect(nodeX(i), trackY - 3, 140, 6);
+      // Lit up to the next node once that phase is done.
+      g.fillStyle(i + 1 < done ? PX.green : PX.borderDim, 1);
+      g.fillRect(nodeX(i), trackY - 1, 140, 2);
+    }
+    (['ORBIT', 'ROVER', 'LANDING'] as PhaseId[]).forEach((p, i) => {
+      const state = i < done ? 'DONE' : i === done && this.runner.failure ? 'FAIL' : 'TODO';
+      const c = state === 'DONE' ? PX.green : state === 'FAIL' ? PX.red : PX.borderDim;
+      const nx = nodeX(i);
+      g.fillStyle(0x07060b, 1);
+      g.fillRect(nx - 11, trackY - 11, 22, 22);
+      g.fillStyle(c, 1);
+      g.fillRect(nx - 9, trackY - 9, 18, 18);
+      g.fillStyle(0xffffff, state === 'TODO' ? 0 : 0.3);
+      g.fillRect(nx - 9, trackY - 9, 18, 3);
+      if (state === 'TODO') {
+        g.fillStyle(PX.panelDeep, 1);
+        g.fillRect(nx - 6, trackY - 6, 12, 12);
+      } else items.push(pixelBody(this, nx, trackY, state === 'DONE' ? '✓' : '✗', 20, '#07060b').setOrigin(0.5));
+      items.push(pixelTitle(this, nx, trackY + 18, PHASE_INFO[p].title.split(' ').pop()!.toUpperCase(), 7, state === 'TODO' ? PX.text.muted : PX.text.white).setOrigin(0.5, 0));
     });
-    const parts = [
-      this.phasePaid > 0 ? `phases $${this.phasePaid}` : '',
-      e.outcome > 0 ? `flight $${e.outcome}` : '',
-      e.mission > 0 ? `missions $${e.mission}` : '',
-      e.awards > 0 ? `bonuses $${e.awards}` : '',
-      e.recovery > 0 ? `rocket recovered $${e.recovery}` : ''
-    ].filter(Boolean);
-    items.push(this.add.text(640, y + 226, parts.join('  ·  '), CLASSIC_TEXT_STYLE(12, CLASSIC.textMuted)).setOrigin(0.5, 0));
 
-    const missionLines = this.completedNow.length > 0 ? this.completedNow.map(m => `✓ ${m.title} (+$${m.reward})`).join('   ') : this.mission ? `✗ ${this.mission.title}: ${this.mission.goal}` : '';
-    const missions = this.add.text(640, y + 254, missionLines, CLASSIC_TEXT_STYLE(14, this.completedNow.length > 0 ? CLASSIC.greenText : '#fca5a5')).setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(w - 60);
-    items.push(missions);
+    // Three numbers: what this flight paid, its score, and the bank.
+    const e = this.earnings!;
+    const stats: Array<[string, string, string]> = [
+      ['EARNED', `+$${e.total + this.phasePaid}`, PX.text.green],
+      ['SCORE', result.score.toLocaleString(), PX.text.white],
+      ['BANK', `$${this.progress.money}`, PX.text.gold]
+    ];
+    const tileW = 128;
+    stats.forEach(([label, value, color], i) => {
+      const tx = cx - (3 * tileW + 16) / 2 + i * (tileW + 8);
+      const ty = y + 146;
+      g.fillStyle(0x07060b, 0.75);
+      g.fillRect(tx, ty, tileW, 54);
+      g.fillStyle(0x000000, 0.4);
+      g.fillRect(tx, ty, tileW, 2);
+      g.fillStyle(tone, 0.6);
+      g.fillRect(tx, ty + 52, tileW, 2);
+      items.push(pixelTitle(this, tx + tileW / 2, ty + 9, label, 6, PX.text.muted).setOrigin(0.5, 0));
+      const v = pixelBody(this, tx + tileW / 2, ty + 20, value, 28, color).setOrigin(0.5, 0);
+      if (v.width > tileW - 8) v.setScale((tileW - 8) / v.width);
+      items.push(v);
+    });
 
-    const tipCount = missions.height > 40 ? 1 : 2;
-    const tips = result.insights.slice(0, tipCount).map(s => `•  ${s}`).join('\n');
-    items.push(this.add.text(x + 36, missions.y + missions.height + 14, tips, CLASSIC_TEXT_STYLE(13)).setWordWrapWidth(w - 72).setLineSpacing(4));
+    // One short mission line.
+    const won = this.completedNow.length > 0;
+    const missionLine = won ? `MISSION DONE  +$${this.completedNow.reduce((n, m) => n + m.reward, 0)}` : this.mission ? 'MISSION NOT DONE' : '';
+    if (missionLine) items.push(pixelTitle(this, cx, y + 216, missionLine, 8, won ? PX.text.green : PX.text.muted).setOrigin(0.5, 0));
 
-    const retry = this.canRetryPhase ? `R  ·  RETRY PHASE ${PHASE_INFO[this.checkpoint!.phase].number}` : 'R  ·  FLY AGAIN';
+    const retry = this.canRetryPhase ? `RETRY P${PHASE_INFO[this.checkpoint!.phase].number}` : 'FLY AGAIN';
     items.push(
-      ...this.makeButton(x + w / 2 - 150, y + h - 40, retry, () => {
+      ...this.makeButton(cx - 108, y + h - 52, 'R', retry, true, () => {
         if (this.canRetryPhase) this.retryFromCheckpoint();
         else this.scene.restart({ tree: this.tree });
       })
     );
-    items.push(...this.makeButton(x + w / 2 + 150, y + h - 40, 'B  ·  BUILDER', () => this.returnToBuilder()));
-    if (this.canRetryPhase) items.push(this.add.text(640, y + h - 12, 'Retrying a phase is free: you keep what you’ve earned so far', CLASSIC_TEXT_STYLE(11, CLASSIC.textMuted)).setOrigin(0.5, 1).setY(y + h - 6));
+    items.push(...this.makeButton(cx + 108, y + h - 52, 'B', 'BUILDER', false, () => this.returnToBuilder()));
+    if (this.canRetryPhase) items.push(pixelBody(this, cx, y + h - 8, 'Retry is free', 16, PX.text.muted).setOrigin(0.5, 1));
     this.resultPanel = this.add.container(0, 0, items).setAlpha(0).setDepth(100);
     this.tweens.add({ targets: this.resultPanel, alpha: 1, duration: 350 });
   }
 
-  private makeButton(cx: number, cy: number, label: string, onClick: () => void): Phaser.GameObjects.GameObject[] {
-    const w = 260;
-    const h = 42;
+  /** Chunky arcade button with a key cap; it sinks under the pointer. Primary is red like LAUNCH!. */
+  private makeButton(cx: number, cy: number, key: string, label: string, primary: boolean, onClick: () => void): Phaser.GameObjects.GameObject[] {
+    const w = 196;
+    const h = 44;
     const bg = this.add.graphics();
+    const cap = pixelTitle(this, 0, 0, key, 10, PX.text.white).setOrigin(0.5);
+    const text = pixelTitle(this, 0, 0, label, 10, '#ffffff').setOrigin(0, 0.5);
     const draw = (hover: boolean) => {
+      const sink = hover ? 3 : 0;
       bg.clear();
-      bg.fillStyle(hover ? 0x1e293b : 0x111827, 1);
-      bg.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, 21);
-      bg.lineStyle(2, hover ? 0x60a5fa : 0x334155, 1);
-      bg.strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, 21);
+      drawPixelPanel(bg, cx - w / 2, cy - h / 2 + sink, w, h, primary
+        ? { fill: hover ? 0xf04a3a : 0xd8322f, fillAlpha: 1, border: 0xff8a5c, highlight: 0xffd0b0, u: 3 }
+        : { fill: hover ? 0x2a2434 : PX.panelDeep, fillAlpha: 1, border: hover ? PX.glow : PX.border, u: 3 });
+      if (!hover) {
+        bg.fillStyle(primary ? 0x8a1414 : 0x000000, primary ? 1 : 0.5);
+        bg.fillRect(cx - w / 2 + 6, cy + h / 2 - 9, w - 12, 3);
+      }
+      // Key cap on the left.
+      const kx = cx - w / 2 + 12;
+      bg.fillStyle(0x01020a, 1);
+      bg.fillRect(kx - 2, cy - 14 + sink, 30, 28);
+      bg.fillStyle(primary ? 0x8a1414 : PX.borderDim, 1);
+      bg.fillRect(kx, cy - 12 + sink, 26, 24);
+      bg.fillStyle(0xffffff, 0.25);
+      bg.fillRect(kx, cy - 12 + sink, 26, 3);
+      cap.setPosition(kx + 13, cy + sink + 1);
+      text.setPosition(kx + 40, cy + sink + 1);
     };
     draw(false);
-    const text = this.add.text(cx, cy, label, CLASSIC_TEXT_STYLE(15, '#ffffff')).setOrigin(0.5);
     const zone = this.add.zone(cx, cy, w, h).setInteractive({ useHandCursor: true });
     zone.on('pointerover', () => draw(true));
     zone.on('pointerout', () => draw(false));
     zone.on('pointerdown', onClick);
-    return [bg, text, zone];
+    return [bg, cap, text, zone];
   }
 }

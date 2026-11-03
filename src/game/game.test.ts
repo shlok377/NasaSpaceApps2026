@@ -57,20 +57,20 @@ describe('missions', () => {
     expect(rocketCost(['COCKPIT', 'FUEL_TANK', 'ENGINE', 'ENGINE'])).toBeGreaterThan(rocketCost(['COCKPIT', 'FUEL_TANK', 'ENGINE']));
   });
 
-  it('charges extra for picked fuel, engine and payload types', () => {
+  it('charges extra for picked fuel and payload types', () => {
     const base = rocketCost(['COCKPIT', 'FUEL_TANK', 'ENGINE']);
     const standard = rocketCost([
       { type: 'COCKPIT', payload: 'CREW' },
-      { type: 'FUEL_TANK', fuelKind: 'STANDARD' },
-      { type: 'ENGINE', engineKind: 'STANDARD' }
+      { type: 'FUEL_TANK', fuelKind: 'KEROSENE' },
+      { type: 'ENGINE' }
     ]);
     const fancy = rocketCost([
       { type: 'COCKPIT', payload: 'ROVER' },
-      { type: 'FUEL_TANK', fuelKind: 'PURPLE' },
-      { type: 'ENGINE', engineKind: 'TWIN' }
+      { type: 'FUEL_TANK', fuelKind: 'HYDROGEN' },
+      { type: 'ENGINE' }
     ]);
     expect(standard).toBe(base);
-    expect(fancy).toBe(base + 15 + 10 + 12);
+    expect(fancy).toBe(base + 15 + 10);
   });
 });
 

@@ -1,5 +1,5 @@
-import { PART_DEFINITIONS } from './partDefinitions';
-import { EngineKind, FuelKind, HierarchicalRocketNode, PartType, PayloadKind, PortDirection, RocketNode, RocketTelemetry } from './types';
+import { FUEL_STATS, isBoosterFuel, PART_DEFINITIONS } from './partDefinitions';
+import { FuelKind, HierarchicalRocketNode, PartType, PayloadKind, PortDirection, RocketNode, RocketTelemetry } from './types';
 
 export interface AvailablePort {
   nodeId: string;
@@ -94,6 +94,8 @@ export class RocketTree {
       if (node.type === 'COCKPIT' || node.type === 'FUEL_TANK' || node.type === 'STRUCTURAL') {
         exposedDirections.push('NORTH', 'SOUTH', 'EAST', 'WEST');
       }
+      // Parts can hang below an RCS shell; they fall away when the shell separates.
+      if (node.type === 'RCS') exposedDirections.push('SOUTH');
 
       for (const dir of exposedDirections) {
         // If this port is connected to parent, it's not open
@@ -126,9 +128,10 @@ export class RocketTree {
       return { valid: false, reason: 'Cell is already occupied' };
     }
 
-    const ports = this.getAvailablePorts().filter(
-      p => p.targetGridX === gridX && p.targetGridY === gridY
-    );
+    // A part touching an RCS hangs from it (so it falls away at separation).
+    const ports = this.getAvailablePorts()
+      .filter(p => p.targetGridX === gridX && p.targetGridY === gridY)
+      .sort((a, b) => Number(this.nodes.get(b.nodeId)?.type === 'RCS') - Number(this.nodes.get(a.nodeId)?.type === 'RCS'));
 
     if (ports.length === 0) {
       return { valid: false, reason: 'No adjacent open connection socket' };
@@ -160,7 +163,7 @@ export class RocketTree {
             childPort: neededChildPort
           };
         }
-      } else if (childType === 'FIN') {
+      } else if (childType === 'FIN' || childType === 'RCS') {
         // Left Fin: on the left side of parent (parent's West port connects to Fin's East port)
         if (port.direction === 'WEST') {
           return {
@@ -194,7 +197,7 @@ export class RocketTree {
     return { valid: false, reason: 'Part orientation incompatible with socket' };
   }
 
-  public attachPart(gridX: number, gridY: number, childType: PartType, kind?: FuelKind | EngineKind): { success: boolean; node?: RocketNode; reason?: string } {
+  public attachPart(gridX: number, gridY: number, childType: PartType, kind?: FuelKind): { success: boolean; node?: RocketNode; reason?: string } {
     const validation = this.validateAttachment(gridX, gridY, childType);
     if (!validation.valid || !validation.parentNode || !validation.parentPort) {
       return { success: false, reason: validation.reason || 'Invalid attachment' };
@@ -212,8 +215,7 @@ export class RocketTree {
       parentPort: validation.parentPort,
       childrenIds: [],
       finOrientation: validation.finOrientation,
-      ...(childType === 'FUEL_TANK' && kind ? { fuelKind: kind as FuelKind } : {}),
-      ...(childType === 'ENGINE' && kind ? { engineKind: kind as EngineKind } : {}),
+      ...(childType === 'FUEL_TANK' ? { fuelKind: kind ?? 'KEROSENE' } : {}),
       mass: def.mass,
       fuel: def.fuel,
       thrust: def.thrust
@@ -276,19 +278,38 @@ export class RocketTree {
     let totalMass = 0;
     let totalThrust = 0;
     let totalFuel = 0;
+    let totalFuelMass = 0;
+    let fuelThrustSum = 0;
     let engineCount = 0;
     let fuelTankCount = 0;
+    let boosterTanks = 0;
+    let gasTanks = 0;
+    let rcsCount = 0;
 
     for (const node of nodes) {
       totalMass += node.mass;
       totalThrust += node.thrust;
       totalFuel += node.fuel;
+      if (node.fuel > 0) {
+        const kind = node.fuelKind ?? 'KEROSENE';
+        const f = FUEL_STATS[kind];
+        totalFuelMass += node.fuel * f.density;
+        if (isBoosterFuel(kind)) {
+          boosterTanks++;
+          fuelThrustSum += node.fuel * f.density * f.thrust;
+        } else gasTanks++;
+      }
+      if (node.type === 'RCS') rcsCount++;
       if (node.type === 'ENGINE') engineCount++;
       if (node.type === 'FUEL_TANK') fuelTankCount++;
     }
 
     const twr = totalMass > 0 ? Number((totalThrust / totalMass).toFixed(2)) : 0;
-    const valid = engineCount >= 1 && fuelTankCount >= 1 && totalThrust >= totalMass;
+    // Boosters need kerosene or hydrogen; RCS thrusters need cold gas.
+    const missing =
+      engineCount < 1 ? 'NEED CMD + FUEL + BOOSTER' : boosterTanks < 1 ? 'BOOSTERS NEED KEROSENE OR HYDROGEN' : rcsCount > 0 && gasTanks < 1 ? 'RCS NEEDS A COLD GAS TANK' : '';
+    const valid = missing === '' && fuelTankCount >= 1 && totalThrust >= totalMass;
+    const boosterFuelMass = [...nodes].reduce((sum, n) => (n.fuel > 0 && isBoosterFuel(n.fuelKind) ? sum + n.fuel * FUEL_STATS[n.fuelKind ?? 'KEROSENE'].density : sum), 0);
 
     return {
       valid,
@@ -296,7 +317,12 @@ export class RocketTree {
       totalMass,
       totalThrust,
       totalFuel,
+      totalFuelMass,
+      // Engines push harder or softer depending on the fuel they burn (averaged over the fuel on board).
+      // No kerosene or hydrogen aboard: the boosters have nothing to burn.
+      liftoffThrust: boosterFuelMass > 0 ? (totalThrust * fuelThrustSum) / boosterFuelMass : 0,
       twr,
+      missing,
       tree: this.buildHierarchicalNode(this.rootId)
     };
   }

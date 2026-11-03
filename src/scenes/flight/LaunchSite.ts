@@ -346,15 +346,29 @@ function dirt(u: number, y: number, d: number): number {
 }
 
 /** The repeating land: hazy far range, snowy near range, hills, grass and dirt. Periodic in LAND_PERIOD. */
+/** Outline colours: darkest on the nearest shapes, softer on the hazy far range. */
+const OUTLINE = { hill: 0x2c4a24, near: 0x2e3238, far: 0x6f7c94, prop: 0x231c2b } as const;
+
+/** Is (u, y) on a ridge's outline: its top pixel, or a flank pixel where a neighbouring column's ridge sits lower? */
+function isEdge(u: number, y: number, row: number, peaks: Peak[], seed: number): boolean {
+  if (y < row + 1) return true;
+  const l = ridge(mod(u - 1, LAND_PERIOD), peaks, seed).row;
+  const r = ridge(mod(u + 1, LAND_PERIOD), peaks, seed).row;
+  return y < Math.min(l, r) && y < row + 6;
+}
+
 function landAt(gx: number, y: number, hillDrop = 0, mountains = true): number | null {
   const u = mod(gx, LAND_PERIOD);
   if (y >= G) return dirt(u, y, y - G);
   const hill = G - 7 + hillDrop + Math.round(3 * Math.sin((u * Math.PI * 2 * 3) / LAND_PERIOD) + 2 * Math.sin((u * Math.PI * 2 * 7) / LAND_PERIOD + 1));
   if (y >= hill) return y === hill ? 0x9fd46a : dither(u, y) > 0.6 ? 0x6fb04a : 0x7dbb52;
+  // Dark outlines on every layer's top edge, so each shape reads against the sky and the layer behind it in any light.
+  if (y === hill - 1) return OUTLINE.hill;
   if (!mountains) return null;
 
   const near = ridge(u, NEAR_PEAKS, 3);
   if (y >= near.row) {
+    if (isEdge(u, y, near.row, NEAR_PEAKS, 3)) return OUTLINE.near;
     const p = near.peak;
     const lit = near.dx < -(y - p.top) * 0.35 + (hash(y, p.x) - 0.5) * 2;
     const snowLine = p.top + 10 + hash(u) * 4;
@@ -370,6 +384,7 @@ function landAt(gx: number, y: number, hillDrop = 0, mountains = true): number |
   // Far range: pale and hazy (air perspective).
   const far = ridge(u, FAR_PEAKS, 7);
   if (y >= far.row) {
+    if (isEdge(u, y, far.row, FAR_PEAKS, 7)) return OUTLINE.far;
     const lit = far.dx < -(y - far.peak.top) * 0.4;
     if (y < far.peak.top + 6) return lit ? 0xf4f8fc : 0xdde7f1;
     return lit ? 0xc3d3e4 : 0xadc0d6;
@@ -549,10 +564,17 @@ const PROPS: Prop[] = [
 /** The centre piece: land on the west edge matching the land tile, sea on the east edge matching the sea tile. */
 function centreAt(gx: number, y: number): number | null {
   if (isSeaColumn(gx)) return seaAt(gx, y);
-  for (const prop of PROPS) {
-    const c = prop(gx, y);
-    if (c !== null) return c;
-  }
+  const propAt = (x: number, yy: number) => {
+    for (const prop of PROPS) {
+      const c = prop(x, yy);
+      if (c !== null) return c;
+    }
+    return null;
+  };
+  const c = propAt(gx, y);
+  if (c !== null) return c;
+  // Only the skyline gets a line: a dark pixel sitting on top of each prop's upper edge.
+  if (y < SITE_GROUND_ROW && propAt(gx, y + 1) !== null) return OUTLINE.prop;
   if (gx <= COAST_FROM) return landAt(gx, y);
 
   // Coast: hills fall towards the cliff, the sea shows behind them, and the cliff face drops into the water.

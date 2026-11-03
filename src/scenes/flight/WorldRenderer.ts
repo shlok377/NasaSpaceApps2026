@@ -140,6 +140,10 @@ function partShape(p: FlightPart, h: number): number[] {
   return [-s, -s, s, -s, s, s, -s, s];
 }
 
+/** Rocket outline colour and the four directions it's nudged in. */
+const ROCKET_OUTLINE = 0x120e1a;
+const OUTLINE_OFFSETS: ReadonlyArray<readonly [number, number]> = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
 export class WorldRenderer {
   public camera: Camera = { x: 0, y: 0, upAngle: Math.PI / 2, scale: CELL_PX, rocketScale: CELL_PX, mode: 'ASCENT' };
   private readonly skyGfx: Phaser.GameObjects.Graphics;
@@ -174,6 +178,9 @@ export class WorldRenderer {
   private readonly partSpritesContainer: Phaser.GameObjects.Container;
   private readonly partSpritesPool: Phaser.GameObjects.Image[] = [];
   private activeSpriteCount = 0;
+  /** Dark silhouette copies drawn under each part, so the rocket reads against bright day skies. */
+  private readonly outlineContainer: Phaser.GameObjects.Container;
+  private readonly outlinePool: Phaser.GameObjects.Image[] = [];
   private readonly labels: Phaser.GameObjects.Text[] = [];
   private labelIndex = 0;
   private clouds: Array<{ x: number; y: number; puffs: Array<{ dx: number; dy: number; r: number }> }> = [];
@@ -246,6 +253,7 @@ export class WorldRenderer {
     this.setTimeOfDay(this.time);
     this.worldGfx = scene.add.graphics();
     this.rocketGfx = scene.add.graphics();
+    this.outlineContainer = scene.add.container(0, 0);
     this.partSpritesContainer = scene.add.container(0, 0);
   }
 
@@ -473,6 +481,7 @@ export class WorldRenderer {
 
   public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, overlay: MissionOverlay, runnerState?: EvasiveRunnerState): void {
     this.labelIndex = 0;
+    this.rcsRevealed = sim.separated;
     this.drawSky(sim, t);
     const g = this.worldGfx;
     g.clear();
@@ -1359,6 +1368,9 @@ export class WorldRenderer {
     }
   }
 
+  /** RCS thrusters show their launch shell until separation cracks it off. */
+  private rcsRevealed = false;
+
   private renderPartSprite(p: FlightPart, sx: number, sy: number, rot: number, cellPx: number, alpha: number, fuelRemaining?: number): void {
     let img = this.partSpritesPool[this.activeSpriteCount];
     if (!img) {
@@ -1368,13 +1380,40 @@ export class WorldRenderer {
     }
     this.activeSpriteCount++;
 
-    const texKey = getPartTextureKey(p.type, p.finOrientation, fuelRemaining);
+    const texKey = getPartTextureKey(p.type, p.finOrientation, fuelRemaining, p.fuelKind, this.rcsRevealed);
     img.setTexture(texKey);
     img.setPosition(sx, sy);
-    img.setRotation(rot);
+    // RCS nozzles face outward from the side they hang on.
+    img.setRotation(rot + (p.type === 'RCS' ? (p.finOrientation === 'RIGHT' ? -Math.PI / 2 : Math.PI / 2) : 0));
     img.setDisplaySize(cellPx, cellPx);
     img.setAlpha(alpha);
     img.setVisible(true);
+
+    // Four dark copies nudged out by a pixel or two trace the part's silhouette.
+    const w = Math.max(1, Math.round(cellPx / 24));
+    OUTLINE_OFFSETS.forEach(([ox, oy], k) => {
+      const i = (this.activeSpriteCount - 1) * 4 + k;
+      let o = this.outlinePool[i];
+      if (!o) {
+        o = this.scene.add.image(0, 0, texKey);
+        o.setTint?.(ROCKET_OUTLINE);
+        o.setTintMode?.(Phaser.TintModes.FILL);
+        this.outlineContainer.add(o);
+        this.outlinePool.push(o);
+      }
+      o.setTexture(texKey)
+        .setPosition(sx + ox * w, sy + oy * w)
+        .setRotation(img.rotation)
+        .setDisplaySize(cellPx, cellPx)
+        .setAlpha(alpha * 0.9)
+        .setVisible(true);
+    });
+  }
+
+  /** Hide pooled part sprites (and their outlines) past the ones drawn this frame. */
+  private hideUnusedSprites(): void {
+    for (let i = this.activeSpriteCount; i < this.partSpritesPool.length; i++) this.partSpritesPool[i].setVisible(false);
+    for (let i = this.activeSpriteCount * 4; i < this.outlinePool.length; i++) this.outlinePool[i].setVisible(false);
   }
 
   private drawRocketAndDebris(sim: FlightSim, t: FlightTelemetry, alive: boolean): void {
@@ -1406,9 +1445,7 @@ export class WorldRenderer {
       }
     }
     if (!alive) {
-      for (let i = this.activeSpriteCount; i < this.partSpritesPool.length; i++) {
-        this.partSpritesPool[i].setVisible(false);
-      }
+      this.hideUnusedSprites();
       return;
     }
 
@@ -1461,9 +1498,7 @@ export class WorldRenderer {
     }
 
     // Hide any unused pooled sprites
-    for (let i = this.activeSpriteCount; i < this.partSpritesPool.length; i++) {
-      this.partSpritesPool[i].setVisible(false);
-    }
+    this.hideUnusedSprites();
   }
 
   /** Part positions as drawn, for collisions. */

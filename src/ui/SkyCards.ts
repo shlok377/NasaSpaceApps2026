@@ -33,6 +33,7 @@ interface Card {
   time: TimeOfDay;
   box: Phaser.GameObjects.Container;
   frame: Phaser.GameObjects.Graphics;
+  tag: Phaser.GameObjects.Graphics;
   hover: boolean;
 }
 
@@ -55,9 +56,10 @@ export class SkyCards {
       const name = scene.add.text(10, SKY_H + 9, look.label, shadowed(PX.title, 8, PX.text.cream));
       const pay = scene.add.text(W - 9, SKY_H + 7, `$×${timeOfDayReward(time)}`, shadowed(PX.body, 18, PX.text.gold)).setOrigin(1, 0);
       const zone = scene.add.zone(W / 2, H / 2, W, H).setInteractive({ useHandCursor: true });
-      box.add([frame, sky, art, name, pay, zone]);
+      const tag = scene.add.graphics();
+      box.add([frame, sky, art, tag, name, pay, zone]);
       this.container.add(box);
-      const card: Card = { time, box, frame, hover: false };
+      const card: Card = { time, box, frame, tag, hover: false };
       zone.on('pointerover', () => ((card.hover = true), this.redraw()));
       zone.on('pointerout', () => ((card.hover = false), this.redraw()));
       zone.on('pointerdown', () => onPick(time));
@@ -109,13 +111,17 @@ export class SkyCards {
         g.fillRect(10 + b * 9, SKY_H + 25, 7, 5);
       }
       if (on) {
-        // Gold check tag on the top edge.
-        g.fillStyle(0x07060b, 1);
-        g.fillRect(W - 24, -6, 20, 14);
-        g.fillStyle(PX.gold, 1);
-        g.fillRect(W - 22, -4, 16, 10);
-        g.fillStyle(0x3a2614, 1);
-        for (const [dx, dy] of [[-19, 1], [-17, 3], [-15, 1], [-13, -1], [-11, -3]] as const) g.fillRect(W + dx, dy, 2, 2);
+      }
+      // Gold check tag in the window's top-right corner, drawn above the sky so nothing clips it.
+      const t = c.tag;
+      t.clear();
+      if (on) {
+        t.fillStyle(0x07060b, 1);
+        t.fillRect(W - 24, 4, 20, 14);
+        t.fillStyle(PX.gold, 1);
+        t.fillRect(W - 22, 6, 16, 10);
+        t.fillStyle(0x3a2614, 1);
+        for (const [dx, dy] of [[-19, 10], [-17, 12], [-15, 10], [-13, 8], [-11, 6]] as const) t.fillRect(W + dx, dy, 2, 2);
       }
       this.scene.tweens.killTweensOf(c.box);
       this.scene.tweens.add({ targets: c.box, y: this.y - (on ? LIFT : c.hover ? LIFT / 2 : 0), duration: 110, ease: 'Quad.easeOut' });
@@ -133,7 +139,8 @@ export class SkyCards {
     if (time === 'NIGHT') {
       // Storm front over the sea on the right.
       g.fillStyle(0x222a46, 1);
-      for (const [lx, r] of [[74, 8], [86, 11], [100, 9], [112, 12]]) g.fillCircle(x0 + lx, groundY - 2, r);
+      // Kept inside the window so it never spills past the card's edge.
+      for (const [lx, r] of [[70, 6], [82, 8], [95, 7], [106, 6]]) g.fillCircle(x0 + lx, groundY - 2, r);
     }
     // The coast: grass on the left, the sea on the right, lit by the time's land tint.
     const tint = (c: number) => {
