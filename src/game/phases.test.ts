@@ -264,3 +264,27 @@ describe('objectives by payload', () => {
     expect(run.phase).toBe('LANDING');
   });
 });
+
+describe('a chosen rover mission', () => {
+  const landedRover = (inside: boolean) => ({ x: 0, y: 0, vx: 0, vy: -500, landed: true, angle: 0, inZone: inside });
+
+  it('ends the moment the rover lands in the zone, however hard it hits', () => {
+    const sim = inOrbit(400);
+    const run = new PhaseRunner('ROVER', 1, Math.random, 'ROVER');
+    run.dropReady = true;
+    run.rover = landedRover(true);
+    run.update(sim, 1 / 120);
+    expect(run.complete).toBe(true);
+    expect(run.failure).toBeNull();
+  });
+
+  it('is lost if the one rover misses the zone', () => {
+    const sim = inOrbit(400);
+    const run = new PhaseRunner('ROVER', 1, Math.random, 'ROVER');
+    run.dropReady = true;
+    run.rover = landedRover(false);
+    run.update(sim, 1 / 120);
+    expect(run.complete).toBe(false);
+    expect(run.failure).not.toBeNull();
+  });
+});

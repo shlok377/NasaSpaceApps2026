@@ -162,3 +162,27 @@ describe('hull integrity', () => {
     expect(sim.hull).toBe(0);
   });
 });
+
+describe('RCS in air', () => {
+  // Cold gas lives in the core stack, so it stays aboard after the shell opens.
+  const flown = (altitude: number, open: boolean) => {
+    const tree = new RocketTree(7, 8);
+    tree.attachPart(7, 9, 'FUEL_TANK', 'COLD_GAS');
+    tree.attachPart(7, 10, 'FUEL_TANK', 'KEROSENE');
+    tree.attachPart(7, 11, 'ENGINE');
+    tree.attachPart(6, 8, 'RCS');
+    tree.attachPart(6, 9, 'STRUCTURAL');
+    const sim = inSpace(tree);
+    sim.state.y = altitude;
+    sim.onGround = false;
+    if (open) sim.separate();
+    for (let i = 0; i < 20; i++) sim.step(0.01, { throttle: 0, steer: 1 });
+    return Math.abs(sim.state.omega);
+  };
+
+  it('an open RCS adds some turning in air, but far less than in space', () => {
+    const airGain = flown(2_000, true) - flown(2_000, false);
+    expect(airGain).toBeGreaterThan(0);
+    expect(airGain).toBeLessThan(flown(400_000, true));
+  });
+});

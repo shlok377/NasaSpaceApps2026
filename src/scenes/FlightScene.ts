@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { CONFIG } from '../config';
-import { HierarchicalRocketNode } from '../core/types';
+import { HierarchicalRocketNode, PayloadKind } from '../core/types';
 import { currentMission, Mission, MissionContext, newlyCompleted, rocketCost } from '../game/missions';
 import {
   ActiveProblem,
@@ -13,7 +13,7 @@ import {
   predictRoverLanding,
   PROBLEM_INFO
 } from '../game/phases';
-import { normalizeKey } from '../core/separationKeys';
+import { DEFAULT_SEPARATION_KEY, normalizeKey } from '../core/separationKeys';
 import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, objectiveBonus, payoutBreakdown, PlayerProgress, saveProgress } from '../game/progress';
 import { anchorBelt, checkBelt, Combo, generateBelt, generateLaneWaves, Rock, runnerSpeedAt } from '../game/rocks';
 import { createEvasiveRunnerState, EvasiveRunnerState, updateEvasiveRunner, RUNNER_CONFIG } from '../game/evasiveRunner';
@@ -240,7 +240,7 @@ export class FlightScene extends Phaser.Scene {
     this.vehicle = buildFlightVehicle(this.tree);
     this.report = analyzeVehicle(this.vehicle);
     this.sim = new FlightSim(this.vehicle);
-    this.runner = new PhaseRunner('ORBIT', 0, Math.random, this.tree.payload ?? 'CREW');
+    this.runner = new PhaseRunner('ORBIT', 0, Math.random, this.payload);
     this.runner.drainEvents();
     this.cost = rocketCost(flattenParts(this.tree));
     this.exposeForDebug();
@@ -355,8 +355,10 @@ export class FlightScene extends Phaser.Scene {
     this.keys.SPACE.on('down', () => {
       if (this.sim.phase === 'PRELAUNCH') this.startCountdown();
       else if (this.runnerState.promptActive) this.spacePressedThisFrame = true;
-      else if (this.runner.deploySatellite(this.sim)) this.fx.ring(this.world.rocketScreen(this.sim).x, this.world.rocketScreen(this.sim).y, WORLD_COLORS.rover, 50, 0.5);
-      else if (this.runner.dropRover(this.sim)) this.fx.ring(this.world.rocketScreen(this.sim).x, this.world.rocketScreen(this.sim).y, WORLD_COLORS.rover, 50, 0.5);
+      else if (this.runner.deploySatellite(this.sim) || this.runner.dropRover(this.sim)) {
+        const at = this.world.rocketScreen(this.sim);
+        this.fx.ring(at.x, at.y, WORLD_COLORS.rover, 50, 0.5);
+      }
     });
     const onLeftDown = () => {
       if (this.runnerState.active) this.laneSteerInput = -1;
@@ -705,7 +707,7 @@ export class FlightScene extends Phaser.Scene {
       saveProgress(this.progress);
     }
     this.sim = FlightSim.restore(cp.snapshot);
-    this.runner = new PhaseRunner(cp.phase, cp.phasesDone, Math.random, this.tree.payload ?? 'CREW');
+    this.runner = new PhaseRunner(cp.phase, cp.phasesDone, Math.random, this.payload);
     this.runner.sparesLeft = cp.sparesLeft;
     // Problems that went wrong before the checkpoint still count.
     this.runner.solved = cp.solved;
@@ -897,9 +899,12 @@ export class FlightScene extends Phaser.Scene {
   }
 
   /** Keys of the shells still closed, e.g. "B / G". */
+  private get payload(): PayloadKind {
+    return this.tree.payload ?? 'CREW';
+  }
+
   private shellKeys(): string {
-    const keys = this.sim.vehicle.parts.filter(p => p.type === 'RCS' && this.sim.vehicle.parts.some(c => c.parentId === p.id) && !this.sim.openShells.has(p.id)).map(p => p.separationKey ?? 'B');
-    return [...new Set(keys)].join(' / ') || 'B';
+    return this.sim.closedShellKeys.join(' / ') || DEFAULT_SEPARATION_KEY;
   }
 
   /** Offer SEPARATE once the rocket is in space or its boosters are dry. */

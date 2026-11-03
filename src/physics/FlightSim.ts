@@ -1,4 +1,5 @@
 import { CONFIG } from '../config';
+import { DEFAULT_SEPARATION_KEY } from '../core/separationKeys';
 import { isBoosterFuel } from '../core/partDefinitions';
 import { AIRFRAME, ENGINE, FINS, G0, LIMITS, MOON, MOON_CENTER, STEERING, WORLD } from './constants';
 import { OrbitElements, orbitFromState } from './orbit';
@@ -158,6 +159,9 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.min(Math.max(v, lo), hi);
 }
 
+/** Hull integrity of an undamaged rocket. */
+export const FULL_HULL = 100;
+
 export class FlightSim {
   public vehicle: FlightVehicle;
   public readonly initialVehicle: FlightVehicle;
@@ -243,9 +247,9 @@ export class FlightSim {
     return kg;
   }
 
-  /** Hull integrity, 100 at launch: every part lost costs a share, and at 0 the flight is lost. */
+  /** Hull integrity, FULL_HULL at launch: every part lost costs a share, and at 0 the flight is lost. */
   public get hull(): number {
-    return Math.max(0, 100 - this.stats.partsLost * CONFIG.hull.perPart);
+    return Math.max(0, FULL_HULL - this.stats.partsLost * CONFIG.hull.perPart);
   }
 
   /** RCS shells already cracked open (by their key, in any phase of flight). */
@@ -266,6 +270,12 @@ export class FlightSim {
     return this.activeRcsCount > 0;
   }
 
+  /** Keys of the RCS shells still closed (parts hang on them), without repeats. */
+  public get closedShellKeys(): string[] {
+    const keys = this.vehicle.parts.filter(p => p.type === 'RCS' && !this.shellOpen(p.id)).map(p => p.separationKey ?? DEFAULT_SEPARATION_KEY);
+    return [...new Set(keys)];
+  }
+
   /** Some RCS shell with parts hanging on it is still closed. */
   public get canSeparate(): boolean {
     return this.phase === 'FLYING' && this.vehicle.parts.some(p => p.type === 'RCS' && !this.shellOpen(p.id));
@@ -283,7 +293,7 @@ export class FlightSim {
   public separate(key?: string): boolean {
     if (this.phase !== 'FLYING') return false;
     const shells = this.vehicle.parts.filter(
-      p => p.type === 'RCS' && !this.shellOpen(p.id) && (key === undefined || (p.separationKey ?? 'B') === key.toUpperCase())
+      p => p.type === 'RCS' && !this.shellOpen(p.id) && (key === undefined || (p.separationKey ?? DEFAULT_SEPARATION_KEY) === key.toUpperCase())
     );
     if (shells.length === 0) return false;
     for (const rcs of shells) {
@@ -451,13 +461,15 @@ export class FlightSim {
     const qA = q * v.referenceArea;
     // In space the boosters can't steer at all: only RCS thrusters (shells off, cold gas left) can.
     const inSpace = rho <= 0;
-    const rcsOn = inSpace && this.rcsReady && steer !== 0;
-    if (rcsOn) this.drawFuel(Math.abs(steer) * CONFIG.rcs.gasPerSecond * this.activeRcsCount * dt, false);
+    // An open RCS also works in air, but thick air smothers its puffs: only a fraction of its space power.
+    const rcsPower = inSpace ? 1 : CONFIG.rcs.airFraction * Math.max(0.25, 1 - q / 2000);
+    const rcsOn = this.rcsReady && steer !== 0;
+    if (rcsOn) this.drawFuel(Math.abs(steer) * CONFIG.rcs.gasPerSecond * this.activeRcsCount * rcsPower * dt, false);
+    const rcsTorque = rcsOn ? CONFIG.rcs.torque * this.activeRcsCount * rcsPower : 0;
     const steerAuthority = inSpace
-      ? rcsOn
-        ? CONFIG.rcs.torque * this.activeRcsCount
-        : 0
+      ? rcsTorque
       : (v.hasCommandModule ? AIRFRAME.reactionWheelTorque + (thrust === 0 ? STEERING.rcsTorque : 0) : 0) +
+        rcsTorque +
         thrust * Math.sin(ENGINE.gimbalRange) * gimbalArm +
         FINS.controlAuthority * v.finCount * qA * v.length * 0.5;
     const controlTorque = steer * steerAuthority;

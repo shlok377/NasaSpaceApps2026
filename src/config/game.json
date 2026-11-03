@@ -64,7 +64,8 @@
     "_note": "Per RCS thruster, once its shell has separated: turning torque, sideways push (m/s^2) and cold gas burned per second at full steer. Boosters cannot steer in space.",
     "torque": 700,
     "accel": 2.5,
-    "gasPerSecond": 0.4
+    "gasPerSecond": 0.4,
+    "airFraction": 0.3
   },
   "world": {
     "surfaceGravity": 9.81,
