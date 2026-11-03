@@ -1,13 +1,14 @@
 import { CONFIG } from '../config';
 import { ROCK_BELT } from '../physics/constants';
+import { TimeOfDay, timeOfDayRocks } from './timeOfDay';
 
 /**
  * The rock belt between the top of the air and the Moon. Rocks drift
  * sideways; they get denser and faster the higher you go. A hit knocks off
- * the part it strikes (unless a shield takes it); flying close without
+ * the part it strikes; flying close without
  * touching scores a near miss, and near misses in a row build a combo.
  */
-export type RockKind = 'ROCK' | 'SHIELD' | 'FUEL';
+export type RockKind = 'ROCK' | 'FUEL';
 
 export interface Rock {
   id: number;
@@ -20,7 +21,13 @@ export interface Rock {
   seed: number;
   /** Already scored as a near miss / used up. */
   spent: boolean;
+  /** Lane of a lane rock (drifters have none). */
   laneIndex?: number;
+  /**
+   * Time at which the rock is at x0 (default 0). `null` means its clock has
+   * not started yet (an evasive-runner rock before `anchorBelt`): it holds at x0.
+   */
+  t0?: number | null;
 }
 
 const RB = CONFIG.rockBelt;
@@ -70,114 +77,254 @@ export function generateBelt(seed = 2026): Rock[] {
       });
     }
   }
-  // A few helpers scattered through the belt, near the Moon's axis.
-  for (const [kind, n] of [
-    ['SHIELD', RB.shields],
-    ['FUEL', RB.fuelCans]
-  ] as const) {
-    for (let i = 0; i < n; i++) {
-      rocks.push({
-        id: rocks.length,
-        kind,
-        x0: (rand() * 2 - 1) * BELT.halfWidth * 0.6,
-        y: ROCK_BELT.bottom + rand() * span,
-        vx: (rand() * 2 - 1) * 4,
-        radius: 2.5,
-        seed: rand(),
-        spent: false
-      });
-    }
+  // A few fuel cans scattered through the belt, near the Moon's axis.
+  for (let i = 0; i < RB.fuelCans; i++) {
+    rocks.push({
+      id: rocks.length,
+      kind: 'FUEL',
+      x0: (rand() * 2 - 1) * BELT.halfWidth * 0.6,
+      y: ROCK_BELT.bottom + rand() * span,
+      vx: (rand() * 2 - 1) * 4,
+      radius: 2.5,
+      seed: rand(),
+      spent: false
+    });
   }
   return rocks;
 }
 
-export function generateLaneWaves(seed = 2026): Rock[] {
+/** Where the reserved safe route runs: lane `lane` is occupied from `from` to `to` (m). */
+interface PathSpan {
+  lane: number;
+  from: number;
+  to: number;
+}
+
+/** The player's runner rocket as the belt generator sees it. */
+export const RUNNER_BODY = {
+  halfLength: RUNNER_CONFIG.rocketHalfLength,
+  halfWidth: RUNNER_CONFIG.rocketHalfWidth,
+  /** Height climbed while a lane shift is under way (m), at the fastest climb. */
+  shiftClimb: RUNNER_CONFIG.cruiseSpeedTop * RUNNER_CONFIG.laneShiftDuration
+} as const;
+
+/**
+ * The runner's climb speed at height y (m/s): the cruise speed below the belt, then
+ * ramping linearly up to cruiseSpeedTop at the belt's top, so the rocks come faster
+ * the deeper you get.
+ */
+export function runnerSpeedAt(y: number): number {
+  const k = Math.min(1, Math.max(0, (y - ROCK_BELT.bottom) / (ROCK_BELT.top - ROCK_BELT.bottom)));
+  return RUNNER_CONFIG.cruiseSpeed + (RUNNER_CONFIG.cruiseSpeedTop - RUNNER_CONFIG.cruiseSpeed) * k;
+}
+
+/** Belt clock (s since the runner rocket crossed the belt's bottom) when it is at height y, following the speed ramp. */
+export function beltTimeAt(y: number): number {
+  const v0 = RUNNER_CONFIG.cruiseSpeed;
+  if (y <= ROCK_BELT.bottom) return (y - ROCK_BELT.bottom) / v0;
+  const span = ROCK_BELT.top - ROCK_BELT.bottom;
+  const dv = RUNNER_CONFIG.cruiseSpeedTop - v0;
+  const top = Math.min(y, ROCK_BELT.top);
+  // ∫ dy / v(y) with v linear in y; past the top the climb stays at the top speed.
+  const inside = Math.abs(dv) < 1e-9 ? (top - ROCK_BELT.bottom) / v0 : (span / dv) * Math.log(runnerSpeedAt(top) / v0);
+  return inside + Math.max(0, y - ROCK_BELT.top) / RUNNER_CONFIG.cruiseSpeedTop;
+}
+
+/** Where `rock` is (m) at belt clock `beltTime` (s since its x0 moment), wrapped to the belt's width. */
+export function beltX(rock: Rock, beltTime: number): number {
+  const w = BELT.halfWidth * 2;
+  const x = rock.x0 + rock.vx * beltTime + BELT.halfWidth;
+  return (((x % w) + w) % w) - BELT.halfWidth;
+}
+
+/**
+ * Does `rock` block a runner rocket centred on lane x `laneX` at height `y`? The
+ * rocket climbs at the cruise speed, so the belt clock follows from `y`.
+ */
+export function rockBlocks(rock: Rock, laneX: number, y: number): boolean {
+  if (rock.kind !== 'ROCK') return false;
+  if (Math.abs(rock.y - y) >= rock.radius + RUNNER_BODY.halfLength) return false;
+  return Math.abs(beltX(rock, beltTimeAt(y)) - laneX) < rock.radius + RUNNER_BODY.halfWidth;
+}
+
+/**
+ * The evasive runner's belt. Rocks sit in the 5 lanes at their own heights
+ * (no rows), denser towards the top; in the last third a few drift sideways
+ * across lanes. A lane-weaving route is reserved first, so a rocket climbing
+ * at the cruise speed with the normal lane-shift time can always get through.
+ * `time` is the launch time: dawn is sparsest, night densest.
+ *
+ * Drifters move on the belt clock (0 when the rocket enters the belt). Until
+ * `anchorBelt` starts that clock they hold at their belt-entry position.
+ * The runner climbs at exactly the cruise speed inside the belt (the scene
+ * clamps it), which is what the reserved route assumes.
+ */
+export function generateLaneWaves(seed = 2026, time: TimeOfDay = 'NOON'): Rock[] {
   const rand = mulberry32(seed);
-  const items: Rock[] = [];
   const cfg = RUNNER_CONFIG;
   const lanes = cfg.lanes;
-  const interval = cfg.waveInterval;
+  const mult = timeOfDayRocks(time);
+  const span = ROCK_BELT.top - ROCK_BELT.bottom;
+  const margin = cfg.pathMargin;
 
-  let waveIndex = 0;
-  for (let y = ROCK_BELT.bottom + interval; y < ROCK_BELT.top; y += interval) {
-    const numSafe = cfg.minSafeLanes + Math.floor(rand() * (cfg.maxSafeLanes - cfg.minSafeLanes + 1));
-    const indices = [0, 1, 2, 3, 4];
-    for (let i = indices.length - 1; i > 0; i--) {
-      const j = Math.floor(rand() * (i + 1));
-      const temp = indices[i];
-      indices[i] = indices[j];
-      indices[j] = temp;
-    }
-    const safeLaneIndices = new Set(indices.slice(0, numSafe));
+  // 1. The reserved route: hold a lane for a while, then shift to a neighbour.
+  const path: PathSpan[] = [];
+  let lane = Math.floor(rand() * lanes.length);
+  let y = ROCK_BELT.bottom - 50;
+  while (y < ROCK_BELT.top + 20) {
+    const shiftAt = y + cfg.pathSegmentMin + rand() * (cfg.pathSegmentMax - cfg.pathSegmentMin);
+    const next = lane === 0 ? 1 : lane === lanes.length - 1 ? lane - 1 : lane + (rand() < 0.5 ? -1 : 1);
+    path.push({ lane, from: y, to: shiftAt + RUNNER_BODY.shiftClimb });
+    lane = next;
+    y = shiftAt;
+  }
+  path.push({ lane, from: y, to: Infinity });
 
-    for (let laneIdx = 0; laneIdx < lanes.length; laneIdx++) {
-      const laneX = lanes[laneIdx];
-      if (safeLaneIndices.has(laneIdx)) {
-        if (waveIndex % 2 === 1 && rand() < 0.75) {
-          const kind: RockKind = 'SHIELD';
-          items.push({
-            id: items.length,
-            kind,
-            x0: laneX,
-            y,
-            vx: 0,
-            radius: 2.5,
-            seed: rand(),
-            spent: false,
-            laneIndex: laneIdx
-          });
-        }
-      } else {
-        const radius = RB.rockRadiusMin + rand() * (RB.rockRadiusMax - RB.rockRadiusMin) * 0.65;
-        items.push({
-          id: items.length,
-          kind: 'ROCK',
-          x0: laneX,
-          y: y + (rand() - 0.5) * 4,
-          vx: 0,
-          radius,
-          seed: rand(),
-          spent: false,
-          laneIndex: laneIdx
-        });
+  const pathLanesAt = (h: number): number[] => path.filter(p => h >= p.from && h <= p.to).map(p => p.lane);
+  const clearOfPath = (rock: Rock): boolean => {
+    const reach = rock.radius + RUNNER_BODY.halfLength + margin;
+    for (let h = rock.y - reach; h <= rock.y + reach; h += 0.5) {
+      const x = beltX(rock, beltTimeAt(h));
+      for (const l of pathLanesAt(h)) {
+        if (Math.abs(x - lanes[l]) < rock.radius + RUNNER_BODY.halfWidth + margin) return false;
       }
     }
-    waveIndex++;
+    return true;
+  };
+
+  const items: Rock[] = [];
+  const radius = () => RB.rockRadiusMin + rand() * (RB.rockRadiusMax - RB.rockRadiusMin) * cfg.rockRadiusFactor;
+  const fitsAmongRocks = (laneIdx: number, h: number): boolean =>
+    items.every(o => {
+      if (o.laneIndex === undefined) {
+        // A boulder: don't overlap it, and don't line up beside it.
+        const dy = Math.abs(o.y - h);
+        const dx = Math.abs(o.x0 - lanes[laneIdx]);
+        if (dy < o.radius + RB.rockRadiusMax + 2 && dx < o.radius + RB.rockRadiusMax + 2) return false;
+        return !(dy < cfg.rowTolerance && dx <= (lanes[1] - lanes[0]) * 1.5);
+      }
+      const d = Math.abs(o.y - h);
+      if (o.laneIndex === laneIdx) return d >= cfg.sameLaneSpacing;
+      if (Math.abs(o.laneIndex - laneIdx) === 1) return d >= cfg.rowTolerance;
+      return true;
+    });
+
+  // 2a. Big boulders above the first third, sitting between two lanes so they block both.
+  //     Placed first so the denser lane rocks can make room around them.
+  const laneGapB = lanes[1] - lanes[0];
+  const topB = ROCK_BELT.top - cfg.beltTopGap;
+  const boulders = Math.round(((cfg.bouldersPer100m * span) / 100) * (2 / 3) * mult);
+  const bFrom = ROCK_BELT.bottom + span / 3;
+  for (let i = 0; i < boulders; i++) {
+    for (let attempt = 0; attempt < cfg.drifterAttempts; attempt++) {
+      const left = Math.floor(rand() * (lanes.length - 1));
+      const h = bFrom + rand() * (topB - bFrom);
+      const x0 = (lanes[left] + lanes[left + 1]) / 2;
+      const rock: Rock = { id: 0, kind: 'ROCK', x0, y: h, vx: 0, radius: cfg.boulderRadius, seed: rand(), spent: false, t0: null };
+      const roomy = items.every(o => {
+        const dy = Math.abs(o.y - h);
+        const dx = Math.abs(beltX(o, beltTimeAt(o.y)) - x0);
+        const reach = cfg.boulderRadius + o.radius + 2;
+        if (dy < reach && dx < reach) return false; // overlapping
+        return !(dy < cfg.rowTolerance && dx <= laneGapB * 1.5); // a row with the lanes beside it
+      });
+      if (roomy && clearOfPath(rock)) {
+        items.push(rock);
+        break;
+      }
+    }
   }
 
-  // Guarantee at least one SHIELD pickup across the run
-  const kinds: RockKind[] = ['SHIELD'];
-  for (const kind of kinds) {
-    if (!items.some(i => i.kind === kind)) {
-      for (let y = ROCK_BELT.bottom + interval; y < ROCK_BELT.top; y += interval) {
-        const waveItems = items.filter(i => Math.abs(i.y - y) < 15);
-        const usedLanes = new Set(waveItems.map(i => i.x0));
-        const openLanes = lanes.filter(l => !usedLanes.has(l));
-        if (openLanes.length > 0) {
-          items.push({
-            id: items.length,
-            kind,
-            x0: openLanes[0],
-            y,
-            vx: 0,
-            radius: 2.5,
-            seed: rand(),
-            spent: false,
-            laneIndex: lanes.indexOf(openLanes[0])
-          });
+  // 2. Lane rocks, each at its own height, density ramping bottom to top.
+  const band = cfg.rockBand;
+  const highest = ROCK_BELT.top - cfg.beltTopGap;
+  for (let b = ROCK_BELT.bottom + cfg.beltBottomGap; b < highest; b += band) {
+    const k = (b + band / 2 - ROCK_BELT.bottom) / span;
+    const per100 = cfg.rocksPer100mBottom + (cfg.rocksPer100mTop - cfg.rocksPer100mBottom) * k;
+    const count = Math.floor((per100 * mult * band) / 100 + rand());
+    for (let i = 0; i < count; i++) {
+      for (let attempt = 0; attempt < cfg.rockAttempts; attempt++) {
+        const laneIdx = Math.floor(rand() * lanes.length);
+        const h = Math.min(highest, b + rand() * band);
+        const rock: Rock = { id: 0, kind: 'ROCK', x0: lanes[laneIdx], y: h, vx: 0, radius: radius(), seed: rand(), spent: false, laneIndex: laneIdx, t0: null };
+        if (fitsAmongRocks(laneIdx, h) && clearOfPath(rock)) {
+          items.push(rock);
           break;
         }
       }
     }
   }
 
+  // 3. Drifters from the middle of the belt up, crossing the lanes as the rocket arrives. The
+  //    no-rows rule holds for them too: when the rocket is level with a drifter,
+  //    no lane rock in the lane it is crossing or a neighbouring one, and no other
+  //    drifter, sits within rowTolerance of its height.
+  const laneGap = lanes.length > 1 ? lanes[1] - lanes[0] : Infinity;
+  const drifterFits = (xAtArrival: number, h: number): boolean =>
+    items.every(o => {
+      if (Math.abs(o.y - h) >= cfg.rowTolerance) return true;
+      if (o.laneIndex === undefined) return false;
+      return Math.abs(lanes[o.laneIndex] - xAtArrival) > laneGap * 1.5;
+    });
+  const drifters = Math.round(cfg.drifters * mult);
+  const lastThird = ROCK_BELT.bottom + span * cfg.driftersFrom;
+  const laneSpan = lanes[lanes.length - 1] - lanes[0];
+  const edge = cfg.drifterEdge;
+  for (let i = 0; i < drifters; i++) {
+    for (let attempt = 0; attempt < cfg.drifterAttempts; attempt++) {
+      const h = lastThird + edge + rand() * (ROCK_BELT.top - lastThird - 2 * edge);
+      const speed = cfg.drifterSpeedMin + rand() * (cfg.drifterSpeedMax - cfg.drifterSpeedMin);
+      const vx = rand() < 0.5 ? -speed : speed;
+      const xAtArrival = lanes[0] + rand() * laneSpan;
+      const rock: Rock = { id: 0, kind: 'ROCK', x0: xAtArrival - vx * beltTimeAt(h), y: h, vx, radius: radius(), seed: rand(), spent: false, t0: null };
+      if (drifterFits(xAtArrival, h) && clearOfPath(rock)) {
+        items.push(rock);
+        break;
+      }
+    }
+  }
+
+  items.forEach((r, i) => (r.id = i));
   return items;
 }
 
+/**
+ * Start the belt clock from the rocket at height `y` at sim time `simTime`: the
+ * clock reads 0 when a rocket climbing at the cruise speed is (or was) at the
+ * belt's bottom. Call it again at the real belt entry to correct a prediction.
+ */
+export function anchorBelt(rocks: Rock[], simTime: number, y: number): void {
+  const t0 = simTime - beltTimeAt(y);
+  for (const r of rocks) r.t0 = t0;
+}
+
+/** Where `rock` is (m) at sim time `time`. A rock whose clock hasn't started holds at x0. */
 export function rockX(rock: Rock, time: number): number {
-  const w = BELT.halfWidth * 2;
-  const x = rock.x0 + rock.vx * time + BELT.halfWidth;
-  return (((x % w) + w) % w) - BELT.halfWidth;
+  if (rock.t0 === null) return beltX(rock, 0);
+  return beltX(rock, time - (rock.t0 ?? 0));
+}
+
+/**
+ * Evasive-runner threat look-ahead: for each lane, the seconds until the rocket
+ * (at height `y`, sim time `time`, climbing at the cruise speed) would meet a
+ * rock in it, or null when nothing crosses that lane within `lookahead` s.
+ * Drifters count at their x when the rocket reaches their height. Only rocks
+ * more than `minAhead` m above the rocket count (rocks on screen show themselves).
+ */
+export function laneThreats(rocks: readonly Rock[], y: number, time: number, lookahead: number = RUNNER_CONFIG.threatLookahead, minAhead = 0): Array<number | null> {
+  const here = beltTimeAt(y);
+  return RUNNER_LANES.map(laneX => {
+    let soonest: number | null = null;
+    for (const r of rocks) {
+      if (r.spent || r.kind !== 'ROCK') continue;
+      const dy = r.y - y;
+      if (dy <= minAhead) continue;
+      const eta = beltTimeAt(r.y) - here;
+      if (eta > lookahead || (soonest !== null && eta >= soonest)) continue;
+      if (Math.abs(rockX(r, time + eta) - laneX) < r.radius + RUNNER_BODY.halfWidth) soonest = eta;
+    }
+    return soonest;
+  });
 }
 
 export interface PartPoint {

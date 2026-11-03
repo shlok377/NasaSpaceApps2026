@@ -35,24 +35,24 @@ export const TIME_LOOKS: Record<TimeOfDay, TimeOfDayLook> = {
   DAWN: {
     label: 'DAWN',
     blurb: 'Calm air',
-    sky: [0x5d7fc4, 0x7d93cf, 0x9fa8d6, 0xc3b6d6, 0xe3bfc8, 0xf3c7b4, 0xf8d3a6, 0xfbe2b0],
-    cloud: [0xfff1e6, 0xffd9c4, 0xe2b4b8],
+    sky: [0x2d3a7a, 0x4a4f96, 0x6f5fa8, 0x9a6db0, 0xc47cab, 0xe8929f, 0xf7ad92, 0xfcca98, 0xfde3b0],
+    cloud: [0xfff4ec, 0xeeb2b8, 0x9a78a6],
     landTint: 0xf2dcd6,
     farTint: 0xf0c8c8,
-    horizon: 0xf6cfb0,
-    skyLow: 0x7d93cf,
+    horizon: 0xfcca98,
+    skyLow: 0x4a4f96,
     stars: false,
     accent: 0xf8b27a
   },
   NOON: {
     label: 'NOON',
     blurb: 'Breezy',
-    sky: [0x7fb8e8, 0x8cc2ec, 0x9bcbef, 0xabd4f2, 0xbcdcf4, 0xcde5f6, 0xdcecf7, 0xe9f3f8],
-    cloud: [0xffffff, 0xe8f1f8, 0xd6e6f2],
+    sky: [0x0b46a0, 0x1557b4, 0x2069c3, 0x2f7dd0, 0x4592db, 0x61a8e4, 0x84bdeb, 0xacd2f1, 0xd4e8f6, 0xeef6fa],
+    cloud: [0xffffff, 0xdce7f1, 0x94a9c0],
     landTint: 0xffffff,
     farTint: 0xffffff,
-    horizon: 0xb9dcf5,
-    skyLow: 0x6fb1e6,
+    horizon: 0xd4e8f6,
+    skyLow: 0x1557b4,
     stars: false,
     accent: 0x7fc4f0
   },
@@ -85,3 +85,5 @@ export const TIME_LOOKS: Record<TimeOfDay, TimeOfDayLook> = {
 
 export const timeOfDayWind = (t: TimeOfDay): number => CONFIG.timeOfDay[t].wind;
 export const timeOfDayReward = (t: TimeOfDay): number => CONFIG.timeOfDay[t].reward;
+/** Rock belt density multiplier: dawn sparsest, night densest (more drifters too). */
+export const timeOfDayRocks = (t: TimeOfDay): number => CONFIG.timeOfDay[t].rocks;

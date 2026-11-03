@@ -255,27 +255,27 @@ describe('WorldRenderer Performance & Allocation Optimizations', () => {
 
     // Initial render: sky gradient should be drawn once
     const t0 = { ...sim.getTelemetry(), earthAltitude: 10 };
-    renderer.render(sim, t0, [], true, false, dummyOverlay);
+    renderer.render(sim, t0, [], true, dummyOverlay);
     expect(renderer.skyRedrawCount).toBe(1);
 
     // Minor altitude shift (15m, which is < 25m threshold): sky gradient should NOT redraw
     const t1 = { ...sim.getTelemetry(), earthAltitude: 20 };
-    renderer.render(sim, t1, [], true, false, dummyOverlay);
+    renderer.render(sim, t1, [], true, dummyOverlay);
     expect(renderer.skyRedrawCount).toBe(1);
 
     // Another small shift (22m): still < 25m threshold from original 10m
     const t2 = { ...sim.getTelemetry(), earthAltitude: 32 };
-    renderer.render(sim, t2, [], true, false, dummyOverlay);
+    renderer.render(sim, t2, [], true, dummyOverlay);
     expect(renderer.skyRedrawCount).toBe(1);
 
     // Significant altitude shift (>25m from 10m, now at 60m): sky gradient redraws
     const t3 = { ...sim.getTelemetry(), earthAltitude: 60 };
-    renderer.render(sim, t3, [], true, false, dummyOverlay);
+    renderer.render(sim, t3, [], true, dummyOverlay);
     expect(renderer.skyRedrawCount).toBe(2);
 
     // Camera mode switch (e.g. into ORBIT): immediate redraw regardless of altitude
     renderer.camera.mode = 'ORBIT';
-    renderer.render(sim, t3, [], true, false, dummyOverlay);
+    renderer.render(sim, t3, [], true, dummyOverlay);
     expect(renderer.skyRedrawCount).toBe(3);
   });
 
@@ -359,7 +359,7 @@ describe('WorldRenderer Performance & Allocation Optimizations', () => {
       impactMarker: null
     };
     const t = sim.getTelemetry();
-    renderer.render(sim, t, [], true, false, dummyOverlay);
+    renderer.render(sim, t, [], true, dummyOverlay);
 
     const smokeSpritesPool = (renderer as any).smokeSpritesPool;
     expect(smokeSpritesPool.length).toBeGreaterThan(0);
