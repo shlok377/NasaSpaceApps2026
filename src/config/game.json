@@ -206,6 +206,10 @@
     "padBonus": 100,
     "recoveryRefund": 0.5
   },
+  "hull": {
+    "_note": "Hull integrity is 100 at launch; every part knocked or snapped off costs perPart. At 0 the flight is lost.",
+    "perPart": 25
+  },
   "gameSpeed": 1.5,
   "phases": {
     "orbit": {

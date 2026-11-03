@@ -151,3 +151,14 @@ describe('shell separation by key', () => {
     expect(free.separate('B')).toBe(false);
   });
 });
+
+describe('hull integrity', () => {
+  it('starts at 100 and drops with every part lost, down to 0', () => {
+    const sim = inSpace(rcsRocket());
+    expect(sim.hull).toBe(100);
+    sim.stats.partsLost = 1;
+    expect(sim.hull).toBeLessThan(100);
+    sim.stats.partsLost = 10;
+    expect(sim.hull).toBe(0);
+  });
+});

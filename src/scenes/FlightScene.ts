@@ -798,7 +798,7 @@ export class FlightScene extends Phaser.Scene {
     const onPad = this.sim.phase === 'PRELAUNCH' && this.countdown === null;
 
     this.goalChip.setVisible(!onPad && !this.result);
-    this.goalChip.update(r.phase, r.phasesDone, this.objective(t));
+    this.goalChip.update(r.phase, r.phasesDone, this.objective(t) + (this.sim.hull < 100 ? `  ·  HULL ${this.sim.hull}%` : ''));
 
     const ascent = mode === 'ASCENT';
     this.ladder.setVisible(ascent && !this.result);

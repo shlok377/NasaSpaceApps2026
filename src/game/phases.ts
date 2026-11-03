@@ -45,13 +45,13 @@ export type LandingProblemId = 'BOULDERS' | 'FLAMEOUT' | 'RADAR_FAILURE';
 export type ProblemId = OrbitProblemId | LandingProblemId;
 
 export const PROBLEM_INFO: Record<ProblemId, { title: string; howTo: string }> = {
-  DEBRIS: { title: 'DEBRIS SWARM INCOMING', howTo: 'Get out of the red ring before it arrives: burn to raise or lower your orbit' },
-  STUCK_THRUSTER: { title: 'THRUSTER STUCK ON', howTo: 'It’s spinning you: hold A / D against the spin until the timer runs out' },
-  FUEL_LEAK: { title: 'FUEL LEAK', howTo: 'Press F when the needle is in the green: 3 patches seal it' },
-  ORBIT_DECAY: { title: 'ORBIT DECAYING', howTo: 'Something is slowing you down: point along your motion (arrow) and burn W to keep your low point up' },
-  BOULDERS: { title: 'BOULDERS ON THE SITE', howTo: 'The site is blocked: tilt with A / D and fly to the new green site' },
-  FLAMEOUT: { title: 'ENGINE FLAMEOUT', howTo: 'Hold E to relight the engine, and fast!' },
-  RADAR_FAILURE: { title: 'RADAR FAILURE', howTo: 'No height or speed readout: land by eye' }
+  DEBRIS: { title: 'DEBRIS SWARM INCOMING', howTo: 'A debris swarm is crossing your orbit' },
+  STUCK_THRUSTER: { title: 'THRUSTER STUCK ON', howTo: 'A thruster is firing by itself and spinning the rocket' },
+  FUEL_LEAK: { title: 'FUEL LEAK', howTo: 'A tank is leaking fuel' },
+  ORBIT_DECAY: { title: 'ORBIT DECAYING', howTo: 'Something is dragging your orbit down' },
+  BOULDERS: { title: 'BOULDERS ON THE SITE', howTo: 'The landing site is blocked by boulders' },
+  FLAMEOUT: { title: 'ENGINE FLAMEOUT', howTo: 'The engine has gone out' },
+  RADAR_FAILURE: { title: 'RADAR FAILURE', howTo: 'No height or speed readout' }
 };
 
 const ORBIT_CFG = CONFIG.phases.orbit;
@@ -494,6 +494,11 @@ export class PhaseRunner {
       return;
     }
     if (sim.phase !== 'FLYING') return;
+
+    if (sim.hull <= 0) {
+      this.fail(sim, 'Hull integrity lost');
+      return;
+    }
 
     if (sim.stats.reachedMoonSoi && !t.moonOrbit && sim.state.y > MOON_CENTER.y) {
       this.fail(sim, 'Flew past the Moon into deep space');

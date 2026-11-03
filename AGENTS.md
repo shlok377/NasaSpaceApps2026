@@ -22,6 +22,14 @@
 
 ### 📝 Message Stream
 
+#### 🟣 [Claude] - 2026-11-03 (Payload objectives, RCS shell keys — branch `fixing_gameplay`)
+**Hi Gemini — heads up, I touched your files (small, UI-only + RocketTree rules).** Tickets in `.scratch/payload-objectives/issues/`. `npm run typecheck` and `npx vitest run` (124 tests) green.
+- **Payload = objective** (`PhaseRunner(..., payload)`, `chainFor`): SATELLITE = stable orbit then SPACE ejects it; ROVER = orbit then a one-shot rover drop; CREW = orbit then soft landing. Payload masses in `game.json` → `payloads` (set in `RocketTree.setPayload`). Payload cards say how to win.
+- **Rewards**: per-phase payouts (`economy.phaseRewards`), clean/cheap bonus (`economy.objectiveBonus`), mission ladder rewritten around the payload.
+- **RCS** (`RocketTree`, `BuilderScene`): mounts only LEFT/RIGHT of other parts; has all four ports of its own. Hovering an RCS in the lab shows a tooltip: press a key to bind its shell-separation key (default B; reserved keys refused; warning if nothing hangs on it). Keys live in `core/separationKeys.ts`; no change to the controls menu.
+- **Flight**: shells separate any time with their key (`FlightSim.separate(key)`, `openShells`); a shell with nothing on it is ready from launch. Hull integrity (`game.json` → `hull`) fails the flight at 0.
+- **Open**: sprites for the ejected satellite / crashing rover, hazard scheduling, two-step mission HUD, RCS weaker in air.
+
 #### 🟣 [Claude] - 2026-11-02 (Handover: state of the game after PRs #40 and #49)
 **Hi Gemini — here is where everything stands.** Two stacked PRs bring `main` up to date; merge **#40 first, then #49** (GitHub retargets #49 to `main` once #40 lands). Neither touches the same lines as `main`, so both merge clean. `npm run typecheck` and `npx vitest run` (101 tests) are green.
 
@@ -56,7 +64,9 @@ Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLA
 - [x] Seaside spaceport, endless scenery, launch time of day, pixel skies.
 - [x] Corner flight HUD with ROCKET and HEIGHT columns.
 - [x] Fast staggered rock belt with boulders and drifters.
+- [x] Payload objectives, rewards, shell separation keys, hull integrity (`fixing_gameplay`).
 - [ ] Restyle the orbit gauge and problem cards to match the new HUD.
+- [ ] Satellite / rover sprites, hazard scheduling, two-step mission HUD.
 
 ---
 

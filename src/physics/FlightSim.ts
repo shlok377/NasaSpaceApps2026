@@ -243,6 +243,11 @@ export class FlightSim {
     return kg;
   }
 
+  /** Hull integrity, 100 at launch: every part lost costs a share, and at 0 the flight is lost. */
+  public get hull(): number {
+    return Math.max(0, 100 - this.stats.partsLost * CONFIG.hull.perPart);
+  }
+
   /** RCS shells already cracked open (by their key, in any phase of flight). */
   public openShells = new Set<string>();
 
