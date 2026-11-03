@@ -3,7 +3,7 @@ import { FlightStats } from '../physics/FlightSim';
 import { ROCK_BELT } from '../physics/constants';
 import { VehicleReport } from '../physics/vehicle';
 import { currentMission, MISSIONS, newlyCompleted, rocketCost } from './missions';
-import { flightEarnings, objectiveBonus, GRANT_FLOOR, loadProgress, saveProgress, STARTING_MONEY, withGrant } from './progress';
+import { flightEarnings, objectiveBonus, payoutBreakdown, GRANT_FLOOR, loadProgress, saveProgress, STARTING_MONEY, withGrant } from './progress';
 import { anchorBelt, BELT, beltTimeAt, runnerSpeedAt, beltX, checkBelt, Combo, generateBelt, generateLaneWaves, laneThreats, rockBlocks, rockX, RUNNER_BODY, RUNNER_CONFIG, RUNNER_LANES } from './rocks';
 
 const stats: FlightStats = {
@@ -368,5 +368,16 @@ describe('rock belt', () => {
       }
       expect(allFlagged / samples).toBeLessThan(0.02);
     });
+  });
+});
+
+describe('payout breakdown', () => {
+  it('lists the base and each bonus, and only pays bonuses on a finished objective', () => {
+    expect(payoutBreakdown(false, 400, 0, 10, 2)).toEqual({ base: 400, clean: 0, cheap: 0, time: 0 });
+    const b = payoutBreakdown(true, 400, 0, 10, 1.5);
+    expect(b.clean).toBeGreaterThan(0);
+    expect(b.cheap).toBeGreaterThan(0);
+    expect(b.time).toBe(200);
+    expect(objectiveBonus(true, 400, 0, 10)).toBe(b.clean + b.cheap);
   });
 });

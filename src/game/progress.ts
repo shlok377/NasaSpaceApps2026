@@ -91,12 +91,32 @@ export interface FlightEarnings {
   total: number;
 }
 
-/** Share of the objective payout earned for flying clean and cheap. 0 unless the objective was finished. */
-export function objectiveBonus(objectiveDone: boolean, basePayout: number, partsLost: number, rocketCost: number): number {
-  if (!objectiveDone) return 0;
+/** The bonus lines on top of a finished objective's base payout ($). All 0 unless the objective was finished. */
+export interface PayoutBreakdown {
+  base: number;
+  /** No part lost in flight. */
+  clean: number;
+  /** A cheap rocket. */
+  cheap: number;
+  /** Extra from launching later in the day. */
+  time: number;
+}
+
+export function payoutBreakdown(objectiveDone: boolean, basePayout: number, partsLost: number, rocketCost: number, rewardScale = 1): PayoutBreakdown {
+  if (!objectiveDone) return { base: basePayout, clean: 0, cheap: 0, time: 0 };
   const cfg = CONFIG.economy.objectiveBonus;
-  const share = (partsLost === 0 ? cfg.noDamage : 0) + (rocketCost <= cfg.cheapCost ? cfg.cheap : 0);
-  return Math.round(basePayout * share);
+  return {
+    base: basePayout,
+    clean: partsLost === 0 ? Math.round(basePayout * cfg.noDamage) : 0,
+    cheap: rocketCost <= cfg.cheapCost ? Math.round(basePayout * cfg.cheap) : 0,
+    time: Math.round(basePayout * (rewardScale - 1))
+  };
+}
+
+/** Clean + cheap bonus on a finished objective ($), before the time-of-day scale. */
+export function objectiveBonus(objectiveDone: boolean, basePayout: number, partsLost: number, rocketCost: number): number {
+  const b = payoutBreakdown(objectiveDone, basePayout, partsLost, rocketCost);
+  return b.clean + b.cheap;
 }
 
 /** `phasePaid`: phase rewards already paid out during the flight (so they aren't paid twice). */

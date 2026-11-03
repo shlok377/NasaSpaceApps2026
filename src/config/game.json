@@ -187,7 +187,7 @@
     "startingMoney": 100000000,
     "grantFloor": 50,
     "phaseRewards": {
-      "ORBIT": 220,
+      "ORBIT": 120,
       "ROVER": 330,
       "DEPLOY": 150,
       "LANDING": 700

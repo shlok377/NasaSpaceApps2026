@@ -14,7 +14,7 @@ import {
   PROBLEM_INFO
 } from '../game/phases';
 import { normalizeKey } from '../core/separationKeys';
-import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, objectiveBonus, PlayerProgress, saveProgress } from '../game/progress';
+import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, objectiveBonus, payoutBreakdown, PlayerProgress, saveProgress } from '../game/progress';
 import { anchorBelt, checkBelt, Combo, generateBelt, generateLaneWaves, Rock, runnerSpeedAt } from '../game/rocks';
 import { createEvasiveRunnerState, EvasiveRunnerState, updateEvasiveRunner, RUNNER_CONFIG } from '../game/evasiveRunner';
 import { Award, StuntTracker } from '../game/stunts';
@@ -1099,6 +1099,11 @@ export class FlightScene extends Phaser.Scene {
     const won = this.completedNow.length > 0;
     const missionLine = won ? `MISSION DONE  +$${this.completedNow.reduce((n, m) => n + m.reward, 0)}` : this.mission ? 'MISSION NOT DONE' : '';
     if (missionLine) items.push(pixelTitle(this, cx, y + 216, missionLine, 8, won ? PX.text.green : PX.text.muted).setOrigin(0.5, 0));
+
+    // Where the payout came from: the base, then each bonus.
+    const pay = payoutBreakdown(this.runner.complete, OUTCOME_PAYOUT[result.outcome], this.sim.stats.partsLost, this.cost, timeOfDayReward(this.timeOfDay));
+    const lines = [`BASE $${pay.base}`, pay.clean ? `CLEAN +$${pay.clean}` : '', pay.cheap ? `CHEAP +$${pay.cheap}` : '', pay.time ? `${this.timeOfDay} +$${pay.time}` : ''].filter(Boolean);
+    if (pay.base > 0) items.push(pixelBody(this, cx, y + 236, lines.join('   '), 16, PX.text.muted).setOrigin(0.5, 0));
 
     const retry = this.canRetryPhase ? `RETRY P${PHASE_INFO[this.checkpoint!.phase].number}` : 'FLY AGAIN';
     items.push(
