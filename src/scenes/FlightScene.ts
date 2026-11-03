@@ -10,6 +10,8 @@ import {
   PhaseEvent,
   PhaseId,
   PhaseRunner,
+  phaseNumber,
+  stepsDone,
   predictRoverLanding,
   PROBLEM_INFO
 } from '../game/phases';
@@ -641,7 +643,7 @@ export class FlightScene extends Phaser.Scene {
           this.phasePaid += reward;
           saveProgress(this.progress);
           const at = this.world.rocketScreen(this.sim);
-          this.fx.popup(at.x, at.y - 80, `PHASE ${PHASE_INFO[e.phase].number} COMPLETE  +$${reward}`, UI.greenText, 24);
+          this.fx.popup(at.x, at.y - 80, `PHASE ${phaseNumber(this.runner.chain, e.phase)} COMPLETE  +$${reward}`, UI.greenText, 24);
           this.fx.ring(at.x, at.y, 0x4ade80, 220, 0.9);
           break;
         }
@@ -741,7 +743,7 @@ export class FlightScene extends Phaser.Scene {
 
   private showPhaseTitle(phase: PhaseId): void {
     const info = PHASE_INFO[phase];
-    this.phaseTitle.setText(`PHASE ${info.number} · ${info.title}`).setAlpha(1);
+    this.phaseTitle.setText(`PHASE ${phaseNumber(this.runner.chain, phase)} · ${info.title}`).setAlpha(1);
     this.phaseGoal.setText(info.goal).setAlpha(1);
     this.titleTimer = 3.2;
   }
@@ -803,7 +805,7 @@ export class FlightScene extends Phaser.Scene {
     const onPad = this.sim.phase === 'PRELAUNCH' && this.countdown === null;
 
     this.goalChip.setVisible(!onPad && !this.result);
-    this.goalChip.update(r.phase, r.phasesDone, this.objective(t));
+    this.goalChip.update(r.chain, r.phase, stepsDone(r.chain, r.phase, r.complete), this.objective(t));
     this.hullBar.setVisible(!onPad && !this.result);
     this.hullBar.update(this.sim.hull);
 
@@ -1058,18 +1060,19 @@ export class FlightScene extends Phaser.Scene {
       );
     }
 
-    // Phase track: three nodes on a line, lit as far as you got.
-    const done = this.runner.phasesDone;
+    // Phase track: the nodes on a line, lit as far as you got.
+    const chain = this.runner.chain;
+    const done = stepsDone(chain, this.runner.phase, this.runner.complete);
     const trackY = y + 92;
-    const nodeX = (i: number) => cx - 140 + i * 140;
-    for (let i = 0; i < 2; i++) {
+    const nodeX = (i: number) => cx - 70 * (chain.length - 1) + i * 140;
+    for (let i = 0; i < chain.length - 1; i++) {
       g.fillStyle(0x07060b, 1);
       g.fillRect(nodeX(i), trackY - 3, 140, 6);
       // Lit up to the next node once that phase is done.
       g.fillStyle(i + 1 < done ? PX.green : PX.borderDim, 1);
       g.fillRect(nodeX(i), trackY - 1, 140, 2);
     }
-    (['ORBIT', 'ROVER', 'LANDING'] as PhaseId[]).forEach((p, i) => {
+    chain.forEach((p, i) => {
       const state = i < done ? 'DONE' : i === done && this.runner.failure ? 'FAIL' : 'TODO';
       const c = state === 'DONE' ? PX.green : state === 'FAIL' ? PX.red : PX.borderDim;
       const nx = nodeX(i);
@@ -1119,7 +1122,7 @@ export class FlightScene extends Phaser.Scene {
     const lines = [`BASE $${pay.base}`, pay.clean ? `CLEAN +$${pay.clean}` : '', pay.cheap ? `CHEAP +$${pay.cheap}` : '', pay.time ? `${this.timeOfDay} +$${pay.time}` : ''].filter(Boolean);
     if (pay.base > 0) items.push(pixelBody(this, cx, y + 236, lines.join('   '), 16, PX.text.muted).setOrigin(0.5, 0));
 
-    const retry = this.canRetryPhase ? `RETRY P${PHASE_INFO[this.checkpoint!.phase].number}` : 'FLY AGAIN';
+    const retry = this.canRetryPhase ? `RETRY P${phaseNumber(this.runner.chain, this.checkpoint!.phase)}` : 'FLY AGAIN';
     items.push(
       ...this.makeButton(cx - 108, y + h - 52, 'R', retry, true, () => {
         if (this.canRetryPhase) this.retryFromCheckpoint();

@@ -6,7 +6,7 @@ import { moonAngleOf, surfaceDistance } from '../physics/bodies';
 import { MOON, MOON_CENTER } from '../physics/constants';
 import { ControlInput, FlightSim } from '../physics/FlightSim';
 import { buildFlightVehicle } from '../physics/vehicle';
-import { chainFor, isStableOrbit, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, updateProblem } from './phases';
+import { chainFor, isStableOrbit, phaseNumber, stepsDone, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, updateProblem } from './phases';
 
 type Layout = Array<[number, number, PartType, FuelKind?]>;
 const STAGED: Layout = [
@@ -298,5 +298,14 @@ describe('a chosen rover mission', () => {
     run.update(sim, 1 / 120);
     expect(run.complete).toBe(false);
     expect(run.failure).not.toBeNull();
+  });
+});
+
+describe('phase numbering', () => {
+  it('counts within the payload’s own chain', () => {
+    expect(phaseNumber(chainFor('SATELLITE'), 'DEPLOY')).toBe(2);
+    expect(phaseNumber(chainFor('CREW'), 'LANDING')).toBe(2);
+    expect(stepsDone(chainFor('ROVER'), 'ROVER', false)).toBe(1);
+    expect(stepsDone(chainFor('ROVER'), 'ROVER', true)).toBe(2);
   });
 });

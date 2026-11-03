@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { GAME_ASSETS } from '../core/assets';
 import { FUEL_KINDS } from '../core/partDefinitions';
 import { FuelKind } from '../core/types';
-import { PHASE_INFO, PHASES, PhaseId, phaseSlot } from '../game/phases';
+import { PHASE_INFO, PhaseId, phaseNumber } from '../game/phases';
 import { PX } from './pixel';
 import { formatDistance, UI } from './theme';
 
@@ -101,9 +101,9 @@ export class GoalChip {
     this.container.setVisible(v);
   }
 
-  public update(current: PhaseId, done: number, goal: string): void {
-    const now = phaseSlot(current);
-    const key = `${now}|${done}|${goal}`;
+  public update(chain: readonly PhaseId[], current: PhaseId, done: number, goal: string): void {
+    const now = chain.indexOf(current);
+    const key = `${chain.length}|${now}|${done}|${goal}`;
     if (key === this.key) return;
     this.key = key;
     this.phase.setText(PHASE_INFO[current].title);
@@ -115,11 +115,11 @@ export class GoalChip {
     this.tab.forEach(t => t.destroy());
     this.tab.length = 0;
     hudFrame(g, this.x, this.y, w, h, PX.border, 0.55);
-    const tab = headerTab(this.scene, g, this.x + 12, this.y, `PHASE ${PHASE_INFO[current].number}/3`);
+    const tab = headerTab(this.scene, g, this.x + 12, this.y, `PHASE ${phaseNumber(chain, current)}/${chain.length}`);
     this.container.add(tab);
     this.tab.push(tab);
     // Phase pips: done = green, now = gold, later = hollow.
-    PHASES.forEach((_, i) => {
+    chain.forEach((_, i) => {
       const px = this.x + 14 + i * 12;
       const py = this.y + 13;
       g.fillStyle(0x07060b, 1);

@@ -15,6 +15,14 @@ import { PayloadKind } from '../core/types';
 export type PhaseId = 'ORBIT' | 'ROVER' | 'LANDING' | 'DEPLOY';
 export const PHASES: PhaseId[] = ['ORBIT', 'ROVER', 'LANDING'];
 
+/** "Phase n of m" for a phase within a chain (1-based). */
+export const phaseNumber = (chain: readonly PhaseId[], phase: PhaseId): number => chain.indexOf(phase) + 1;
+
+/** Steps of the chain finished so far. */
+export function stepsDone(chain: readonly PhaseId[], phase: PhaseId, complete: boolean): number {
+  return complete ? chain.length : Math.max(0, chain.indexOf(phase));
+}
+
 /** Which of the three HUD slots a phase fills (the satellite deploy takes the middle one). */
 export const phaseSlot = (p: PhaseId): number => (p === 'DEPLOY' ? 1 : PHASES.indexOf(p));
 
