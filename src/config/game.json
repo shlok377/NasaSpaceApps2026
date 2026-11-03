@@ -188,9 +188,15 @@
     "grantFloor": 50,
     "phaseRewards": {
       "ORBIT": 220,
-      "ROVER": 250,
-      "DEPLOY": 250,
-      "LANDING": 400
+      "ROVER": 330,
+      "DEPLOY": 150,
+      "LANDING": 700
+    },
+    "objectiveBonus": {
+      "_note": "Extra share of the objective payout: no part lost in flight, and a cheap rocket.",
+      "noDamage": 0.2,
+      "cheapCost": 90,
+      "cheap": 0.15
     },
     "partialRewards": {
       "SKY": 10,

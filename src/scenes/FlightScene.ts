@@ -13,7 +13,7 @@ import {
   predictRoverLanding,
   PROBLEM_INFO
 } from '../game/phases';
-import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, PlayerProgress, saveProgress } from '../game/progress';
+import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, objectiveBonus, PlayerProgress, saveProgress } from '../game/progress';
 import { anchorBelt, checkBelt, Combo, generateBelt, generateLaneWaves, Rock, runnerSpeedAt } from '../game/rocks';
 import { createEvasiveRunnerState, EvasiveRunnerState, updateEvasiveRunner, RUNNER_CONFIG } from '../game/evasiveRunner';
 import { Award, StuntTracker } from '../game/stunts';
@@ -21,7 +21,7 @@ import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay, timeOfDayReward, timeOfDayWind } f
 import { moonSoiAltitude } from '../physics/bodies';
 import { ENGINE, FINS, G0, LIMITS, ROCK_BELT, WORLD } from '../physics/constants';
 import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physics/FlightSim';
-import { evaluateMission, MAX_STARS, MissionResult } from '../physics/mission';
+import { evaluateMission, MAX_STARS, MissionResult, OUTCOME_PAYOUT } from '../physics/mission';
 import { analyzeVehicle, buildFlightVehicle, FlightVehicle, VehicleReport } from '../physics/vehicle';
 import { GoalChip, HeightLadder, hudFrame, InstrumentChip, MoneyChip } from '../ui/CornerHud';
 import { SkyCards } from '../ui/SkyCards';
@@ -931,6 +931,7 @@ export class FlightScene extends Phaser.Scene {
       report: this.report,
       fuelFraction: this.vehicle.fuelCapacity > 0 ? this.sim.fuel / this.vehicle.fuelCapacity : 0,
       phasesDone: r.phasesDone,
+      payload: r.payload,
       bonus: this.stunts.total,
       failure: r.failure ?? (r.complete ? undefined : 'Flight ended early')
     });
@@ -941,13 +942,15 @@ export class FlightScene extends Phaser.Scene {
       cost: this.cost,
       awards: this.stunts.awards,
       phasesDone: r.phasesDone,
+      payload: r.payload ?? 'CREW',
+      objectiveDone: r.complete,
       problemsSolved: r.solved,
       problemsFailed: r.failedProblems
     };
     this.completedNow = newlyCompleted(ctx, this.progress.completedMissions);
     const missionReward = this.completedNow.reduce((s, m) => s + m.reward, 0);
     const rewardScale = timeOfDayReward(this.timeOfDay);
-    this.earnings = flightEarnings(this.result.outcome, this.stunts.awards, missionReward, this.cost, st.landedOn === 'EARTH' && st.reachedSpace, this.phasePaid, rewardScale);
+    this.earnings = flightEarnings(this.result.outcome, this.stunts.awards, missionReward, this.cost, st.landedOn === 'EARTH' && st.reachedSpace, this.phasePaid, rewardScale, objectiveBonus(r.complete, OUTCOME_PAYOUT[this.result.outcome], st.partsLost, this.cost));
 
     this.progress = {
       ...this.progress,
@@ -977,6 +980,7 @@ export class FlightScene extends Phaser.Scene {
     const accent: Record<MissionResult['outcome'], number> = {
       CREW_LANDED: PX.gold,
       ROVER_DEPLOYED: PX.green,
+      SATELLITE_DEPLOYED: PX.green,
       IN_ORBIT: PX.green,
       MOON_SOI: 0xa3e635,
       SPACE: 0x7dd3fc,

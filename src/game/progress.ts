@@ -86,7 +86,17 @@ export interface FlightEarnings {
   mission: number;
   /** Half the rocket's price back for landing it intact back home (reusable rockets!). */
   recovery: number;
+  /** Extra for a clean flight (no part lost) and a cheap rocket, on a finished objective. */
+  bonus: number;
   total: number;
+}
+
+/** Share of the objective payout earned for flying clean and cheap. 0 unless the objective was finished. */
+export function objectiveBonus(objectiveDone: boolean, basePayout: number, partsLost: number, rocketCost: number): number {
+  if (!objectiveDone) return 0;
+  const cfg = CONFIG.economy.objectiveBonus;
+  const share = (partsLost === 0 ? cfg.noDamage : 0) + (rocketCost <= cfg.cheapCost ? cfg.cheap : 0);
+  return Math.round(basePayout * share);
 }
 
 /** `phasePaid`: phase rewards already paid out during the flight (so they aren't paid twice). */
@@ -98,15 +108,17 @@ export function flightEarnings(
   landedHome: boolean,
   phasePaid = 0,
   /** Launch-time bonus on the outcome and mission payouts (phasePaid is already scaled). */
-  rewardScale = 1
+  rewardScale = 1,
+  bonus = 0
 ): FlightEarnings {
   const e = {
     outcome: Math.max(0, Math.round(OUTCOME_PAYOUT[outcome] * rewardScale) - phasePaid),
     awards: cashFromAwards(awards),
     mission: Math.round(missionReward * rewardScale),
-    recovery: landedHome ? Math.round(rocketCost * CONFIG.economy.recoveryRefund) : 0
+    recovery: landedHome ? Math.round(rocketCost * CONFIG.economy.recoveryRefund) : 0,
+    bonus: Math.round(bonus * rewardScale)
   };
-  return { ...e, total: e.outcome + e.awards + e.mission + e.recovery };
+  return { ...e, total: e.outcome + e.awards + e.mission + e.recovery + e.bonus };
 }
 
 /** Never let the player get stuck unable to afford a rocket. */

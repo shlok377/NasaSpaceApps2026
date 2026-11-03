@@ -3,7 +3,7 @@ import { FlightStats } from '../physics/FlightSim';
 import { ROCK_BELT } from '../physics/constants';
 import { VehicleReport } from '../physics/vehicle';
 import { currentMission, MISSIONS, newlyCompleted, rocketCost } from './missions';
-import { flightEarnings, GRANT_FLOOR, loadProgress, saveProgress, STARTING_MONEY, withGrant } from './progress';
+import { flightEarnings, objectiveBonus, GRANT_FLOOR, loadProgress, saveProgress, STARTING_MONEY, withGrant } from './progress';
 import { anchorBelt, BELT, beltTimeAt, runnerSpeedAt, beltX, checkBelt, Combo, generateBelt, generateLaneWaves, laneThreats, rockBlocks, rockX, RUNNER_BODY, RUNNER_CONFIG, RUNNER_LANES } from './rocks';
 
 const stats: FlightStats = {
@@ -45,11 +45,27 @@ describe('missions', () => {
   });
 
   it('checks goals and constraints against the flight', () => {
-    const cheapSpace = { stats: { ...stats, maxAltitude: 3_500, reachedSpace: true }, report, cost: 60, awards: [], phasesDone: 0, problemsSolved: 0, problemsFailed: 0 };
+    const cheapSpace = { stats: { ...stats, maxAltitude: 3_500, reachedSpace: true }, report, cost: 60, awards: [], phasesDone: 0, payload: 'CREW' as const, objectiveDone: false, problemsSolved: 0, problemsFailed: 0 };
     const done = newlyCompleted(cheapSpace, []).map(m => m.id);
     expect(done).toEqual(expect.arrayContaining(['liftoff', 'clouds', 'cheap-space']));
     const pricey = { ...cheapSpace, cost: 200 };
     expect(newlyCompleted(pricey, []).map(m => m.id)).not.toContain('cheap-space');
+  });
+
+  it('objective missions follow the chosen payload', () => {
+    const base = { stats, report, cost: 100, awards: [], phasesDone: 2, payload: 'SATELLITE' as const, objectiveDone: true, problemsSolved: 0, problemsFailed: 0 };
+    const ids = (c: typeof base | { payload: 'ROVER' | 'CREW' }) => newlyCompleted({ ...base, ...c }, []).map(m => m.id);
+    expect(ids(base)).toContain('satellite');
+    expect(ids(base)).not.toContain('rover');
+    expect(ids({ payload: 'ROVER' })).toContain('rover');
+    expect(ids({ payload: 'CREW' })).toContain('crew');
+  });
+
+  it('pays a bonus for a clean, cheap finished objective only', () => {
+    expect(objectiveBonus(false, 500, 0, 50)).toBe(0);
+    expect(objectiveBonus(true, 500, 3, 500)).toBe(0);
+    expect(objectiveBonus(true, 500, 0, 500)).toBeGreaterThan(0);
+    expect(objectiveBonus(true, 500, 0, 50)).toBeGreaterThan(objectiveBonus(true, 500, 0, 500));
   });
 
   it('prices rockets from their parts', () => {

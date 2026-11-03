@@ -1,5 +1,5 @@
 import { partCost, PricedPart } from '../core/partDefinitions';
-import { PartType } from '../core/types';
+import { PartType, PayloadKind } from '../core/types';
 import { FlightStats } from '../physics/FlightSim';
 import { VehicleReport } from '../physics/vehicle';
 import { Award } from './stunts';
@@ -13,6 +13,10 @@ export interface MissionContext {
   awards: readonly Award[];
   /** Mission phases finished: 1 orbit, 2 rover, 3 crew landed. */
   phasesDone: number;
+  /** What the rocket carried. */
+  payload: PayloadKind;
+  /** The payload's own objective was finished. */
+  objectiveDone: boolean;
   /** Problems the player fixed in orbit and on the way down. */
   problemsSolved: number;
   /** Problems that went wrong. */
@@ -39,10 +43,11 @@ export const MISSIONS: Mission[] = [
   { id: 'rock-dodger', title: 'Rock dodger', goal: 'Get 3 near misses in the rock belt', reward: 50, check: c => nearMisses(c) >= 3 },
   { id: 'moon-soi', title: 'Moonbound', goal: 'Reach the Moon’s gravity', reward: 60, check: c => c.stats.reachedMoonSoi },
   { id: 'orbiter', title: 'Phase 1: Lunar orbiter', goal: 'Get into a stable orbit around the Moon', reward: 80, check: c => c.phasesDone >= 1 },
-  { id: 'rover', title: 'Phase 2: Lunar rover', goal: 'Drop the rover in its landing zone', reward: 100, check: c => c.phasesDone >= 2 },
-  { id: 'crew', title: 'Phase 3: Human landing', goal: 'Land the crew on the Moon', reward: 150, check: c => c.phasesDone >= 3 },
-  { id: 'cool-head', title: 'Cool head', goal: 'Finish all three phases without a single problem going wrong', reward: 200, check: c => c.phasesDone >= 3 && c.problemsFailed === 0 },
-  { id: 'lean-lander', title: 'Lean lander', goal: 'Land the crew with a rocket costing $120 or less', reward: 250, check: c => c.phasesDone >= 3 && c.cost <= 120 }
+  { id: 'satellite', title: 'Satellite out', goal: 'Eject a satellite from a stable lunar orbit', reward: 80, check: c => c.payload === 'SATELLITE' && c.objectiveDone },
+  { id: 'rover', title: 'Rover delivered', goal: 'Crash a rover onto its landing zone', reward: 100, check: c => c.payload === 'ROVER' && c.objectiveDone },
+  { id: 'crew', title: 'Human landing', goal: 'Land the crew on the Moon', reward: 150, check: c => c.payload === 'CREW' && c.objectiveDone },
+  { id: 'cool-head', title: 'Cool head', goal: 'Finish any mission without a single problem going wrong', reward: 200, check: c => c.objectiveDone && c.problemsFailed === 0 },
+  { id: 'lean-lander', title: 'Lean lander', goal: 'Land the crew with a rocket costing $120 or less', reward: 250, check: c => c.payload === 'CREW' && c.objectiveDone && c.cost <= 120 }
 ];
 
 export function currentMission(completed: readonly string[]): Mission | null {
