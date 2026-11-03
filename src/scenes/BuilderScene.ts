@@ -7,6 +7,7 @@ import { FuelKind, PartType, PayloadKind, PortDirection, RocketNode } from '../c
 import { ParticleManager } from '../particles';
 import { preloadGameAssets, getPartTextureKey, GAME_ASSETS } from '../core/assets';
 import { PX, drawPixelPanel, drawSparkle, pixelBody, pixelTitle } from '../ui/pixel';
+import { normalizeKey } from '../core/separationKeys';
 import { BACKDROP_SCALE, createBackdropTexture } from '../ui/backdrop';
 
 interface PaletteBay {
@@ -110,6 +111,11 @@ export class BuilderScene extends Phaser.Scene {
   private flyCards: Array<{ kind: PartKind; card: Phaser.GameObjects.Container; frame: Phaser.GameObjects.Graphics }> = [];
   private flyHoverKind: PartKind | null = null;
   private payloadTag?: Phaser.GameObjects.Container;
+  /** Tooltip over the RCS shell under the pointer, where its separation key is bound. */
+  private shellTip?: Phaser.GameObjects.Container;
+  private shellTipId: string | null = null;
+  private shellTipNote = '';
+  private shellTipSig = '';
 
   // HUD objects
   private statValues: Record<'mass' | 'thrust' | 'fuel' | 'twr', Phaser.GameObjects.Text> = {} as never;
@@ -888,6 +894,16 @@ export class BuilderScene extends Phaser.Scene {
     });
 
     this.input.keyboard?.on('keydown-ENTER', () => this.launchFlight());
+    // Hovering an RCS shell and pressing a key binds that key to separate it in flight.
+    this.input.keyboard?.on('keydown', (e: KeyboardEvent) => {
+      if (!this.shellTipId || e.ctrlKey || e.metaKey || e.altKey) return;
+      const key = normalizeKey(e.key.length === 1 ? e.key : '');
+      if (!key) return;
+      const res = this.rocketTree.setSeparationKey(this.shellTipId, key);
+      this.shellTipNote = res.success ? '' : res.reason ?? '';
+      this.shellTipSig = '';
+      this.drawShellTip();
+    });
 
     // Coming back from a flight: the design is untouched, just reset the cursor.
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
@@ -1000,8 +1016,42 @@ export class BuilderScene extends Phaser.Scene {
     }
   }
 
+  /** Show the key tooltip while the pointer is over an RCS shell in the build bay. */
+  private updateShellTip(pointer: Phaser.Input.Pointer): void {
+    const { col, row, inside } = this.getGridCellAtPointer(pointer);
+    const node = inside && !this.isOverSidePanels(pointer) ? this.rocketTree.getNodeAt(col, row) : undefined;
+    const id = node?.type === 'RCS' ? node.id : null;
+    const sig = id ? `${id}|${this.rocketTree.getSeparationKey(id)}|${this.rocketTree.shellWarning(id)}` : '';
+    if (id === this.shellTipId && sig === this.shellTipSig) return;
+    if (id !== this.shellTipId) this.shellTipNote = '';
+    this.shellTipId = id;
+    this.shellTipSig = sig;
+    this.drawShellTip();
+  }
+
+  private drawShellTip(): void {
+    this.shellTip?.destroy();
+    this.shellTip = undefined;
+    const node = this.shellTipId ? this.rocketTree.getAllNodes().find(n => n.id === this.shellTipId) : undefined;
+    if (!node) return;
+    const size = BuilderScene.CELL_SIZE;
+    const warning = this.shellTipNote || this.rocketTree.shellWarning(node.id) || '';
+    const w = 250;
+    const h = warning ? 92 : 58;
+    const x = Math.min(this.gridOriginX + node.gridX * size + size / 2 - w / 2, this.scale.width - w - 8);
+    const y = this.gridOriginY + node.gridY * size - h - 10;
+    const g = this.add.graphics();
+    drawPixelPanel(g, 0, 0, w, h);
+    const key = pixelTitle(this, 12, 10, `SHELL KEY: [${this.rocketTree.getSeparationKey(node.id)}]`, 9, PX.text.accent);
+    const how = pixelBody(this, 12, 30, 'Press a key to rebind', 16, PX.text.muted);
+    const items: Phaser.GameObjects.GameObject[] = [g, key, how];
+    if (warning) items.push(pixelBody(this, 12, 54, warning, 15, '#ff8a8a').setWordWrapWidth(w - 24));
+    this.shellTip = this.add.container(Math.max(8, x), Math.max(8, y), items).setDepth(60);
+  }
+
   private updateGhostPreview(pointer: Phaser.Input.Pointer): void {
     this.updateCursorStyle(pointer);
+    this.updateShellTip(pointer);
 
     const overFlyout = this.flyoutFor !== null && this.flyoutRect.contains(pointer.worldX, pointer.worldY);
     if (overFlyout && this.game.canvas) this.game.canvas.style.cursor = 'pointer';
@@ -1111,6 +1161,9 @@ export class BuilderScene extends Phaser.Scene {
       const size = BuilderScene.CELL_SIZE;
       this.particleManager.triggerEffect('PART_DISASSEMBLE', this.gridOriginX + col * size + size / 2, this.gridOriginY + row * size + size / 2);
       this.renderRocket();
+      this.shellTipId = null;
+      this.shellTipSig = '';
+      this.drawShellTip();
       this.syncExportableState('[RocketBuilder] Part removed:');
     } else {
       console.warn(`[RocketBuilder] ${removeResult.reason}`);

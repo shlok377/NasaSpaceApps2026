@@ -1,3 +1,4 @@
+import { DEFAULT_SEPARATION_KEY, isReservedKey, normalizeKey } from './separationKeys';
 import { FUEL_STATS, isBoosterFuel, PART_DEFINITIONS, PAYLOADS } from './partDefinitions';
 import { FuelKind, HierarchicalRocketNode, PartType, PayloadKind, PortDirection, RocketNode, RocketTelemetry } from './types';
 
@@ -234,6 +235,28 @@ export class RocketTree {
     if (!root) return;
     root.payload = payload;
     root.mass = PAYLOADS[payload].mass;
+  }
+
+  /** Bind the key that separates an RCS shell. Reserved keys and non-RCS parts are refused. */
+  public setSeparationKey(id: string, raw: string): { success: boolean; reason?: string } {
+    const node = this.nodes.get(id);
+    if (!node || node.type !== 'RCS') return { success: false, reason: 'Only RCS shells have a separation key' };
+    const key = normalizeKey(raw);
+    if (!key) return { success: false, reason: 'Use a letter or digit' };
+    if (isReservedKey(key)) return { success: false, reason: `${key} is already used` };
+    node.separationKey = key;
+    return { success: true };
+  }
+
+  public getSeparationKey(id: string): string {
+    return this.nodes.get(id)?.separationKey ?? DEFAULT_SEPARATION_KEY;
+  }
+
+  /** What is wrong with an RCS shell's setup, or null (nothing hangs on it, so its key does nothing). */
+  public shellWarning(id: string): string | null {
+    const node = this.nodes.get(id);
+    if (!node || node.type !== 'RCS') return null;
+    return node.childrenIds.length === 0 ? 'Nothing is attached to this RCS: its key does nothing' : null;
   }
 
   public removeNode(id: string): { success: boolean; reason?: string } {

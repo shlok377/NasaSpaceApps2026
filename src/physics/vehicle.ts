@@ -1,4 +1,5 @@
 import { FUEL_STATS, isBoosterFuel } from '../core/partDefinitions';
+import { DEFAULT_SEPARATION_KEY } from '../core/separationKeys';
 import { FuelKind, HierarchicalRocketNode, PartType } from '../core/types';
 import { AIRFRAME, ENGINE, FINS, G0, PROPELLANT_DENSITY, WORLD } from './constants';
 
@@ -6,6 +7,8 @@ import { AIRFRAME, ENGINE, FINS, G0, PROPELLANT_DENSITY, WORLD } from './constan
 export interface FlightPart {
   id: string;
   type: PartType;
+  /** RCS only: key that separates this shell. */
+  separationKey?: string;
   gridX: number;
   gridY: number;
   finOrientation?: 'LEFT' | 'RIGHT';
@@ -110,6 +113,7 @@ export function partsFromTree(tree: HierarchicalRocketNode): FlightPart[] {
   return nodes.map(([node, depth]) => ({
     id: node.id,
     type: node.type,
+    ...(node.type === 'RCS' ? { separationKey: node.separationKey ?? DEFAULT_SEPARATION_KEY } : {}),
     gridX: node.gridX,
     gridY: node.gridY,
     finOrientation: node.finOrientation,

@@ -42,6 +42,8 @@ export interface RocketNode {
   finOrientation?: 'LEFT' | 'RIGHT';
   fuelKind?: FuelKind;
   payload?: PayloadKind;
+  /** RCS only: the key that separates this shell in flight (default B). */
+  separationKey?: string;
   mass: number;
   fuel: number;
   thrust: number;

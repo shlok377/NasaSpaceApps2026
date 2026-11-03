@@ -201,3 +201,24 @@ describe('RCS mounting', () => {
     expect(tree.attachPart(9, 5, 'STRUCTURAL').success).toBe(true);
   });
 });
+
+describe('RCS separation keys', () => {
+  it('defaults to B, accepts free keys and refuses reserved ones', () => {
+    const tree = new RocketTree(7, 5);
+    const rcs = tree.attachPart(8, 5, 'RCS').node!;
+    expect(tree.getSeparationKey(rcs.id)).toBe('B');
+    expect(tree.setSeparationKey(rcs.id, 'g').success).toBe(true);
+    expect(tree.getSeparationKey(rcs.id)).toBe('G');
+    expect(tree.setSeparationKey(rcs.id, 'A').success).toBe(false);
+    expect(tree.setSeparationKey(rcs.id, ' ').success).toBe(false);
+    expect(tree.getSeparationKey(rcs.id)).toBe('G');
+  });
+
+  it('warns while nothing hangs on the shell', () => {
+    const tree = new RocketTree(7, 5);
+    const rcs = tree.attachPart(8, 5, 'RCS').node!;
+    expect(tree.shellWarning(rcs.id)).not.toBeNull();
+    tree.attachPart(8, 6, 'FUEL_TANK');
+    expect(tree.shellWarning(rcs.id)).toBeNull();
+  });
+});
