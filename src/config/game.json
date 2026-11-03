@@ -31,6 +31,12 @@
       "thrust": 0,
       "cost": 4
     },
+    "RCS": {
+      "mass": 25,
+      "fuelLiters": 0,
+      "thrust": 0,
+      "cost": 18
+    },
     "STRUCTURAL": {
       "mass": 20,
       "fuelLiters": 0,
@@ -41,6 +47,18 @@
   "engine": {
     "isp": 70,
     "gimbalDegrees": 5
+  },
+  "fuelTypes": {
+    "_note": "Per fuel: kg per litre (a tank holds parts.FUEL_TANK.fuelLiters), and multipliers on a booster's efficiency (isp) and push (thrust) while it burns this fuel. COLD_GAS only feeds RCS thrusters. unlockCost: one-time price to unlock the fuel in the lab (0 = open from the start).",
+    "KEROSENE": { "density": 1.0, "isp": 1.0, "thrust": 1.0, "unlockCost": 0 },
+    "HYDROGEN": { "density": 0.55, "isp": 1.6, "thrust": 0.8, "unlockCost": 150 },
+    "COLD_GAS": { "density": 0.5, "isp": 1.0, "thrust": 1.0, "unlockCost": 0 }
+  },
+  "rcs": {
+    "_note": "Per RCS thruster, once its shell has separated: turning torque, sideways push (m/s^2) and cold gas burned per second at full steer. Boosters cannot steer in space.",
+    "torque": 700,
+    "accel": 2.5,
+    "gasPerSecond": 0.4
   },
   "world": {
     "surfaceGravity": 9.81,

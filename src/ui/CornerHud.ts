@@ -114,7 +114,7 @@ export class GoalChip {
     g.clear();
     this.tab.forEach(t => t.destroy());
     this.tab.length = 0;
-    hudFrame(g, this.x, this.y, w, h);
+    hudFrame(g, this.x, this.y, w, h, PX.border, 0.55);
     const tab = headerTab(this.scene, g, this.x + 12, this.y, `PHASE ${PHASE_INFO[current].number}/3`);
     this.container.add(tab);
     this.tab.push(tab);

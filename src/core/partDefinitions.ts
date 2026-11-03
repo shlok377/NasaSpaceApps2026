@@ -1,25 +1,31 @@
 import { CONFIG } from '../config';
-import { EngineKind, FuelKind, PartDefinition, PartType, PayloadKind } from './types';
+import { FuelKind, PartDefinition, PartType, PayloadKind } from './types';
 
 /** Fuel choices offered for tanks, in picker order. `extraCost` is added to the tank's base price. */
 export const FUEL_KINDS: Record<FuelKind, { label: string; color: number; extraCost: number; description: string }> = {
-  STANDARD: { label: 'KEROSENE', color: 0xffba00, extraCost: 0, description: 'Cheap, dense and reliable.' },
-  GREEN: { label: 'METHANE', color: 0x36ff12, extraCost: 4, description: 'Clean burn. Can be made on Mars.' },
-  PURPLE: { label: 'HYDROGEN', color: 0xc000ff, extraCost: 10, description: 'Most efficient. Kept super cold.' }
+  KEROSENE: { label: 'KEROSENE', color: 0xffba00, extraCost: 0, description: 'Starter fuel for boosters.' },
+  HYDROGEN: { label: 'HYDROGEN', color: 0xc000ff, extraCost: 10, description: 'Light booster fuel, goes furthest.' },
+  COLD_GAS: { label: 'COLD GAS', color: 0x36ff12, extraCost: 2, description: 'Feeds RCS thrusters only.' }
 };
 
-/** Engine choices offered in the builder, in picker order. `extraCost` is added to the engine's base price. */
-export const ENGINE_KINDS: Record<EngineKind, { label: string; color: number; extraCost: number; description: string }> = {
-  STANDARD: { label: 'STANDARD', color: 0xef4444, extraCost: 0, description: 'Simple, trusty workhorse.' },
-  TWIN: { label: 'TWIN', color: 0x3b6fd8, extraCost: 12, description: 'Two bells under one cover.' },
-  LANDER: { label: 'LANDER', color: 0xf4eee6, extraCost: 8, description: 'Built for soft Moon landings.' }
-};
+/** Fuels that feed the boosters (ENGINE parts); cold gas only feeds RCS. */
+export const isBoosterFuel = (kind: FuelKind | undefined): boolean => (kind ?? 'KEROSENE') !== 'COLD_GAS';
+
+/** How many launches a player needs before they can pick this fuel. */
+export const fuelUnlockCost = (kind: FuelKind): number => CONFIG.fuelTypes[kind].unlockCost;
 
 /** Payload choices for the root slot, in picker order. `extraCost` is added to the cockpit's base price. */
 export const PAYLOADS: Record<PayloadKind, { label: string; color: number; extraCost: number; description: string }> = {
   CREW: { label: 'CREW', color: 0xe8e4f0, extraCost: 0, description: 'Seats for a brave crew.' },
   SATELLITE: { label: 'SATELLITE', color: 0x4fa3ff, extraCost: 10, description: 'No crew. Goes into orbit.' },
   ROVER: { label: 'ROVER', color: 0xf0c040, extraCost: 15, description: 'Drives on the Moon.' }
+};
+
+/** How each fuel behaves: kg per litre, and multipliers on engine efficiency and push while burning it. */
+export const FUEL_STATS: Record<FuelKind, { density: number; isp: number; thrust: number }> = {
+  KEROSENE: CONFIG.fuelTypes.KEROSENE,
+  HYDROGEN: CONFIG.fuelTypes.HYDROGEN,
+  COLD_GAS: CONFIG.fuelTypes.COLD_GAS
 };
 
 /** Mass / fuel / thrust / cost come from src/config/game.json so they can be tuned in one place. */
@@ -47,7 +53,7 @@ export const PART_DEFINITIONS: Record<PartType, PartDefinition> = {
   },
   ENGINE: {
     type: 'ENGINE',
-    label: 'THRUST',
+    label: 'BOOSTER',
     defaultPorts: ['NORTH'],
     ...stats('ENGINE'),
     color: 0xef4444, // Red
@@ -69,6 +75,15 @@ export const PART_DEFINITIONS: Record<PartType, PartDefinition> = {
     color: 0xa855f7, // Purple
     textureKey: 'tex_fin_left'
   },
+  RCS: {
+    type: 'RCS',
+    label: 'RCS',
+    // Bolts to the side of the rocket; parts can hang below its shell.
+    defaultPorts: ['EAST', 'WEST', 'SOUTH'],
+    ...stats('RCS'),
+    color: 0x9fe8ff,
+    textureKey: 'tex_rcs'
+  },
   STRUCTURAL: {
     type: 'STRUCTURAL',
     label: 'BLOCK',
@@ -83,7 +98,6 @@ export const PART_DEFINITIONS: Record<PartType, PartDefinition> = {
 export interface PricedPart {
   type: PartType;
   fuelKind?: FuelKind;
-  engineKind?: EngineKind;
   payload?: PayloadKind;
 }
 
@@ -92,7 +106,6 @@ export function partCost(part: PartType | PricedPart): number {
   const p = typeof part === 'string' ? { type: part } : part;
   const extra =
     (p.type === 'FUEL_TANK' && p.fuelKind ? FUEL_KINDS[p.fuelKind].extraCost : 0) +
-    (p.type === 'ENGINE' && p.engineKind ? ENGINE_KINDS[p.engineKind].extraCost : 0) +
     (p.type === 'COCKPIT' && p.payload ? PAYLOADS[p.payload].extraCost : 0);
   return PART_DEFINITIONS[p.type].cost + extra;
 }

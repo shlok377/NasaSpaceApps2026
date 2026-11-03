@@ -2,8 +2,8 @@ import Phaser from 'phaser';
 import { RocketTree } from '../core/RocketTree';
 import { currentMission, rocketCost } from '../game/missions';
 import { loadProgress, saveProgress, withGrant } from '../game/progress';
-import { ENGINE_KINDS, FUEL_KINDS, PART_DEFINITIONS, PAYLOADS, partCost } from '../core/partDefinitions';
-import { EngineKind, FuelKind, PartType, PayloadKind, PortDirection, RocketNode } from '../core/types';
+import { FUEL_KINDS, fuelUnlockCost, PART_DEFINITIONS, PAYLOADS, partCost } from '../core/partDefinitions';
+import { FuelKind, PartType, PayloadKind, PortDirection, RocketNode } from '../core/types';
 import { ParticleManager } from '../particles';
 import { preloadGameAssets, getPartTextureKey, GAME_ASSETS } from '../core/assets';
 import { PX, drawPixelPanel, drawSparkle, pixelBody, pixelTitle } from '../ui/pixel';
@@ -21,9 +21,11 @@ interface PaletteBay {
   chips?: Phaser.GameObjects.Graphics;
 }
 
-/** Parts with a picker of looks: fuel tanks (fuel type), engines (engine type) and the root slot (payload). */
+/** Parts with a picker of looks: fuel tanks (fuel type), engines (booster or RCS) and the root slot (payload). */
 type VariantPart = 'FUEL_TANK' | 'ENGINE' | 'COCKPIT';
-type PartKind = FuelKind | EngineKind | PayloadKind;
+/** The engine slot places either a booster (ENGINE) or an RCS thruster. */
+type EngineChoice = 'BOOSTER' | 'RCS';
+type PartKind = FuelKind | PayloadKind | EngineChoice;
 const VARIANTS: Record<VariantPart, Array<{ kind: PartKind; label: string; color: number; extraCost: number; description: string }>> = {
   COCKPIT: (Object.keys(PAYLOADS) as PayloadKind[]).map(kind => ({
     kind,
@@ -31,12 +33,19 @@ const VARIANTS: Record<VariantPart, Array<{ kind: PartKind; label: string; color
     label: kind === 'CREW' ? 'COCKPIT' : PAYLOADS[kind].label
   })),
   FUEL_TANK: (Object.keys(FUEL_KINDS) as FuelKind[]).map(kind => ({ kind, ...FUEL_KINDS[kind] })),
-  ENGINE: (Object.keys(ENGINE_KINDS) as EngineKind[]).map(kind => ({
-    kind,
-    ...ENGINE_KINDS[kind],
-    label: kind === 'STANDARD' ? 'ENGINE' : kind === 'TWIN' ? 'TWIN ENG' : ENGINE_KINDS[kind].label
-  }))
+  ENGINE: [
+    { kind: 'BOOSTER', label: 'BOOSTER', color: 0xff8a3d, extraCost: 0, description: 'Main burn. Can’t steer in space.' },
+    {
+      kind: 'RCS',
+      label: 'TWIN LEG',
+      color: 0x7aa6ff,
+      extraCost: PART_DEFINITIONS.RCS.cost - PART_DEFINITIONS.ENGINE.cost,
+      description: 'RCS: steers in space on cold gas.'
+    }
+  ]
 };
+/** RCS thrusters sit on the sides with their nozzle facing outward. */
+const rcsAngle = (type: PartType, side?: 'LEFT' | 'RIGHT') => (type !== 'RCS' ? 0 : side === 'RIGHT' ? -90 : 90);
 const isVariantPart = (type: PartType): type is VariantPart => type in VARIANTS;
 /** Variant swatches on a slot, in slot-local coordinates (centre of the slot is 0,0). */
 const CHIP = 12;
@@ -49,7 +58,6 @@ const CARD_H = 168;
 const CARD_GAP = 8;
 /** How far the hovered card rises out of the row. */
 const CARD_LIFT = 14;
-const FAN_W = CARD_W * 3 + CARD_GAP * 2;
 const cardX = (i: number) => i * (CARD_W + CARD_GAP);
 
 const SIDE_X = 20;
@@ -94,7 +102,8 @@ export class BuilderScene extends Phaser.Scene {
   public particleManager!: ParticleManager;
   private hoveredBay: PartType | null = null;
   /** Current look for each variant part; COCKPIT is what sits in the root slot. */
-  private partKinds: Record<VariantPart, PartKind> = { COCKPIT: 'CREW', FUEL_TANK: 'STANDARD', ENGINE: 'STANDARD' };
+  private partKinds: Record<VariantPart, PartKind> = { COCKPIT: 'CREW', FUEL_TANK: 'KEROSENE', ENGINE: 'BOOSTER' };
+  private unlockedFuels: string[] = [];
   private flyout!: Phaser.GameObjects.Container;
   private flyoutFor: VariantPart | null = null;
   private flyoutRect = new Phaser.Geom.Rectangle();
@@ -474,16 +483,19 @@ export class BuilderScene extends Phaser.Scene {
       { type: 'COCKPIT', label: 'COCKPIT', hotkey: 'C', stat: '' },
       { type: 'STRUCTURAL', label: 'BLOCK', hotkey: '1', stat: `${PART_DEFINITIONS.STRUCTURAL.mass} kg` },
       { type: 'NOSE_CONE', label: 'NOSE CONE', hotkey: '2', stat: 'less drag' },
-      { type: 'ENGINE', label: 'ENGINE', hotkey: '3', stat: `${PART_DEFINITIONS.ENGINE.thrust} thrust` },
+      { type: 'ENGINE', label: 'BOOSTER', hotkey: '3', stat: `${PART_DEFINITIONS.ENGINE.thrust} thrust` },
       { type: 'FUEL_TANK', label: 'FUEL TANK', hotkey: '4', stat: `${PART_DEFINITIONS.FUEL_TANK.fuel} L` },
       { type: 'FIN', label: 'FIN', hotkey: '5', stat: 'stability' }
     ];
+    // Fit every slot in the panel: shrink the row pitch (and the slot itself if it must).
+    const pitch = Math.min(SLOT_H + 6, (PANEL_BOTTOM - partsY - 44) / bayConfigs.length);
+    const slotScale = Math.min(1, (pitch - 2) / SLOT_H);
 
     this.paletteBays = [];
     bayConfigs.forEach((cfg, idx) => {
       const cx = x + w / 2;
-      const cy = partsY + 40 + idx * (SLOT_H + 6) + SLOT_H / 2;
-      const bay = this.add.container(cx, cy);
+      const cy = partsY + 36 + idx * pitch + pitch / 2;
+      const bay = this.add.container(cx, cy).setScale(1, slotScale);
       const bgGfx = this.add.graphics();
       const icon = this.add.image(-SLOT_W / 2 + 64, 0, this.partTexture(cfg.type, 'LEFT')).setDisplaySize(48, 48);
       const key = pixelBody(this, -SLOT_W / 2 + 19, 0, cfg.hotkey, 22, PX.text.accent).setOrigin(0.5);
@@ -548,6 +560,7 @@ export class BuilderScene extends Phaser.Scene {
     const { progress, grant } = withGrant(loadProgress());
     if (grant > 0) saveProgress(progress);
     this.money = progress.money;
+    this.unlockedFuels = progress.unlockedFuels;
     const mission = currentMission(progress.completedMissions);
     this.missionText.setText(mission ? mission.goal : 'All missions complete — chase the high score!');
     const reward = mission ? `REWARD +$${mission.reward}` : '';
@@ -568,10 +581,11 @@ export class BuilderScene extends Phaser.Scene {
 
   private updateHud(telemetry: ReturnType<RocketTree['getTelemetry']>): void {
     // TWR with the tanks full — what the rocket actually has to lift off the pad.
-    const wetMass = telemetry.totalMass + telemetry.totalFuel;
-    const wetTwr = wetMass > 0 ? telemetry.totalThrust / wetMass : 0;
+    // Fuel weighs what its type weighs (hydrogen is light), and pushes what its type pushes.
+    const wetMass = Math.round(telemetry.totalMass + telemetry.totalFuelMass);
+    const wetTwr = wetMass > 0 ? telemetry.liftoffThrust / wetMass : 0;
     this.statValues.mass.setText(`${wetMass} kg`);
-    this.statValues.thrust.setText(`${telemetry.totalThrust}`);
+    this.statValues.thrust.setText(`${Math.round(telemetry.liftoffThrust)}`);
     this.statValues.fuel.setText(`${telemetry.totalFuel} L`);
     this.statValues.twr.setText(wetTwr.toFixed(2)).setColor(wetTwr >= 1 ? PX.text.green : telemetry.totalThrust > 0 ? PX.text.red : PX.text.white);
     this.setGauge(wetTwr);
@@ -584,7 +598,7 @@ export class BuilderScene extends Phaser.Scene {
     this.costText.setText(`$${cost}`).setColor(affordable ? PX.text.white : PX.text.red);
 
     this.launchReady = telemetry.valid && affordable;
-    this.launchBlockedReason = !telemetry.valid ? 'NEED CMD + FUEL + ENGINE' : `COSTS $${cost} · YOU HAVE $${this.money}`;
+    this.launchBlockedReason = !telemetry.valid ? telemetry.missing : `COSTS $${cost} · YOU HAVE $${this.money}`;
     if (this.launchButtonBg) this.drawLaunchButton();
   }
 
@@ -605,7 +619,8 @@ export class BuilderScene extends Phaser.Scene {
     if (this.selectedPartType === type) {
       if (isVariantPart(type)) {
         const list = VARIANTS[type];
-        const next = list[(list.findIndex(v => v.kind === this.partKinds[type]) + 1) % list.length];
+        const open = list.filter(v => !this.isLocked(v.kind));
+        const next = open[(open.findIndex(v => v.kind === this.partKinds[type]) + 1) % open.length];
         this.setPartKind(type, next.kind);
       } else {
         this.deselectPart();
@@ -620,16 +635,44 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   /** Texture for a part in its current look; falls back to the plain sprite if that art isn't loaded. */
-  private partTexture(type: PartType, finOrientation?: 'LEFT' | 'RIGHT', kind?: FuelKind | EngineKind | PayloadKind): string {
+  private partTexture(type: PartType, finOrientation?: 'LEFT' | 'RIGHT', kind?: PartKind): string {
     const look = kind ?? (isVariantPart(type) ? this.partKinds[type] : undefined);
-    const key = getPartTextureKey(type, finOrientation, undefined, look);
+    if (type === 'ENGINE' && look === 'RCS') return this.partTexture('RCS', finOrientation);
+    const key = getPartTextureKey(type, finOrientation, undefined, look as FuelKind | PayloadKind | undefined);
     return this.textures.exists(key) ? key : getPartTextureKey(type, finOrientation);
+  }
+
+  /** What the selected slot actually places: the engine slot can hold an RCS thruster. */
+  private placedType(type: PartType): PartType {
+    return type === 'ENGINE' && this.partKinds.ENGINE === 'RCS' ? 'RCS' : type;
+  }
+
+  /** Fuels that still need their one-time unlock bought (liquid hydrogen). */
+  private isLocked(kind: PartKind): boolean {
+    return kind in FUEL_KINDS && fuelUnlockCost(kind as FuelKind) > 0 && !this.unlockedFuels.includes(kind);
+  }
+
+  /** Buy a locked fuel for good if the bank covers it; returns whether it's now open. */
+  private tryUnlock(kind: FuelKind): boolean {
+    const cost = fuelUnlockCost(kind);
+    if (this.money < cost) {
+      this.cameras.main.shake(120, 0.003);
+      return false;
+    }
+    const progress = loadProgress();
+    const unlockedFuels = [...progress.unlockedFuels, kind];
+    saveProgress({ ...progress, money: progress.money - cost, unlockedFuels });
+    this.money = progress.money - cost;
+    this.unlockedFuels = unlockedFuels;
+    this.updateHud(this.rocketTree.getTelemetry());
+    return true;
   }
 
   /** Price of a part type in a given look ($). */
   private variantPrice(type: VariantPart, kind: PartKind): number {
     if (type === 'COCKPIT') return partCost({ type, payload: kind as PayloadKind });
-    return partCost(type === 'FUEL_TANK' ? { type, fuelKind: kind as FuelKind } : { type, engineKind: kind as EngineKind });
+    if (type === 'ENGINE') return partCost({ type: kind === 'RCS' ? 'RCS' : 'ENGINE' });
+    return partCost({ type, fuelKind: kind as FuelKind });
   }
 
   /** Index of the variant chip under a slot-local point, or -1. */
@@ -642,6 +685,7 @@ export class BuilderScene extends Phaser.Scene {
 
   /** Pick a fuel / engine type (selects that part) or a payload (swaps the root slot), then refresh the slot. */
   public setPartKind(type: VariantPart, kind: PartKind): void {
+    if (this.isLocked(kind) && !this.tryUnlock(kind as FuelKind)) return;
     this.partKinds[type] = kind;
     if (type === 'COCKPIT') this.applyPayload(kind as PayloadKind);
     else if (this.selectedPartType !== type) this.selectPaletteItem(type);
@@ -679,9 +723,11 @@ export class BuilderScene extends Phaser.Scene {
     if (!bay) return;
     const keepHover = this.flyoutFor === type ? this.flyHoverKind : null;
     this.flyoutFor = type;
-    const x = RIGHT_X + SIDE_W / 2 - SLOT_W / 2 - 18 - FAN_W;
+    const n = VARIANTS[type].length;
+    const fanW = n * CARD_W + (n - 1) * CARD_GAP;
+    const x = RIGHT_X + SIDE_W / 2 - SLOT_W / 2 - 18 - fanW;
     const y = Math.round(Phaser.Math.Clamp(bay.container.y - CARD_H / 2, CARD_LIFT + 8, this.scale.height - CARD_H - 8));
-    this.flyoutRect.setTo(x, y - CARD_LIFT, FAN_W + 18, CARD_H + CARD_LIFT);
+    this.flyoutRect.setTo(x, y - CARD_LIFT, fanW + 18, CARD_H + CARD_LIFT);
     this.flyout.removeAll(true);
     this.flyout.setPosition(x, y).setVisible(true);
     this.flyCards = [];
@@ -699,6 +745,20 @@ export class BuilderScene extends Phaser.Scene {
       const price = pixelBody(this, CARD_W / 2 + 8, CARD_H - 26, `${this.variantPrice(type, v.kind)}`, 20, PX.text.gold).setOrigin(0.5, 0);
       const coin = this.add.image(price.x - price.width / 2 - 9, CARD_H - 15, GAME_ASSETS.UI_COIN.key).setDisplaySize(12, 12);
       card.add([frame, art, name, about, price, coin]);
+      if (this.isLocked(v.kind)) {
+        const cost = fuelUnlockCost(v.kind as FuelKind);
+        art.setTint(0x444050);
+        about.setText(this.money >= cost ? 'CLICK TO UNLOCK' : 'EARN MORE TO UNLOCK').setColor(this.money >= cost ? PX.text.green : PX.text.muted);
+        price.setText(`${cost}`).setColor(this.money >= cost ? PX.text.gold : PX.text.red);
+        coin.setX(price.x - price.width / 2 - 9);
+        const lock = this.add.graphics();
+        const lx = CARD_W / 2 - 9;
+        lock.fillStyle(0x000000, 1).fillRect(lx - 2, 30, 22, 20);
+        lock.fillStyle(PX.gold, 1).fillRect(lx, 32, 18, 16);
+        lock.fillStyle(0x000000, 1).fillRect(lx + 7, 37, 4, 6);
+        lock.lineStyle(3, PX.gold, 1).strokeRect(lx + 4, 22, 10, 12);
+        card.add(lock);
+      }
       this.flyout.add(card);
       this.flyCards.push({ kind: v.kind, card, frame });
     });
@@ -952,13 +1012,13 @@ export class BuilderScene extends Phaser.Scene {
 
     this.ghostContainer.setVisible(true);
     const size = BuilderScene.CELL_SIZE;
-    const type = this.selectedPartType;
+    const type = this.placedType(this.selectedPartType);
     const { col, row, inside } = this.getGridCellAtPointer(pointer);
     this.ghostGfx.clear();
     this.ghostText.setText('');
     this.ghostSprite.setVisible(false);
     const showGhost = (finOrientation: 'LEFT' | 'RIGHT', alpha: number) =>
-      this.ghostSprite.setTexture(this.partTexture(type, finOrientation)).setDisplaySize(size, size).setAlpha(alpha).setVisible(true);
+      this.ghostSprite.setTexture(this.partTexture(type, finOrientation)).setDisplaySize(size, size).setAngle(rcsAngle(type, finOrientation)).setAlpha(alpha).setVisible(true);
 
     if (inside) {
       this.ghostContainer.setPosition(this.gridOriginX + col * size + size / 2, this.gridOriginY + row * size + size / 2);
@@ -1013,8 +1073,8 @@ export class BuilderScene extends Phaser.Scene {
       return;
     }
 
-    const type = this.selectedPartType;
-    const attachResult = this.rocketTree.attachPart(col, row, type, type === 'FUEL_TANK' || type === 'ENGINE' ? (this.partKinds[type] as FuelKind | EngineKind) : undefined);
+    const type = this.placedType(this.selectedPartType);
+    const attachResult = this.rocketTree.attachPart(col, row, type, type === 'FUEL_TANK' ? (this.partKinds.FUEL_TANK as FuelKind) : undefined);
     if (attachResult.success && attachResult.node) {
       this.renderRocket();
       this.updateGhostPreview(pointer);
@@ -1126,7 +1186,9 @@ export class BuilderScene extends Phaser.Scene {
     const cy = this.gridOriginY + node.gridY * size + size / 2;
 
     const blockContainer = this.add.container(cx, cy);
-    const sprite = this.add.image(0, 0, this.partTexture(node.type, node.finOrientation, node.fuelKind ?? node.engineKind ?? node.payload ?? 'STANDARD')).setDisplaySize(size, size);
+    const sprite = this.add.image(0, 0, this.partTexture(node.type, node.finOrientation, node.fuelKind ?? node.payload))
+      .setDisplaySize(size, size)
+      .setAngle(rcsAngle(node.type, node.finOrientation));
     blockContainer.add(sprite);
     this.blocksContainer.add(blockContainer);
     this.blockDisplayMap.set(node.id, blockContainer);

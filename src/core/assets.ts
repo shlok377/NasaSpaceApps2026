@@ -1,5 +1,5 @@
 import type Phaser from 'phaser';
-import { EngineKind, FuelKind, PartType, PayloadKind } from './types';
+import { FuelKind, PartType, PayloadKind } from './types';
 
 export const GAME_ASSETS = {
   // Rocket Parts
@@ -78,7 +78,9 @@ export function getPartTextureKey(
   type: PartType,
   finOrientation?: 'LEFT' | 'RIGHT',
   fuel?: number,
-  kind?: FuelKind | EngineKind | PayloadKind
+  kind?: FuelKind | PayloadKind,
+  /** RCS only: true once the shell has cracked off. */
+  revealed?: boolean
 ): string {
   switch (type) {
     case 'COCKPIT':
@@ -89,13 +91,13 @@ export function getPartTextureKey(
       if (typeof fuel === 'number' && fuel <= 0.001) {
         return GAME_ASSETS.PART_FUEL_EMPTY.key;
       }
-      if (kind === 'GREEN') return GAME_ASSETS.PART_FUEL_GREEN.key;
-      if (kind === 'PURPLE') return GAME_ASSETS.PART_FUEL_PURPLE.key;
+      if (kind === 'HYDROGEN') return GAME_ASSETS.PART_FUEL_PURPLE.key;
+      if (kind === 'COLD_GAS') return GAME_ASSETS.PART_FUEL_GREEN.key;
       return GAME_ASSETS.PART_FUEL.key;
     case 'ENGINE':
-      if (kind === 'TWIN') return GAME_ASSETS.PART_ENGINE_TWIN.key;
-      if (kind === 'LANDER') return GAME_ASSETS.PART_ENGINE_LANDER.key;
       return GAME_ASSETS.PART_ENGINE.key;
+    case 'RCS':
+      return revealed ? GAME_ASSETS.PART_ENGINE_LANDER.key : GAME_ASSETS.PART_ENGINE_TWIN.key;
     case 'NOSE_CONE':
       return GAME_ASSETS.PART_NOSE_CONE.key;
     case 'FIN':
