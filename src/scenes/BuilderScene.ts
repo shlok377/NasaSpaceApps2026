@@ -118,6 +118,8 @@ export class BuilderScene extends Phaser.Scene {
   private shellTipSig = '';
   /** RCS the player has already hovered: their "!" badge is gone for good. */
   private seenShells = new Set<string>();
+  /** RCS just placed: the pointer still rests on it, so that hover does not count as having found the tooltip. */
+  private freshShells = new Set<string>();
   private shellBadges = new Map<string, Phaser.GameObjects.Container>();
 
   // HUD objects
@@ -1035,9 +1037,10 @@ export class BuilderScene extends Phaser.Scene {
     const node = inside && !this.isOverSidePanels(pointer) ? this.rocketTree.getNodeAt(col, row) : undefined;
     const id = node?.type === 'RCS' ? node.id : null;
     const sig = id ? `${id}|${this.rocketTree.getSeparationKey(id)}|${this.rocketTree.shellWarning(id)}` : '';
+    for (const fresh of this.freshShells) if (fresh !== id) this.freshShells.delete(fresh);
     if (id === this.shellTipId && sig === this.shellTipSig) return;
     if (id !== this.shellTipId) this.shellTipNote = '';
-    if (id) this.markShellSeen(id);
+    if (id && !this.freshShells.has(id)) this.markShellSeen(id);
     this.shellTipId = id;
     this.shellTipSig = sig;
     this.drawShellTip();
@@ -1242,6 +1245,7 @@ export class BuilderScene extends Phaser.Scene {
         container.destroy();
         this.blockDisplayMap.delete(id);
         this.shellBadges.delete(id);
+        this.freshShells.delete(id);
       }
     }
 
@@ -1269,6 +1273,7 @@ export class BuilderScene extends Phaser.Scene {
       const badge = this.shellBadge(size);
       blockContainer.add(badge);
       this.shellBadges.set(node.id, badge);
+      this.freshShells.add(node.id);
     }
     this.blocksContainer.add(blockContainer);
     this.blockDisplayMap.set(node.id, blockContainer);
