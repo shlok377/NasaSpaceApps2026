@@ -488,7 +488,8 @@ export class WorldRenderer {
 
   public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, overlay: MissionOverlay, runnerState?: EvasiveRunnerState): void {
     this.labelIndex = 0;
-    this.openRcs = new Set(sim.vehicle.parts.filter(p => p.type === 'RCS' && sim.isShellOpen(p.id)).map(p => p.id));
+    // On the pad every shell is still shut; an empty one opens as the rocket lifts off.
+    this.openRcs = sim.phase === 'PRELAUNCH' ? new Set() : new Set(sim.vehicle.parts.filter(p => p.type === 'RCS' && sim.isShellOpen(p.id)).map(p => p.id));
     this.drawSky(sim, t);
     const g = this.worldGfx;
     g.clear();
