@@ -161,7 +161,7 @@ export class WorldRenderer {
   private lastSkyMode: CameraMode | null = null;
   public skyRedrawCount = 0;
   private readonly daySky: Phaser.GameObjects.TileSprite;
-  /** Sun, sun glow and the night storm front: behind the land and sea, in front of the sky. */
+  /** Sun, sun glow: behind the land and sea, in front of the sky. */
   private readonly celestialGfx: Phaser.GameObjects.Graphics;
   /** The launch time's wind multiplier: drives cloud drift, flags, sea chop and pad steam. */
   private wind = 1;
@@ -741,26 +741,12 @@ export class WorldRenderer {
     }
   }
 
-  /** Night only: a dark storm front far out over the sea. Drawn behind the land and sea. */
-  private drawCelestial(horizonY: number, alpha: number): void {
+  /** Reserved for celestial bodies; the skies are painted, so nothing is drawn here now. */
+  private drawCelestial(_horizonY: number, alpha: number): void {
     const g = this.celestialGfx;
     g?.clear?.();
     if (!g || alpha <= 0.01) return;
-    // A disc built from 4 px rows, so it matches the pixel art.
-    const disc = (cx: number, cy: number, r: number, color: number, a: number) => {
-      g.fillStyle(color, a * alpha);
-      for (let y = -r; y < r; y += PIXEL) {
-        const half = Math.floor(Math.sqrt(Math.max(0, r * r - (y + PIXEL / 2) ** 2)) / PIXEL) * PIXEL;
-        if (half > 0) g.fillRect(Math.round(cx - half), Math.round(cy + y), half * 2, PIXEL);
-      }
-    };
-    // No sun in any sky: the daytime skies carry their light in their colours.
-    if (this.time === 'NIGHT') {
-      // Night storm front out over the sea on the right, under the stars (no lightning).
-      const lumps = [[880, 26], [930, 34], [990, 30], [1050, 40], [1120, 34], [1190, 44], [1260, 38]];
-      for (const [x, r] of lumps) disc(x, horizonY - 6, r, 0x1a2038, 1);
-      for (const [x, r] of lumps) disc(x - 6, horizonY - 12, r - 10, 0x232b48, 1);
-    }
+    // No sun and no storm front: the skies carry their light in their colours.
   }
 
   /** Concrete pad with a flame trench, and a red lattice gantry whose arm holds the rocket's nose until launch. */
