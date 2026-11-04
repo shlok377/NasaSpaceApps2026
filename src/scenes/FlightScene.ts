@@ -29,7 +29,7 @@ import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physic
 import { evaluateMission, MAX_STARS, MissionResult, OUTCOME_PAYOUT } from '../physics/mission';
 import { analyzeVehicle, buildFlightVehicle, FlightVehicle, VehicleReport } from '../physics/vehicle';
 import { distortedReading } from '../physics/damage';
-import { GoalChip, HeightLadder, HullBar, hudFrame, InstrumentChip, MoneyChip } from '../ui/CornerHud';
+import { GoalChip, HeightLadder, hudFrame, InstrumentChip, MoneyChip } from '../ui/CornerHud';
 import { SkyCards } from '../ui/SkyCards';
 import { Milestone } from '../ui/JourneyArc';
 import { LaunchButton } from '../ui/LaunchButton';
@@ -125,7 +125,6 @@ export class FlightScene extends Phaser.Scene {
 
   // HUD
   private goalChip!: GoalChip;
-  private hullBar!: HullBar;
   private orbitGauge!: OrbitGauge;
   private problemCard!: ProblemCard;
   private ladder!: HeightLadder;
@@ -271,7 +270,6 @@ export class FlightScene extends Phaser.Scene {
 
   private createHud(): void {
     this.goalChip = new GoalChip(this);
-    this.hullBar = new HullBar(this);
     this.orbitGauge = new OrbitGauge(this);
     this.problemCard = new ProblemCard(this);
     this.ladder = new HeightLadder(
@@ -819,8 +817,6 @@ export class FlightScene extends Phaser.Scene {
 
     this.goalChip.setVisible(!onPad && !this.result);
     this.goalChip.update(r.chain, r.phase, stepsDone(r.chain, r.phase, r.complete), this.objective(t));
-    this.hullBar.setVisible(!onPad && !this.result);
-    this.hullBar.update(this.sim.hull);
 
     const ascent = mode === 'ASCENT';
     this.ladder.setVisible(ascent && !this.result);
@@ -842,6 +838,7 @@ export class FlightScene extends Phaser.Scene {
         tiltDeg: (t.pitchFromVertical * 180) / Math.PI,
         mass: t.mass,
         wetMass: this.vehicle.wetMass,
+        health: this.sim.hull,
         sky: TIME_LOOKS[this.timeOfDay].sky[3]
       },
       now

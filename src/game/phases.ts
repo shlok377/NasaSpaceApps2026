@@ -522,7 +522,7 @@ export class PhaseRunner {
     if (sim.phase !== 'FLYING') return;
 
     if (sim.hull <= 0) {
-      this.fail(sim, 'Hull integrity lost');
+      this.fail(sim, "Your ship's health ran out");
       return;
     }
 

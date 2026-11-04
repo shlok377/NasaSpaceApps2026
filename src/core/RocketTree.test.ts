@@ -183,12 +183,10 @@ describe('payload mass', () => {
 });
 
 describe('RCS mounting', () => {
-  it('bolts to the left, right or top of another part, never below it', () => {
+  it('bolts only to the left or right side of another part, never on top or below', () => {
     const tree = new RocketTree(7, 5);
     expect(tree.attachPart(7, 6, 'RCS').success).toBe(false); // below the cockpit
-    const top = tree.attachPart(7, 4, 'RCS');
-    expect(top.success).toBe(true);
-    expect(top.node?.finOrientation).toBe('TOP');
+    expect(tree.attachPart(7, 4, 'RCS').success).toBe(false); // on top of it
     expect(tree.attachPart(8, 5, 'RCS').node?.finOrientation).toBe('RIGHT');
     expect(tree.attachPart(6, 5, 'RCS').node?.finOrientation).toBe('LEFT');
   });

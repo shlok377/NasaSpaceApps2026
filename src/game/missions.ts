@@ -1,3 +1,4 @@
+import { CONFIG } from '../config';
 import { partCost, PricedPart } from '../core/partDefinitions';
 import { PartType, PayloadKind } from '../core/types';
 import { FlightStats } from '../physics/FlightSim';
@@ -51,6 +52,16 @@ export const MISSIONS: Mission[] = [
   { id: 'cool-head', title: 'Cool head', goal: 'Finish any mission without a single problem going wrong', reward: 200, check: c => c.objectiveDone && c.problemsFailed === 0 },
   { id: 'lean-lander', title: 'Lean lander', goal: 'Land the crew with a rocket costing $120 or less', reward: 250, payload: 'CREW', check: c => c.payload === 'CREW' && c.objectiveDone && c.cost <= 120 }
 ];
+
+/** What the chosen payload asks of the pilot, in a line, and what finishing it pays (sum of its phases). */
+export function payloadObjective(payload: PayloadKind): { goal: string; reward: number } {
+  const pay = CONFIG.economy.phaseRewards;
+  switch (payload) {
+    case 'SATELLITE': return { goal: 'Orbit the Moon, then eject the satellite', reward: pay.ORBIT + pay.DEPLOY };
+    case 'ROVER': return { goal: 'Orbit the Moon, then drop the rover', reward: pay.ORBIT + pay.ROVER };
+    case 'CREW': return { goal: 'Orbit the Moon, then land the crew', reward: pay.ORBIT + pay.LANDING };
+  }
+}
 
 /** The first mission not yet done that the chosen payload can actually finish. */
 export function currentMission(completed: readonly string[], payload?: PayloadKind): Mission | null {

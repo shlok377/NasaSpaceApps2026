@@ -1,6 +1,6 @@
 import { FUEL_STATS, isBoosterFuel } from '../core/partDefinitions';
 import { DEFAULT_SEPARATION_KEY } from '../core/separationKeys';
-import { FuelKind, HierarchicalRocketNode, PartType } from '../core/types';
+import { FuelKind, HierarchicalRocketNode, PartType, PayloadKind } from '../core/types';
 import { AIRFRAME, ENGINE, FINS, G0, PROPELLANT_DENSITY, WORLD } from './constants';
 
 /** One part placed in the vehicle's body frame (origin at the command module). */
@@ -11,7 +11,7 @@ export interface FlightPart {
   separationKey?: string;
   gridX: number;
   gridY: number;
-  finOrientation?: 'LEFT' | 'RIGHT' | 'TOP';
+  finOrientation?: 'LEFT' | 'RIGHT';
   /** The part this one is bolted to (null for the command module). */
   parentId: string | null;
   /** Joints between this part and the command module. */
@@ -24,6 +24,8 @@ export interface FlightPart {
   fuelCapacity: number; // kg
   /** What a fuel tank holds, from the lab (kerosene when unset). Only set on parts that carry fuel. */
   fuelKind?: FuelKind;
+  /** What the command module carries (sets its look: crew cockpit, satellite or rover). */
+  payload?: PayloadKind;
   thrust: number; // N
   /** Normal-force coefficient for centre-of-pressure / aero torque. */
   normalForceCoeff: number;
@@ -124,6 +126,7 @@ export function partsFromTree(tree: HierarchicalRocketNode): FlightPart[] {
     dryMass: node.mass,
     fuelCapacity: node.fuel * PROPELLANT_DENSITY * (node.fuel > 0 ? FUEL_STATS[node.fuelKind ?? 'KEROSENE'].density : 1),
     ...(node.fuel > 0 ? { fuelKind: node.fuelKind ?? 'KEROSENE' } : {}),
+    ...(node.type === 'COCKPIT' && node.payload ? { payload: node.payload } : {}),
     thrust: node.thrust * G0,
     normalForceCoeff: normalForceFor(node.type)
   }));

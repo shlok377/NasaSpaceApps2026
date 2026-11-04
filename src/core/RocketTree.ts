@@ -18,7 +18,7 @@ export interface AttachmentValidation {
   parentNode?: RocketNode;
   parentPort?: PortDirection;
   childPort?: PortDirection;
-  finOrientation?: 'LEFT' | 'RIGHT' | 'TOP';
+  finOrientation?: 'LEFT' | 'RIGHT';
 }
 
 export class RocketTree {
@@ -182,15 +182,6 @@ export class RocketTree {
             parentPort: port.direction,
             childPort: neededChildPort, // WEST port on fin
             finOrientation: 'RIGHT'
-          };
-        } else if (childType === 'RCS' && port.direction === 'NORTH') {
-          // An RCS can also sit on top of a part, nozzle pointing up.
-          return {
-            valid: true,
-            parentNode: parent,
-            parentPort: port.direction,
-            childPort: neededChildPort,
-            finOrientation: 'TOP'
           };
         }
       } else {

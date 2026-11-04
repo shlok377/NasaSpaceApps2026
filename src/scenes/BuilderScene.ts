@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { RocketTree } from '../core/RocketTree';
-import { currentMission, rocketCost } from '../game/missions';
+import { payloadObjective, rocketCost } from '../game/missions';
 import { loadProgress, saveProgress, withGrant } from '../game/progress';
 import { FUEL_KINDS, fuelUnlockCost, PART_DEFINITIONS, PAYLOADS, partCost } from '../core/partDefinitions';
 import { FuelKind, PartType, PayloadKind, PortDirection, RocketNode } from '../core/types';
@@ -46,7 +46,7 @@ const VARIANTS: Record<VariantPart, Array<{ kind: PartKind; label: string; color
   ]
 };
 /** RCS thrusters face their nozzle outward: left, right or up (the art points down at 0). */
-const rcsAngle = (type: PartType, side?: 'LEFT' | 'RIGHT' | 'TOP') => (type !== 'RCS' || side === 'TOP' ? 0 : side === 'RIGHT' ? -90 : 90);
+const rcsAngle = (type: PartType, side?: 'LEFT' | 'RIGHT') => (type !== 'RCS' ? 0 : side === 'RIGHT' ? -90 : 90);
 const isVariantPart = (type: PartType): type is VariantPart => type in VARIANTS;
 /** Variant swatches on a slot, in slot-local coordinates (centre of the slot is 0,0). */
 const CHIP = 12;
@@ -575,12 +575,12 @@ export class BuilderScene extends Phaser.Scene {
     this.showMission(progress.completedMissions, grant);
   }
 
-  /** The mission panel follows the chosen payload, so swapping it updates the goal and reward at once. */
-  private showMission(completed: readonly string[], grant = 0): void {
-    const mission = currentMission(completed, this.rocketTree.getRootNode().payload ?? 'CREW');
-    this.missionText.setText(mission ? mission.goal : 'All missions complete — chase the high score!');
-    const reward = mission ? `REWARD +$${mission.reward}` : '';
-    this.rewardText.setText(grant > 0 ? `GRANT +$${grant}!  ${reward}` : reward);
+  /** The mission panel shows the chosen payload's own objective and what finishing it pays. */
+  private showMission(_completed: readonly string[], grant = 0): void {
+    const { goal, reward } = payloadObjective(this.rocketTree.getRootNode().payload ?? 'CREW');
+    this.missionText.setText(goal);
+    const pay = `REWARD +$${reward}`;
+    this.rewardText.setText(grant > 0 ? `GRANT +$${grant}!  ${pay}` : pay);
   }
 
   /** Hand the assembled rocket to the flight simulator; the builder sleeps so the design is kept. */
@@ -651,7 +651,7 @@ export class BuilderScene extends Phaser.Scene {
   }
 
   /** Texture for a part in its current look; falls back to the plain sprite if that art isn't loaded. */
-  private partTexture(type: PartType, finOrientation?: 'LEFT' | 'RIGHT' | 'TOP', kind?: PartKind): string {
+  private partTexture(type: PartType, finOrientation?: 'LEFT' | 'RIGHT', kind?: PartKind): string {
     const look = kind ?? (isVariantPart(type) ? this.partKinds[type] : undefined);
     // The picker shows the bare engine; the shell only appears once it is bolted onto the rocket.
     if (type === 'ENGINE' && look === 'RCS') {
@@ -1091,7 +1091,7 @@ export class BuilderScene extends Phaser.Scene {
     this.ghostGfx.clear();
     this.ghostText.setText('');
     this.ghostSprite.setVisible(false);
-    const showGhost = (finOrientation: 'LEFT' | 'RIGHT' | 'TOP', alpha: number) =>
+    const showGhost = (finOrientation: 'LEFT' | 'RIGHT', alpha: number) =>
       this.ghostSprite.setTexture(this.partTexture(type, finOrientation)).setDisplaySize(size, size).setAngle(rcsAngle(type, finOrientation)).setAlpha(alpha).setVisible(true);
 
     if (inside) {

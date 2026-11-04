@@ -40,7 +40,7 @@ export interface RocketNode {
   parentPort: PortDirection | null;
   childrenIds: string[];
   /** Fins sit LEFT or RIGHT; an RCS can also sit on TOP of a part. */
-  finOrientation?: 'LEFT' | 'RIGHT' | 'TOP';
+  finOrientation?: 'LEFT' | 'RIGHT';
   fuelKind?: FuelKind;
   payload?: PayloadKind;
   /** RCS only: the key that separates this shell in flight (default B). */

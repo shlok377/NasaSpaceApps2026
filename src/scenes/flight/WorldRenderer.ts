@@ -1375,11 +1375,11 @@ export class WorldRenderer {
     }
     this.activeSpriteCount++;
 
-    const texKey = getPartTextureKey(p.type, p.finOrientation, fuelRemaining, p.fuelKind, this.openRcs.has(p.id));
+    const texKey = getPartTextureKey(p.type, p.finOrientation, fuelRemaining, p.fuelKind ?? p.payload, this.openRcs.has(p.id));
     img.setTexture(texKey);
     img.setPosition(sx, sy);
     // RCS nozzles face outward from the side they hang on.
-    img.setRotation(rot + (p.type === 'RCS' && p.finOrientation !== 'TOP' ? (p.finOrientation === 'RIGHT' ? -Math.PI / 2 : Math.PI / 2) : 0));
+    img.setRotation(rot + (p.type === 'RCS' ? (p.finOrientation === 'RIGHT' ? -Math.PI / 2 : Math.PI / 2) : 0));
     img.setDisplaySize(cellPx, cellPx);
     img.setAlpha(alpha);
     img.setVisible(true);
