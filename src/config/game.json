@@ -221,6 +221,58 @@
       "SPACE": ["STUCK_THRUSTER", "FUEL_LEAK"]
     }
   },
+  "challenges": {
+    "_note": "The five flight challenges in src/modules/. Heights are metres above the pad (the Moon's pull starts near 4800 straight up). Each one has its own switch.",
+    "maxQ": {
+      "_note": "Peak air pressure on the climb. Above `limit` (Pa) the airframe strains: health drops at damagePerSecond times the overshoot share. Throttle down to stay under it.",
+      "enabled": true,
+      "from": 900,
+      "to": 1500,
+      "limit": 2400,
+      "damagePerSecond": 30,
+      "reward": 200
+    },
+    "windShear": {
+      "_note": "A gust layer that swings from one side to the other (m/s, scaled by the launch time's wind). Tilting past maxTiltDegrees costs damagePerSecond.",
+      "enabled": true,
+      "from": 1800,
+      "to": 2400,
+      "gust": 28,
+      "maxTiltDegrees": 25,
+      "damagePerSecond": 20,
+      "reward": 200
+    },
+    "stagingFault": {
+      "_note": "The first shell separation of a flight can jam (chance). Tap its key `taps` more times within timeLimit seconds, or the bolts blow and cost `damage` health.",
+      "enabled": true,
+      "chance": 0.1,
+      "taps": 3,
+      "timeLimit": 5,
+      "damage": 15,
+      "reward": 150
+    },
+    "radiationBelt": {
+      "_note": "Charged particles fry the electronics: readouts glitch and health drops at dosePerSecond (crew ships take crewFactor times more). Cross it fast.",
+      "enabled": true,
+      "from": 3950,
+      "to": 4300,
+      "dosePerSecond": 3,
+      "crewFactor": 1.5,
+      "cleanDose": 8,
+      "reward": 200
+    },
+    "transLunarBurn": {
+      "_note": "Aim the coast so the Moon pass (predicted low point, m) lands between lowPeriapsis and highPeriapsis. Off course at the Moon's pull, an automatic correction burn fixes it for fuel (correctionPenalty times what a clean burn would cost, at most maxCorrection m/s).",
+      "enabled": true,
+      "from": 4350,
+      "to": 4750,
+      "lowPeriapsis": 200,
+      "highPeriapsis": 1300,
+      "maxCorrection": 80,
+      "correctionPenalty": 1.5,
+      "reward": 300
+    }
+  },
   "hull": {
     "_note": "Hull integrity is 100 at launch; every part knocked or snapped off costs perPart. At 0 the flight is lost.",
     "perPart": 25

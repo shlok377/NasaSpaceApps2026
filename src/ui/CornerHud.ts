@@ -209,9 +209,24 @@ export interface Instruments {
   wetMass: number;
   /** Sky colour for the horizon (follows the launch time). */
   sky: number;
+  /** Radiation is frying the electronics: the numbers scramble. */
+  glitch?: boolean;
   /** Health of the ship, 0..100 (100 at launch, every lost part costs some). */
   health: number;
 }
+
+/** Fuel kinds on board with under 15% left of that kind's own capacity (not of the total); `includeEmpty: false` skips kinds that ran dry. */
+export function lowFuelKinds(tanks: TankReading[], includeEmpty = true): FuelKind[] {
+  const byKind = new Map<FuelKind, { left: number; cap: number }>();
+  for (const t of tanks) {
+    const k = byKind.get(t.kind) ?? { left: 0, cap: 0 };
+    k.left += t.fraction * t.capacity;
+    k.cap += t.capacity;
+    byKind.set(t.kind, k);
+  }
+  return [...byKind].filter(([, k]) => k.cap > 0 && k.left / k.cap < LOW_FUEL && (includeEmpty || k.left > 1e-9)).map(([kind]) => kind);
+}
+export const LOW_FUEL = 0.15;
 
 /** Fuel capsules: size, spacing, and how many fit before same-fuel tanks are grouped. */
 const CAP_W = 18;
@@ -410,6 +425,7 @@ export class InstrumentChip {
     this.drawHorizon(g, r, time);
     this.drawMass(g, r);
     this.drawHealth(g, r);
+    if (r.glitch) for (const t of [this.fuelPct, this.twrText, this.tiltText, this.massText]) t.setText(scramble(t.text));
   }
 
   /**
@@ -468,7 +484,7 @@ export class InstrumentChip {
     });
 
     const pct = Math.round(r.fuel * 100);
-    const low = r.fuel < 0.15;
+    const low = lowFuelKinds(r.tanks).length > 0;
     const blink = Math.floor(time / 300) % 2 === 0;
     this.fuelPct.setText(`${pct}%`).setColor(low ? (blink ? UI.redText : UI.text) : r.fuel < 0.35 ? UI.amberText : UI.text);
     this.lowTag.setVisible(low && blink);
@@ -667,12 +683,26 @@ export interface LadderMark {
   height: number;
 }
 
+/** A stretch of the climb (rock belt, a challenge zone): a coloured dashed stripe beside the tube. */
+export interface LadderBand {
+  from: number;
+  to: number;
+  label: string;
+  color: number;
+}
+
+const hexColor = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
+/** Garbled digits for a readout fried by radiation. */
+const scramble = (text: string) => text.replace(/[0-9]/g, () => '0123456789#?'[Math.floor(Math.random() * 12)]);
+
 export class HeightLadder {
   private readonly gfx: Phaser.GameObjects.Graphics;
   private readonly value: Phaser.GameObjects.Text;
   private readonly bestText: Phaser.GameObjects.Text;
   private readonly markTexts: Phaser.GameObjects.Text[] = [];
+  private readonly bandTexts: Phaser.GameObjects.Text[] = [];
   private readonly container: Phaser.GameObjects.Container;
+  private readonly scene: Phaser.Scene;
   private readonly x: number;
   private readonly top: number;
   private readonly bottom: number;
@@ -681,11 +711,12 @@ export class HeightLadder {
     scene: Phaser.Scene,
     private readonly max: number,
     private readonly marks: LadderMark[],
-    band?: { from: number; to: number; label: string },
+    private readonly bands: LadderBand[] = [],
     right = 1260,
     top = 120,
     bottom = 600
   ) {
+    this.scene = scene;
     const w = 100;
     const fx = right - w;
     this.x = right - 26;
@@ -703,14 +734,16 @@ export class HeightLadder {
     const moon = scene.add.image(this.x, this.top - 16, GAME_ASSETS.UI_MOON.key).setDisplaySize(18, 18);
     const earth = scene.add.image(this.x, this.bottom + 15, GAME_ASSETS.UI_EARTH.key).setDisplaySize(18, 18);
     const items: Phaser.GameObjects.GameObject[] = [bg, tab, moon, earth];
-    if (band) {
+    for (const band of bands) {
       const y0 = this.toY(band.to);
       const y1 = this.toY(band.from);
       for (let y = y0; y < y1; y += 6) {
-        bg.fillStyle(0xb89a78, 0.65);
+        bg.fillStyle(band.color, 0.75);
         bg.fillRect(this.x - 12, y, 4, 3);
       }
-      items.push(scene.add.text(this.x - 16, (y0 + y1) / 2, band.label, body(15, '#c9b08f')).setOrigin(1, 0.5));
+      const t = scene.add.text(this.x - 16, (y0 + y1) / 2, band.label, body(13, hexColor(band.color))).setOrigin(1, 0.5).setAlpha(0.9);
+      this.bandTexts.push(t);
+      items.push(t);
     }
     for (const m of marks) {
       const y = Math.round(this.toY(m.height));
@@ -741,7 +774,15 @@ export class HeightLadder {
     this.container.x = dx;
   }
 
-  public update(height: number, best: number): void {
+  /** Pin a mark at a height (e.g. where a shell jammed): a red notch across the tube and a "!" beside it. */
+  public addFlag(height: number, color: number): void {
+    const y = Math.round(this.toY(height));
+    const notch = this.scene.add.rectangle(this.x, y, 16, 3, color).setOrigin(0.5);
+    const mark = this.scene.add.text(this.x + 10, y, '!', body(16, hexColor(color))).setOrigin(0, 0.5);
+    this.container.add([notch, mark]);
+  }
+
+  public update(height: number, best: number, glitch = false): void {
     const g = this.gfx;
     g.clear();
     const y = Math.round(this.toY(height));
@@ -754,6 +795,9 @@ export class HeightLadder {
     g.fillRect(this.x - 5, y, 10, 2);
     // Milestones turn gold once reached.
     this.marks.forEach((m, i) => this.markTexts[i].setColor(height >= m.height ? UI.goldText : UI.textMuted));
+    // The band the rocket is in lights up and pulses.
+    const pulse = 0.75 + 0.25 * Math.sin(this.scene.time.now / 140);
+    this.bands.forEach((b, i) => this.bandTexts[i].setAlpha(height >= b.from && height < b.to ? pulse : 0.9));
     if (best > 0) {
       const by = Math.round(this.toY(best));
       g.fillStyle(UI.gold, 1);
@@ -769,6 +813,7 @@ export class HeightLadder {
     g.fillTriangle(this.x - 15, y - 6, this.x - 15, y + 6, this.x - 7, y);
     g.fillStyle(0xffffff, 1);
     g.fillTriangle(this.x - 14, y - 4, this.x - 14, y + 4, this.x - 9, y);
-    this.value.setPosition(this.x - 18, y).setText(formatDistance(Math.max(0, height)));
+    const text = formatDistance(Math.max(0, height));
+    this.value.setPosition(this.x - 18, y).setText(glitch ? scramble(text) : text);
   }
 }

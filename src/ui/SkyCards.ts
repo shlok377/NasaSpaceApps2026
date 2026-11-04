@@ -1,3 +1,4 @@
+import { playSfx } from '../core/sound';
 import Phaser from 'phaser';
 import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay, timeOfDayReward } from '../game/timeOfDay';
 import { daySkyKey } from '../scenes/flight/LaunchSite';
@@ -60,9 +61,16 @@ export class SkyCards {
       box.add([frame, sky, art, tag, name, pay, zone]);
       this.container.add(box);
       const card: Card = { time, box, frame, tag, hover: false };
-      zone.on('pointerover', () => ((card.hover = true), this.redraw()));
+      zone.on('pointerover', () => {
+        card.hover = true;
+        this.redraw();
+        playSfx(scene, 'UI_HOVER');
+      });
       zone.on('pointerout', () => ((card.hover = false), this.redraw()));
-      zone.on('pointerdown', () => onPick(time));
+      zone.on('pointerdown', () => {
+        playSfx(scene, 'UI_CLICK');
+        onPick(time);
+      });
       return card;
     });
     this.redraw();

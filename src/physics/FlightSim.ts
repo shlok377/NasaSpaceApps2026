@@ -69,6 +69,8 @@ export interface FlightStats {
   touchdownAt: number | null;
   stagesDropped: number;
   partsLost: number;
+  /** Health lost to stress, radiation and the like (parts lost count separately). */
+  damageTaken: number;
   bounces: number;
   fuelCollected: number;
   deltaVSpent: number;
@@ -169,6 +171,8 @@ export class FlightSim {
   public phase: FlightPhase = 'PRELAUNCH';
   /** Wind strength multiplier (later launch times blow harder). */
   public windScale = 1;
+  /** Extra wind on top of the normal profile (m/s, + = east), e.g. a wind-shear gust; air only. */
+  public gust = 0;
   public onGround = true;
   public tanks: Map<string, number>;
   public debris: Debris[] = [];
@@ -187,6 +191,7 @@ export class FlightSim {
     touchdownAt: null,
     stagesDropped: 0,
     partsLost: 0,
+    damageTaken: 0,
     bounces: 0,
     fuelCollected: 0,
     deltaVSpent: 0
@@ -249,7 +254,17 @@ export class FlightSim {
 
   /** Hull integrity, FULL_HULL at launch: every part lost costs a share, and at 0 the flight is lost. */
   public get hull(): number {
-    return Math.max(0, FULL_HULL - this.stats.partsLost * CONFIG.hull.perPart);
+    return Math.max(0, FULL_HULL - this.stats.partsLost * CONFIG.hull.perPart - this.stats.damageTaken);
+  }
+
+  /** Knock health off without losing a part (stress, radiation, a blown bolt). */
+  public damage(points: number): void {
+    if (this.phase === 'FLYING' && points > 0) this.stats.damageTaken += points;
+  }
+
+  /** Burn booster fuel outside the engines (a correction burn); returns the kg actually taken. */
+  public spendFuel(kg: number): number {
+    return kg > 0 ? this.drawFuel(kg) : 0;
   }
 
   /** RCS shells already cracked open (by their key, in any phase of flight). */
@@ -421,7 +436,7 @@ export class FlightSim {
 
     // --- Aerodynamics ---------------------------------------------------------
     const rho = airDensity(s.y);
-    const wind = rho > 0 ? windAt(s.y, s.time) * this.windScale : 0;
+    const wind = rho > 0 ? windAt(s.y, s.time) * this.windScale + this.gust : 0;
     const airVx = s.vx - wind;
     const airVy = s.vy;
     const speed = Math.hypot(airVx, airVy);
@@ -942,7 +957,7 @@ export class FlightSim {
       mach: rho > 0 ? speed / WORLD.speedOfSound : 0,
       dynamicPressure: this.lastQ,
       airDensity: rho,
-      wind: rho > 0 ? windAt(s.y, s.time) * this.windScale : 0,
+      wind: rho > 0 ? windAt(s.y, s.time) * this.windScale + this.gust : 0,
       pitchFromVertical: wrapAngle(s.theta - upAngle),
       progradeFromVertical: speed > 0.5 ? wrapAngle(Math.atan2(s.vy, s.vx) - upAngle) : 0,
       angleOfAttack: speed > 0.5 ? wrapAngle(s.theta - Math.atan2(s.vy, s.vx)) : 0,

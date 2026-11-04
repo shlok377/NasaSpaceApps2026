@@ -218,6 +218,7 @@ describe('Surface Flags & Moon Big Sprite in WorldRenderer', () => {
     const sim = new FlightSim(vehicle);
 
     renderer.camera.mode = 'ASCENT';
+    renderer.setTimeOfDay('NIGHT');
     const overlay: MissionOverlay = {
       roverZone: false,
       site: null,

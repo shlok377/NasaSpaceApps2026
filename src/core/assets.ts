@@ -1,5 +1,6 @@
 import type Phaser from 'phaser';
 import { FuelKind, PartType, PayloadKind } from './types';
+import { preloadSounds } from './sound';
 
 export const GAME_ASSETS = {
   // Rocket Parts
@@ -55,6 +56,7 @@ export function applyPixelArtTextureFilters(scene: Phaser.Scene): void {
  * Preload all game assets into Phaser texture cache if not already loaded.
  */
 export function preloadGameAssets(scene: Phaser.Scene): void {
+  preloadSounds(scene);
   let hasPendingLoads = false;
   for (const asset of Object.values(GAME_ASSETS)) {
     if (!scene.textures.exists(asset.key)) {

@@ -1,3 +1,4 @@
+import { playSfx } from '../core/sound';
 import Phaser from 'phaser';
 import { drawPixelPanel } from './pixel';
 import { TEXT_STYLE, TITLE_STYLE, UI } from './theme';
@@ -28,7 +29,10 @@ export class LaunchButton {
     const verdictText = scene.add.text(cx, cy - H / 2 - 14, verdict, TEXT_STYLE(14, verdictColor)).setOrigin(0.5, 1);
     const captionText = scene.add.text(cx, cy + H / 2 + 12, caption, TEXT_STYLE(12, UI.textMuted)).setOrigin(0.5, 0);
     this.zone = scene.add.zone(cx, cy, W, H).setInteractive({ useHandCursor: true });
-    this.zone.on('pointerover', () => (this.hover = true));
+    this.zone.on('pointerover', () => {
+      this.hover = true;
+      playSfx(scene, 'UI_HOVER');
+    });
     this.zone.on('pointerout', () => (this.hover = false));
     this.zone.on('pointerdown', onPress);
     this.container = scene.add.container(0, 0, [this.gfx, this.label, verdictText, captionText, this.zone]).setDepth(15);

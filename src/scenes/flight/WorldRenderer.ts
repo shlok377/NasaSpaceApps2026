@@ -171,6 +171,9 @@ export class WorldRenderer {
   private padRig: { left: number; top: number } | null = null;
   /** Launch time picked on the pad: sets the sky, light on the land and the gradient up to space. */
   private time: TimeOfDay = 'DAWN';
+  /** When the day-time sky Moon's space stage began, and how long it then stays solid. */
+  private moonSpaceSince: number | null = null;
+  private moonHoldMs: number | null = null;
   /** Unique centre piece (pad, complex, cliff) plus endless strips: land west, sea east, and ground / deep water below. */
   private readonly launchSite: Phaser.GameObjects.Image;
   private readonly landStrip: Phaser.GameObjects.TileSprite;
@@ -581,8 +584,21 @@ export class WorldRenderer {
       // Fully opaque in every time of day: a solid Moon, never a ghost.
       this.skyMoonSprite?.setPosition?.(cx, cy);
       this.skyMoonSprite?.setDisplaySize?.(r * 2, r * 2);
-      this.skyMoonSprite?.setAlpha?.(1);
-      this.skyMoonSprite?.setVisible?.(true);
+      // Day themes: fades in from 0 above the clouds to 100% at the space stage, holds for 5-10 s, then fades away. Night keeps it solid.
+      let alpha = 1;
+      if (this.time !== 'NIGHT') {
+        alpha = Phaser.Math.Clamp((y - WORLD.cloudsTo) / (WORLD.atmosphereTop - WORLD.cloudsTo), 0, 1);
+        if (y < WORLD.atmosphereTop) {
+          this.moonSpaceSince = null;
+          this.moonHoldMs = null;
+        } else {
+          this.moonSpaceSince ??= now;
+          this.moonHoldMs ??= 5000 + Math.random() * 5000;
+          alpha *= 1 - Phaser.Math.Clamp((now - this.moonSpaceSince - this.moonHoldMs) / 2000, 0, 1);
+        }
+      }
+      this.skyMoonSprite?.setAlpha?.(alpha);
+      this.skyMoonSprite?.setVisible?.(alpha > 0);
     } else {
       this.skyMoonSprite?.setVisible?.(false);
     }

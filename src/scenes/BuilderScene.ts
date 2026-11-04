@@ -8,6 +8,7 @@ import { ParticleManager } from '../particles';
 import { preloadGameAssets, getPartTextureKey, GAME_ASSETS } from '../core/assets';
 import { PX, drawPixelPanel, drawSparkle, pixelBody, pixelTitle } from '../ui/pixel';
 import { normalizeKey } from '../core/separationKeys';
+import { playSfx } from '../core/sound';
 import { BACKDROP_SCALE, createBackdropTexture } from '../ui/backdrop';
 
 interface PaletteBay {
@@ -399,6 +400,7 @@ export class BuilderScene extends Phaser.Scene {
 
     this.launchButton.on('pointerover', () => {
       if (this.game.canvas) this.game.canvas.style.cursor = this.launchReady ? 'pointer' : 'not-allowed';
+      playSfx(this, 'UI_HOVER');
     });
     this.launchButton.on('pointerout', (pointer: Phaser.Input.Pointer) => this.updateCursorStyle(pointer));
     this.launchButton.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -526,6 +528,7 @@ export class BuilderScene extends Phaser.Scene {
 
       bay.on('pointerover', () => {
         if (this.game.canvas) this.game.canvas.style.cursor = 'pointer';
+        playSfx(this, 'UI_HOVER');
         if (isVariantPart(cfg.type)) this.showFlyout(cfg.type);
         this.hoveredBay = cfg.type;
         this.updatePaletteSelectionUI();
@@ -537,6 +540,7 @@ export class BuilderScene extends Phaser.Scene {
       });
       bay.on('pointerdown', (pointer: Phaser.Input.Pointer, localX: number, localY: number) => {
         if (pointer.button !== 0) return;
+        playSfx(this, 'UI_CLICK');
         const chip = isVariantPart(cfg.type) ? this.chipAt(localX - SLOT_W / 2, localY - SLOT_H / 2) : -1;
         if (chip >= 0 && isVariantPart(cfg.type)) this.setPartKind(cfg.type, VARIANTS[cfg.type][chip].kind);
         else this.selectPaletteItem(cfg.type);
@@ -587,9 +591,11 @@ export class BuilderScene extends Phaser.Scene {
   public launchFlight(): void {
     const telemetry = this.rocketTree.getTelemetry();
     if (!this.launchReady) {
+      playSfx(this, 'CLICK_FAIL');
       this.cameras.main.shake(120, 0.004);
       return;
     }
+    playSfx(this, 'UI_CLICK');
     this.deselectPart();
     this.scene.launch('FlightScene', { tree: telemetry.tree });
     this.scene.sleep();
@@ -916,6 +922,7 @@ export class BuilderScene extends Phaser.Scene {
       if (!key) return;
       const res = this.rocketTree.setSeparationKey(this.shellTipId, key);
       this.shellTipNote = res.success ? '' : res.reason ?? '';
+      playSfx(this, res.success ? 'UI_CLICK' : 'CLICK_FAIL');
       this.shellTipSig = '';
       this.drawShellTip();
     });
@@ -934,7 +941,10 @@ export class BuilderScene extends Phaser.Scene {
         if (!overBay && !this.flyoutRect.contains(pointer.worldX, pointer.worldY)) this.hideFlyout();
         else {
           const kind = this.flyoutKindAt(pointer);
-          if (kind !== this.flyHoverKind) this.setFlyoutHover(kind);
+          if (kind !== this.flyHoverKind) {
+            if (kind) playSfx(this, 'UI_HOVER');
+            this.setFlyoutHover(kind);
+          }
         }
       }
       this.updateGhostPreview(pointer);
@@ -945,6 +955,7 @@ export class BuilderScene extends Phaser.Scene {
       if (this.flyoutFor && this.flyoutRect.contains(pointer.worldX, pointer.worldY)) {
         const kind = this.flyoutKindAt(pointer);
         if (kind && pointer.button === 0) {
+          playSfx(this, 'UI_CLICK');
           this.setPartKind(this.flyoutFor, kind);
           this.setFlyoutHover(kind);
         }
@@ -1150,6 +1161,7 @@ export class BuilderScene extends Phaser.Scene {
     const type = this.placedType(this.selectedPartType);
     const attachResult = this.rocketTree.attachPart(col, row, type, type === 'FUEL_TANK' ? (this.partKinds.FUEL_TANK as FuelKind) : undefined);
     if (attachResult.success && attachResult.node) {
+      playSfx(this, 'UI_CLICK');
       this.renderRocket();
       this.updateGhostPreview(pointer);
       this.syncExportableState('[RocketBuilder] Part attached:');
@@ -1162,6 +1174,7 @@ export class BuilderScene extends Phaser.Scene {
         this.particleManager.triggerEffect('SOCKET_SNAP', blockContainer.x, blockContainer.y);
       }
     } else {
+      playSfx(this, 'CLICK_FAIL');
       this.particleManager.triggerEffect('REJECTION_ERROR', pointer.worldX, pointer.worldY);
     }
   }
@@ -1182,6 +1195,7 @@ export class BuilderScene extends Phaser.Scene {
 
     const removeResult = this.rocketTree.removeNode(targetNode.id);
     if (removeResult.success) {
+      playSfx(this, 'UI_BLOCK_DELETE');
       const size = BuilderScene.CELL_SIZE;
       this.particleManager.triggerEffect('PART_DISASSEMBLE', this.gridOriginX + col * size + size / 2, this.gridOriginY + row * size + size / 2);
       this.renderRocket();
@@ -1190,6 +1204,7 @@ export class BuilderScene extends Phaser.Scene {
       this.drawShellTip();
       this.syncExportableState('[RocketBuilder] Part removed:');
     } else {
+      playSfx(this, 'CLICK_FAIL');
       console.warn(`[RocketBuilder] ${removeResult.reason}`);
       this.flashAndShakeBlock(targetNode);
     }

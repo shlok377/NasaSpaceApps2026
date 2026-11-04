@@ -19,6 +19,7 @@ const stats: FlightStats = {
   touchdownAt: null,
   stagesDropped: 0,
   partsLost: 0,
+  damageTaken: 0,
   bounces: 0,
   fuelCollected: 0,
   deltaVSpent: 0
