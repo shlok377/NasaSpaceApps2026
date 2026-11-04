@@ -102,3 +102,91 @@ describe('booster and RCS', () => {
     expect(Math.abs(sim.state.omega)).toBeGreaterThan(0);
   });
 });
+
+describe('shell separation by key', () => {
+  const twoShells = () => {
+    const tree = new RocketTree(7, 8);
+    tree.attachPart(7, 9, 'FUEL_TANK', 'COLD_GAS');
+    tree.attachPart(7, 10, 'FUEL_TANK', 'KEROSENE');
+    tree.attachPart(7, 11, 'ENGINE');
+    const left = tree.attachPart(6, 8, 'RCS').node!;
+    const right = tree.attachPart(8, 8, 'RCS').node!;
+    tree.attachPart(6, 9, 'STRUCTURAL');
+    tree.attachPart(8, 9, 'STRUCTURAL');
+    tree.setSeparationKey(left.id, 'G');
+    tree.setSeparationKey(right.id, 'H');
+    return { tree, left, right };
+  };
+
+  it('opens only the shells bound to the pressed key, and works in the air', () => {
+    const { tree, left, right } = twoShells();
+    const sim = new FlightSim(buildFlightVehicle(tree.getTelemetry().tree));
+    sim.phase = 'FLYING';
+    const blocks = () => sim.vehicle.parts.filter(p => p.type === 'STRUCTURAL').length;
+    expect(blocks()).toBe(2);
+    expect(sim.separate('G')).toBe(true);
+    expect(blocks()).toBe(1);
+    expect(sim.openShells.has(left.id)).toBe(true);
+    expect(sim.openShells.has(right.id)).toBe(false);
+    // Each RCS reports its own shell, and only the cracked one fires.
+    expect(sim.isShellOpen(left.id)).toBe(true);
+    expect(sim.isShellOpen(right.id)).toBe(false);
+    expect(sim.activeRcsCount).toBe(1);
+    expect(sim.separate('G')).toBe(false);
+    expect(sim.separate('H')).toBe(true);
+    expect(blocks()).toBe(0);
+  });
+
+  it('survives a snapshot, and a shell with nothing on it needs no key', () => {
+    const { tree } = twoShells();
+    const sim = new FlightSim(buildFlightVehicle(tree.getTelemetry().tree));
+    sim.phase = 'FLYING';
+    sim.separate('G');
+    expect(FlightSim.restore(sim.snapshot()).openShells.size).toBe(1);
+
+    const bare = new RocketTree(7, 8);
+    bare.attachPart(7, 9, 'FUEL_TANK', 'COLD_GAS');
+    bare.attachPart(7, 10, 'FUEL_TANK', 'KEROSENE');
+    bare.attachPart(7, 11, 'ENGINE');
+    bare.attachPart(6, 8, 'RCS');
+    const free = new FlightSim(buildFlightVehicle(bare.getTelemetry().tree));
+    free.phase = 'FLYING';
+    expect(free.activeRcsCount).toBe(1);
+    expect(free.separate('B')).toBe(false);
+  });
+});
+
+describe('hull integrity', () => {
+  it('starts at 100 and drops with every part lost, down to 0', () => {
+    const sim = inSpace(rcsRocket());
+    expect(sim.hull).toBe(100);
+    sim.stats.partsLost = 1;
+    expect(sim.hull).toBeLessThan(100);
+    sim.stats.partsLost = 10;
+    expect(sim.hull).toBe(0);
+  });
+});
+
+describe('RCS in air', () => {
+  // Cold gas lives in the core stack, so it stays aboard after the shell opens.
+  const flown = (altitude: number, open: boolean) => {
+    const tree = new RocketTree(7, 8);
+    tree.attachPart(7, 9, 'FUEL_TANK', 'COLD_GAS');
+    tree.attachPart(7, 10, 'FUEL_TANK', 'KEROSENE');
+    tree.attachPart(7, 11, 'ENGINE');
+    tree.attachPart(6, 8, 'RCS');
+    tree.attachPart(6, 9, 'STRUCTURAL');
+    const sim = inSpace(tree);
+    sim.state.y = altitude;
+    sim.onGround = false;
+    if (open) sim.separate();
+    for (let i = 0; i < 20; i++) sim.step(0.01, { throttle: 0, steer: 1 });
+    return Math.abs(sim.state.omega);
+  };
+
+  it('an open RCS adds some turning in air, but far less than in space', () => {
+    const airGain = flown(2_000, true) - flown(2_000, false);
+    expect(airGain).toBeGreaterThan(0);
+    expect(airGain).toBeLessThan(flown(400_000, true));
+  });
+});

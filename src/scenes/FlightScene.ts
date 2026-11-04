@@ -1,19 +1,24 @@
 import Phaser from 'phaser';
 import { CONFIG } from '../config';
-import { HierarchicalRocketNode } from '../core/types';
+import { HierarchicalRocketNode, PayloadKind } from '../core/types';
 import { currentMission, Mission, MissionContext, newlyCompleted, rocketCost } from '../game/missions';
 import {
   ActiveProblem,
   Checkpoint,
+  isStableOrbit,
   onImpactCourse,
   PHASE_INFO,
   PhaseEvent,
   PhaseId,
   PhaseRunner,
+  stepRover,
+  phaseNumber,
+  stepsDone,
   predictRoverLanding,
   PROBLEM_INFO
 } from '../game/phases';
-import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, PlayerProgress, saveProgress } from '../game/progress';
+import { DEFAULT_SEPARATION_KEY, normalizeKey } from '../core/separationKeys';
+import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, objectiveBonus, payoutBreakdown, PlayerProgress, saveProgress } from '../game/progress';
 import { anchorBelt, checkBelt, Combo, generateBelt, generateLaneWaves, Rock, runnerSpeedAt } from '../game/rocks';
 import { createEvasiveRunnerState, EvasiveRunnerState, updateEvasiveRunner, RUNNER_CONFIG } from '../game/evasiveRunner';
 import { Award, StuntTracker } from '../game/stunts';
@@ -21,8 +26,9 @@ import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay, timeOfDayReward, timeOfDayWind } f
 import { moonSoiAltitude } from '../physics/bodies';
 import { ENGINE, FINS, G0, LIMITS, ROCK_BELT, WORLD } from '../physics/constants';
 import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physics/FlightSim';
-import { evaluateMission, MAX_STARS, MissionResult } from '../physics/mission';
+import { evaluateMission, MAX_STARS, MissionResult, OUTCOME_PAYOUT } from '../physics/mission';
 import { analyzeVehicle, buildFlightVehicle, FlightVehicle, VehicleReport } from '../physics/vehicle';
+import { distortedReading } from '../physics/damage';
 import { GoalChip, HeightLadder, hudFrame, InstrumentChip, MoneyChip } from '../ui/CornerHud';
 import { SkyCards } from '../ui/SkyCards';
 import { Milestone } from '../ui/JourneyArc';
@@ -217,7 +223,7 @@ export class FlightScene extends Phaser.Scene {
     this.checkpoint = null;
     this.landedRovers = [];
     this.phasePaid = 0;
-    this.mission = currentMission(this.progress.completedMissions);
+    this.mission = currentMission(this.progress.completedMissions, this.payload);
     this.stunts = new StuntTracker();
     this.rocks = generateBelt(Math.floor(Math.random() * 1e9));
     this.combo = new Combo();
@@ -237,7 +243,7 @@ export class FlightScene extends Phaser.Scene {
     this.vehicle = buildFlightVehicle(this.tree);
     this.report = analyzeVehicle(this.vehicle);
     this.sim = new FlightSim(this.vehicle);
-    this.runner = new PhaseRunner();
+    this.runner = new PhaseRunner('ORBIT', 0, Math.random, this.payload);
     this.runner.drainEvents();
     this.cost = rocketCost(flattenParts(this.tree));
     this.exposeForDebug();
@@ -332,10 +338,15 @@ export class FlightScene extends Phaser.Scene {
     const run = dryRun(this.vehicle);
     const warn = !r.finStable ? `  ·  needs ${FINS.minimumForStability} fins` : run.tips ? '  ·  unbalanced, will tip' : run.finsDropped ? '  ·  fins drop off with the boosters' : '';
     const v = CONFIG.launchVerdict;
+    // What the payload's own mission needs: the satellite just orbits, the rover orbits and drops, the crew lands too.
+    const mission = {
+      SATELLITE: { need: v.orbitOnly, goal: 'orbit + eject' },
+      ROVER: { need: v.orbitAndRover, goal: 'orbit + rover drop' },
+      CREW: { need: v.allPhases, goal: 'orbit + landing' }
+    }[this.payload];
     if (run.reachesMoon) {
-      if (run.deltaVLeft >= v.allPhases) return [`Fuel for all 3 phases${warn}`, UI.greenText];
-      if (run.deltaVLeft >= v.orbitAndRover) return [`Reaches the Moon: fuel for orbit + rover, tight for landing${warn}`, '#a3e635'];
-      if (run.deltaVLeft >= v.orbitOnly) return [`Reaches the Moon: fuel for orbit only${warn}`, '#fbbf24'];
+      if (run.deltaVLeft >= mission.need) return [`Fuel for the whole mission: ${mission.goal}${warn}`, UI.greenText];
+      if (run.deltaVLeft >= v.orbitOnly) return [`Reaches the Moon: fuel to orbit it, tight for ${mission.goal}${warn}`, '#a3e635'];
       return [`Barely reaches the Moon: add fuel to orbit it${warn}`, '#fbbf24'];
     }
     if (run.maxAltitude >= WORLD.atmosphereTop) return [`Reaches space (~${formatDistance(run.maxAltitude)}): add fuel for the Moon${warn}`, '#7dd3fc'];
@@ -351,8 +362,10 @@ export class FlightScene extends Phaser.Scene {
     this.keys.SPACE.on('down', () => {
       if (this.sim.phase === 'PRELAUNCH') this.startCountdown();
       else if (this.runnerState.promptActive) this.spacePressedThisFrame = true;
-      else if (this.separatePromptShown && this.sim.separate()) this.separatePromptShown = false;
-      else if (this.runner.dropRover(this.sim)) this.fx.ring(this.world.rocketScreen(this.sim).x, this.world.rocketScreen(this.sim).y, WORLD_COLORS.rover, 50, 0.5);
+      else if (this.runner.deploySatellite(this.sim) || this.runner.dropRover(this.sim)) {
+        const at = this.world.rocketScreen(this.sim);
+        this.fx.ring(at.x, at.y, WORLD_COLORS.rover, 50, 0.5);
+      }
     });
     const onLeftDown = () => {
       if (this.runnerState.active) this.laneSteerInput = -1;
@@ -373,6 +386,14 @@ export class FlightScene extends Phaser.Scene {
       if (!this.result && this.launched) this.finishMission();
     });
     this.keys.ESC.on('down', () => this.returnToBuilder());
+    // Each RCS shell has its own key from the lab; it can be pressed any time in flight.
+    this.input.keyboard!.on('keydown', (e: KeyboardEvent) => {
+      if (this.result || !this.launched || e.repeat) return;
+      const key = normalizeKey(e.key.length === 1 ? e.key : '');
+      if (!key || !this.sim.separate(key)) return;
+      const at = this.world.rocketScreen(this.sim);
+      this.fx.ring(at.x, at.y, WORLD_COLORS.rover, 70, 0.5);
+    });
     this.keys.B.on('down', () => {
       if (this.result) this.returnToBuilder();
     });
@@ -470,6 +491,7 @@ export class FlightScene extends Phaser.Scene {
         else this.sim.state.vy += (cruise - this.sim.state.vy) * (1 - Math.exp(-dt * 6));
       }
 
+      if (this.runner.satellite) stepRover(this.runner.satellite, gameDt);
       if (this.launched) this.runner.update(this.sim, gameDt, { repairPressed: this.repairPressed, relightHeld: this.keys.E.isDown });
       this.repairPressed = false;
       const events = this.sim.drainEvents();
@@ -545,6 +567,7 @@ export class FlightScene extends Phaser.Scene {
       site: landing ? r.site : null,
       boulders: r.bouldersSeen,
       rover: r.rover,
+      satellite: r.satellite,
       landedRovers: this.landedRovers,
       dropMarker: this.dropMarker,
       debrisRing: problem?.id === 'DEBRIS' ? problem.data.ringRadius : null,
@@ -627,7 +650,7 @@ export class FlightScene extends Phaser.Scene {
           this.phasePaid += reward;
           saveProgress(this.progress);
           const at = this.world.rocketScreen(this.sim);
-          this.fx.popup(at.x, at.y - 80, `PHASE ${PHASE_INFO[e.phase].number} COMPLETE  +$${reward}`, UI.greenText, 24);
+          this.fx.popup(at.x, at.y - 80, `PHASE ${phaseNumber(this.runner.chain, e.phase)} COMPLETE  +$${reward}`, UI.greenText, 24);
           this.fx.ring(at.x, at.y, 0x4ade80, 220, 0.9);
           break;
         }
@@ -648,7 +671,7 @@ export class FlightScene extends Phaser.Scene {
         case 'ROVER_LANDED':
           if (e.angle !== null) this.landedRovers.push(e.angle);
           this.showBanner(
-            e.inZone ? 'The rover bounced down in the zone!' : e.sparesLeft > 0 ? 'Missed the zone! One spare rover left: wait for the next pass' : 'Missed the zone again…',
+            e.inZone ? 'The rover bounced down in the zone!' : e.sparesLeft > 0 ? 'Missed the zone! One spare rover left: wait for the next pass' : 'The rover missed the zone!',
             e.inZone ? UI.greenText : '#fca5a5'
           );
           break;
@@ -657,8 +680,12 @@ export class FlightScene extends Phaser.Scene {
           this.showBanner(`⚠ ${PROBLEM_INFO.BOULDERS.title}: ${PROBLEM_INFO.BOULDERS.howTo}`, '#fca5a5');
           break;
         case 'COMPLETE':
-          if (e.onSite) this.celebrate({ id: 'BULLSEYE', label: 'ON THE SITE', points: 1_000 });
-          this.showBanner(e.onSite ? 'The crew landed right on the site!' : 'The crew is down safely!', UI.greenText);
+          // The rover already got its own banner when it landed; the satellite and the crew get theirs here.
+          if (this.payload === 'SATELLITE') this.showBanner('Satellite deployed: mission complete!', UI.greenText);
+          else if (this.payload === 'CREW') {
+            if (e.onSite) this.celebrate({ id: 'BULLSEYE', label: 'ON THE SITE', points: 1_000 });
+            this.showBanner(e.onSite ? 'The crew landed right on the site!' : 'The crew is down safely!', UI.greenText);
+          }
           break;
         case 'FAILED':
           this.showBanner(e.reason, '#fca5a5');
@@ -693,7 +720,7 @@ export class FlightScene extends Phaser.Scene {
       saveProgress(this.progress);
     }
     this.sim = FlightSim.restore(cp.snapshot);
-    this.runner = new PhaseRunner(cp.phase, cp.phasesDone);
+    this.runner = new PhaseRunner(cp.phase, cp.phasesDone, Math.random, this.payload);
     this.runner.sparesLeft = cp.sparesLeft;
     // Problems that went wrong before the checkpoint still count.
     this.runner.solved = cp.solved;
@@ -727,7 +754,7 @@ export class FlightScene extends Phaser.Scene {
 
   private showPhaseTitle(phase: PhaseId): void {
     const info = PHASE_INFO[phase];
-    this.phaseTitle.setText(`PHASE ${info.number} · ${info.title}`).setAlpha(1);
+    this.phaseTitle.setText(`PHASE ${phaseNumber(this.runner.chain, phase)} · ${info.title}`).setAlpha(1);
     this.phaseGoal.setText(info.goal).setAlpha(1);
     this.titleTimer = 3.2;
   }
@@ -789,7 +816,7 @@ export class FlightScene extends Phaser.Scene {
     const onPad = this.sim.phase === 'PRELAUNCH' && this.countdown === null;
 
     this.goalChip.setVisible(!onPad && !this.result);
-    this.goalChip.update(r.phase, r.phasesDone, this.objective(t));
+    this.goalChip.update(r.chain, r.phase, stepsDone(r.chain, r.phase, r.complete), this.objective(t));
 
     const ascent = mode === 'ASCENT';
     this.ladder.setVisible(ascent && !this.result);
@@ -811,6 +838,7 @@ export class FlightScene extends Phaser.Scene {
         tiltDeg: (t.pitchFromVertical * 180) / Math.PI,
         mass: t.mass,
         wetMass: this.vehicle.wetMass,
+        health: this.sim.hull,
         sky: TIME_LOOKS[this.timeOfDay].sky[3]
       },
       now
@@ -838,10 +866,14 @@ export class FlightScene extends Phaser.Scene {
       if (r.problem?.id === 'RADAR_FAILURE') {
         this.readoutText.setPosition(p.x + 60, p.y).setColor('#f87171').setText('RADAR OUT\n— — —');
       } else {
+        // A damaged hull makes the numbers drift (the colours still use the true speed).
+        const wobble = Math.sin(this.sim.state.time * 5.3) * Math.cos(this.sim.state.time * 1.7);
+        const shownSpeed = distortedReading(t.speed, this.sim.hull, wobble);
+        const shownAlt = distortedReading(Math.max(0, t.altitude), this.sim.hull, -wobble);
         const color = t.speed <= LIMITS.crashSpeed ? UI.greenText : t.speed <= LIMITS.bounceSpeed ? '#fbbf24' : '#f87171';
         const verdict = t.speed <= LIMITS.crashSpeed ? 'SAFE' : t.speed <= LIMITS.bounceSpeed ? 'BOUNCY' : 'TOO FAST';
         const tilt = Math.abs(t.pitchFromVertical) > LIMITS.maxLandingTilt && t.altitude < 40 ? '  ·  TILTED!' : '';
-        this.readoutText.setPosition(p.x + 60, p.y).setColor(color).setText(`${Math.round(t.speed)} m/s  ${verdict}${tilt}\n${formatDistance(Math.max(0, t.altitude))} to go`);
+        this.readoutText.setPosition(p.x + 60, p.y).setColor(color).setText(`${Math.round(shownSpeed)} m/s  ${verdict}${tilt}\n${formatDistance(shownAlt)} to go`);
       }
     }
 
@@ -872,10 +904,20 @@ export class FlightScene extends Phaser.Scene {
     if (r.phase === 'ROVER') {
       if (r.problem) return 'Deal with the problem!';
       if (r.rover && !r.rover.landed) return 'Rover falling…';
-      if (r.dropReady) return `Drop the rover in the green zone  ·  spares: ${r.sparesLeft}`;
+      if (r.dropReady) return r.sparesLeft > 0 ? `Drop the rover in the green zone  ·  spares: ${r.sparesLeft}` : 'Drop the rover in the green zone: one shot';
       return 'Orbiting… stay alert';
     }
+    if (r.phase === 'DEPLOY') return isStableOrbit(t) ? 'Press SPACE to eject the satellite' : 'Get the LOW and HIGH points into the green band to eject';
     return onImpactCourse(t) ? 'Land upright, under 10 m/s, on the blue site' : 'Burn backwards to drop out of orbit: aim the white ✕ at the blue site';
+  }
+
+  /** Keys of the shells still closed, e.g. "B / G". */
+  private get payload(): PayloadKind {
+    return this.tree.payload ?? 'CREW';
+  }
+
+  private shellKeys(): string {
+    return this.sim.closedShellKeys.join(' / ') || DEFAULT_SEPARATION_KEY;
   }
 
   /** Offer SEPARATE once the rocket is in space or its boosters are dry. */
@@ -883,14 +925,14 @@ export class FlightScene extends Phaser.Scene {
     if (this.separatePromptShown || !this.sim.canSeparate) return;
     if (t.airDensity > 0 && this.sim.boosterFuel > 1e-9) return;
     this.separatePromptShown = true;
-    this.showBanner('SEPARATE! Press SPACE to crack the shells and wake the RCS', '#7dff66');
+    this.showBanner(`SEPARATE! Press ${this.shellKeys()} to crack the shells and wake the RCS`, '#7dff66');
   }
 
   /** One plain-language hint for right now. */
   private hint(t: FlightTelemetry): string {
     const r = this.runner;
     const mode = this.world.camera.mode;
-    if (this.separatePromptShown && this.sim.canSeparate) return 'SPACE: SEPARATE — drop the shells and steer with RCS (A / D)';
+    if (this.separatePromptShown && this.sim.canSeparate) return `${this.shellKeys()}: SEPARATE — drop the shells and steer with RCS (A / D)`;
     if (t.airDensity <= 0 && !this.sim.rcsReady) {
       if (this.sim.separated) return 'RCS out of cold gas: no steering in space';
       if (this.sim.vehicle.rcsCount === 0) return 'Boosters can’t steer in space: add RCS + cold gas next time  ·  W / S throttle';
@@ -911,6 +953,7 @@ export class FlightScene extends Phaser.Scene {
       if (r.rover && !r.rover.landed) return 'Rover falling… watch where it lands';
       return 'Stay in orbit: problems can happen any moment';
     }
+    if (r.phase === 'DEPLOY') return isStableOrbit(t) ? 'SPACE: eject the satellite from your stable orbit' : 'Fix your orbit (A / D turn  ·  W burn) until it is stable, then press SPACE';
     if (onImpactCourse(t)) return 'Point along dashed arrow and burn W to slow down  ·  land upright (< 10 m/s)';
     return 'Turn to face backwards (against the arrow), then burn W to drop out of orbit';
   }
@@ -930,6 +973,7 @@ export class FlightScene extends Phaser.Scene {
       report: this.report,
       fuelFraction: this.vehicle.fuelCapacity > 0 ? this.sim.fuel / this.vehicle.fuelCapacity : 0,
       phasesDone: r.phasesDone,
+      payload: r.payload,
       bonus: this.stunts.total,
       failure: r.failure ?? (r.complete ? undefined : 'Flight ended early')
     });
@@ -940,13 +984,15 @@ export class FlightScene extends Phaser.Scene {
       cost: this.cost,
       awards: this.stunts.awards,
       phasesDone: r.phasesDone,
+      payload: r.payload ?? 'CREW',
+      objectiveDone: r.complete,
       problemsSolved: r.solved,
       problemsFailed: r.failedProblems
     };
     this.completedNow = newlyCompleted(ctx, this.progress.completedMissions);
     const missionReward = this.completedNow.reduce((s, m) => s + m.reward, 0);
     const rewardScale = timeOfDayReward(this.timeOfDay);
-    this.earnings = flightEarnings(this.result.outcome, this.stunts.awards, missionReward, this.cost, st.landedOn === 'EARTH' && st.reachedSpace, this.phasePaid, rewardScale);
+    this.earnings = flightEarnings(this.result.outcome, this.stunts.awards, missionReward, this.cost, st.landedOn === 'EARTH' && st.reachedSpace, this.phasePaid, rewardScale, objectiveBonus(r.complete, OUTCOME_PAYOUT[this.result.outcome], st.partsLost, this.cost));
 
     this.progress = {
       ...this.progress,
@@ -976,6 +1022,7 @@ export class FlightScene extends Phaser.Scene {
     const accent: Record<MissionResult['outcome'], number> = {
       CREW_LANDED: PX.gold,
       ROVER_DEPLOYED: PX.green,
+      SATELLITE_DEPLOYED: PX.green,
       IN_ORBIT: PX.green,
       MOON_SOI: 0xa3e635,
       SPACE: 0x7dd3fc,
@@ -1025,18 +1072,19 @@ export class FlightScene extends Phaser.Scene {
       );
     }
 
-    // Phase track: three nodes on a line, lit as far as you got.
-    const done = this.runner.phasesDone;
+    // Phase track: the nodes on a line, lit as far as you got.
+    const chain = this.runner.chain;
+    const done = stepsDone(chain, this.runner.phase, this.runner.complete);
     const trackY = y + 92;
-    const nodeX = (i: number) => cx - 140 + i * 140;
-    for (let i = 0; i < 2; i++) {
+    const nodeX = (i: number) => cx - 70 * (chain.length - 1) + i * 140;
+    for (let i = 0; i < chain.length - 1; i++) {
       g.fillStyle(0x07060b, 1);
       g.fillRect(nodeX(i), trackY - 3, 140, 6);
       // Lit up to the next node once that phase is done.
       g.fillStyle(i + 1 < done ? PX.green : PX.borderDim, 1);
       g.fillRect(nodeX(i), trackY - 1, 140, 2);
     }
-    (['ORBIT', 'ROVER', 'LANDING'] as PhaseId[]).forEach((p, i) => {
+    chain.forEach((p, i) => {
       const state = i < done ? 'DONE' : i === done && this.runner.failure ? 'FAIL' : 'TODO';
       const c = state === 'DONE' ? PX.green : state === 'FAIL' ? PX.red : PX.borderDim;
       const nx = nodeX(i);
@@ -1081,7 +1129,12 @@ export class FlightScene extends Phaser.Scene {
     const missionLine = won ? `MISSION DONE  +$${this.completedNow.reduce((n, m) => n + m.reward, 0)}` : this.mission ? 'MISSION NOT DONE' : '';
     if (missionLine) items.push(pixelTitle(this, cx, y + 216, missionLine, 8, won ? PX.text.green : PX.text.muted).setOrigin(0.5, 0));
 
-    const retry = this.canRetryPhase ? `RETRY P${PHASE_INFO[this.checkpoint!.phase].number}` : 'FLY AGAIN';
+    // Where the payout came from: the base, then each bonus.
+    const pay = payoutBreakdown(this.runner.complete, OUTCOME_PAYOUT[result.outcome], this.sim.stats.partsLost, this.cost, timeOfDayReward(this.timeOfDay));
+    const lines = [`BASE $${pay.base}`, pay.clean ? `CLEAN +$${pay.clean}` : '', pay.cheap ? `CHEAP +$${pay.cheap}` : '', pay.time ? `${this.timeOfDay} +$${pay.time}` : ''].filter(Boolean);
+    if (pay.base > 0) items.push(pixelBody(this, cx, y + 236, lines.join('   '), 16, PX.text.muted).setOrigin(0.5, 0));
+
+    const retry = this.canRetryPhase ? `RETRY P${phaseNumber(this.runner.chain, this.checkpoint!.phase)}` : 'FLY AGAIN';
     items.push(
       ...this.makeButton(cx - 108, y + h - 52, 'R', retry, true, () => {
         if (this.canRetryPhase) this.retryFromCheckpoint();

@@ -1,5 +1,6 @@
+import { CONFIG } from '../config';
 import { partCost, PricedPart } from '../core/partDefinitions';
-import { PartType } from '../core/types';
+import { PartType, PayloadKind } from '../core/types';
 import { FlightStats } from '../physics/FlightSim';
 import { VehicleReport } from '../physics/vehicle';
 import { Award } from './stunts';
@@ -13,6 +14,10 @@ export interface MissionContext {
   awards: readonly Award[];
   /** Mission phases finished: 1 orbit, 2 rover, 3 crew landed. */
   phasesDone: number;
+  /** What the rocket carried. */
+  payload: PayloadKind;
+  /** The payload's own objective was finished. */
+  objectiveDone: boolean;
   /** Problems the player fixed in orbit and on the way down. */
   problemsSolved: number;
   /** Problems that went wrong. */
@@ -25,6 +30,8 @@ export interface Mission {
   /** One plain-language line for the pad and the builder. */
   goal: string;
   reward: number;
+  /** Only this payload can finish it; it is skipped for the others. */
+  payload?: PayloadKind;
   check(ctx: MissionContext): boolean;
 }
 
@@ -39,14 +46,26 @@ export const MISSIONS: Mission[] = [
   { id: 'rock-dodger', title: 'Rock dodger', goal: 'Get 3 near misses in the rock belt', reward: 50, check: c => nearMisses(c) >= 3 },
   { id: 'moon-soi', title: 'Moonbound', goal: 'Reach the Moon’s gravity', reward: 60, check: c => c.stats.reachedMoonSoi },
   { id: 'orbiter', title: 'Phase 1: Lunar orbiter', goal: 'Get into a stable orbit around the Moon', reward: 80, check: c => c.phasesDone >= 1 },
-  { id: 'rover', title: 'Phase 2: Lunar rover', goal: 'Drop the rover in its landing zone', reward: 100, check: c => c.phasesDone >= 2 },
-  { id: 'crew', title: 'Phase 3: Human landing', goal: 'Land the crew on the Moon', reward: 150, check: c => c.phasesDone >= 3 },
-  { id: 'cool-head', title: 'Cool head', goal: 'Finish all three phases without a single problem going wrong', reward: 200, check: c => c.phasesDone >= 3 && c.problemsFailed === 0 },
-  { id: 'lean-lander', title: 'Lean lander', goal: 'Land the crew with a rocket costing $120 or less', reward: 250, check: c => c.phasesDone >= 3 && c.cost <= 120 }
+  { id: 'satellite', title: 'Satellite out', goal: 'Eject a satellite from a stable lunar orbit', reward: 80, payload: 'SATELLITE', check: c => c.payload === 'SATELLITE' && c.objectiveDone },
+  { id: 'rover', title: 'Rover delivered', goal: 'Crash a rover onto its landing zone', reward: 100, payload: 'ROVER', check: c => c.payload === 'ROVER' && c.objectiveDone },
+  { id: 'crew', title: 'Human landing', goal: 'Land the crew on the Moon', reward: 150, payload: 'CREW', check: c => c.payload === 'CREW' && c.objectiveDone },
+  { id: 'cool-head', title: 'Cool head', goal: 'Finish any mission without a single problem going wrong', reward: 200, check: c => c.objectiveDone && c.problemsFailed === 0 },
+  { id: 'lean-lander', title: 'Lean lander', goal: 'Land the crew with a rocket costing $120 or less', reward: 250, payload: 'CREW', check: c => c.payload === 'CREW' && c.objectiveDone && c.cost <= 120 }
 ];
 
-export function currentMission(completed: readonly string[]): Mission | null {
-  return MISSIONS.find(m => !completed.includes(m.id)) ?? null;
+/** What the chosen payload asks of the pilot, in a line, and what finishing it pays (sum of its phases). */
+export function payloadObjective(payload: PayloadKind): { goal: string; reward: number } {
+  const pay = CONFIG.economy.phaseRewards;
+  switch (payload) {
+    case 'SATELLITE': return { goal: 'Orbit the Moon, then eject the satellite', reward: pay.ORBIT + pay.DEPLOY };
+    case 'ROVER': return { goal: 'Orbit the Moon, then drop the rover', reward: pay.ORBIT + pay.ROVER };
+    case 'CREW': return { goal: 'Orbit the Moon, then land the crew', reward: pay.ORBIT + pay.LANDING };
+  }
+}
+
+/** The first mission not yet done that the chosen payload can actually finish. */
+export function currentMission(completed: readonly string[], payload?: PayloadKind): Mission | null {
+  return MISSIONS.find(m => !completed.includes(m.id) && (!payload || !m.payload || m.payload === payload)) ?? null;
 }
 
 /** Missions newly completed by this flight. */

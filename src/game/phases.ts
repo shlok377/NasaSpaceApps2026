@@ -3,6 +3,7 @@ import { gravityAt, insideMoonSoi, moonAltitude, moonAngleOf, surfaceDistance } 
 import { MOON, MOON_CENTER } from '../physics/constants';
 import { FlightSim, FlightSnapshot, FlightTelemetry } from '../physics/FlightSim';
 import { momentOfInertia } from '../physics/vehicle';
+import { PayloadKind } from '../core/types';
 
 /**
  * The mission, as one continuous flight in three phases:
@@ -11,13 +12,40 @@ import { momentOfInertia } from '../physics/vehicle';
  *  3. HUMAN LANDING — bring the crew down on the landing site through landing problems.
  * Each phase starts automatically when the previous one succeeds.
  */
-export type PhaseId = 'ORBIT' | 'ROVER' | 'LANDING';
+export type PhaseId = 'ORBIT' | 'ROVER' | 'LANDING' | 'DEPLOY';
 export const PHASES: PhaseId[] = ['ORBIT', 'ROVER', 'LANDING'];
+
+/** "Phase n of m" for a phase within a chain (1-based). */
+export const phaseNumber = (chain: readonly PhaseId[], phase: PhaseId): number => chain.indexOf(phase) + 1;
+
+/** Steps of the chain finished so far. */
+export function stepsDone(chain: readonly PhaseId[], phase: PhaseId, complete: boolean): number {
+  return complete ? chain.length : Math.max(0, chain.indexOf(phase));
+}
+
+/** Which of the three HUD slots a phase fills (the satellite deploy takes the middle one). */
+export const phaseSlot = (p: PhaseId): number => (p === 'DEPLOY' ? 1 : PHASES.indexOf(p));
+
+/**
+ * The phases a payload has to fly. No payload given = the old full chain, kept for the reference tests.
+ *  - SATELLITE: stable orbit, then eject it;
+ *  - ROVER:     stable orbit, then crash a rover onto the target;
+ *  - CREW:      stable orbit, then a soft landing on the marked site.
+ */
+export function chainFor(payload?: PayloadKind): PhaseId[] {
+  switch (payload) {
+    case 'SATELLITE': return ['ORBIT', 'DEPLOY'];
+    case 'ROVER': return ['ORBIT', 'ROVER'];
+    case 'CREW': return ['ORBIT', 'LANDING'];
+    default: return [...PHASES];
+  }
+}
 
 export const PHASE_INFO: Record<PhaseId, { number: number; title: string; goal: string }> = {
   ORBIT: { number: 1, title: 'LUNAR ORBITER', goal: 'Reach the Moon and burn sideways into a stable orbit' },
   ROVER: { number: 2, title: 'LUNAR ROVER', goal: 'Handle the problems in orbit, then drop the rover in the green zone' },
-  LANDING: { number: 3, title: 'HUMAN LANDING', goal: 'Burn against your motion to drop out of orbit, then land the crew on the site' }
+  LANDING: { number: 3, title: 'HUMAN LANDING', goal: 'Burn against your motion to drop out of orbit, then land the crew on the site' },
+  DEPLOY: { number: 2, title: 'SATELLITE DEPLOY', goal: 'Hold your stable orbit and press SPACE to eject the satellite' }
 };
 
 export type OrbitProblemId = 'DEBRIS' | 'STUCK_THRUSTER' | 'FUEL_LEAK' | 'ORBIT_DECAY';
@@ -329,6 +357,7 @@ export type PhaseEvent =
   | { kind: 'PROBLEM_END'; problem: ActiveProblem }
   | { kind: 'DROP_READY' }
   | { kind: 'ROVER_RELEASED' }
+  | { kind: 'SATELLITE_DEPLOYED' }
   | { kind: 'ROVER_LANDED'; inZone: boolean; sparesLeft: number; angle: number | null }
   | { kind: 'SITE_MOVED'; site: SurfaceZone }
   | { kind: 'FAILED'; reason: string }
@@ -341,6 +370,17 @@ export interface Checkpoint {
   snapshot: FlightSnapshot;
   /** Stunt awards earned before the checkpoint. */
   awardCount: number;
+}
+
+/** Roll this flight's hazards: at each stage's altitude, `chance` of one from the stage's band. */
+export function planHazards(random: () => number): PhaseRunner['hazardPlan'] {
+  const cfg = CONFIG.hazards;
+  if (!cfg.enabled) return [];
+  return cfg.stages.map(stage => {
+    const band = cfg.bands[stage.band as keyof typeof cfg.bands] as OrbitProblemId[];
+    const strikes = random() < cfg.chance;
+    return { altitude: stage.altitude, id: strikes ? band[Math.min(band.length - 1, Math.floor(random() * band.length))] : null };
+  });
 }
 
 export class PhaseRunner {
@@ -360,15 +400,28 @@ export class PhaseRunner {
   public bouldersSeen = false;
   public failure: string | null = null;
   public complete = false;
+  /** The phases this flight has to get through, in order. */
+  public readonly chain: PhaseId[];
+  /** The satellite can be ejected (stable orbit held, SPACE does it). */
+  public deployReady = false;
+  /** The ejected satellite, drifting on its own in orbit. */
+  public satellite: RoverCapsule | null = null;
+
+  /** Hazards still to come on the way to the Moon, in altitude order (id null = the dice said no). */
+  public hazardPlan: Array<{ altitude: number; id: OrbitProblemId | LandingProblemId | null }> = [];
 
   private queue: ProblemId[] = [];
   private gap = 0;
   private triggered = new Set<LandingProblemId>();
   private events: PhaseEvent[] = [];
 
-  constructor(start: PhaseId = 'ORBIT', phasesDone = 0, private readonly random: () => number = Math.random) {
+  constructor(start: PhaseId = 'ORBIT', phasesDone = 0, private readonly random: () => number = Math.random, public readonly payload?: PayloadKind) {
+    this.chain = chainFor(payload);
+    // A chosen rover is one shot: it lands in the zone or the mission is lost.
+    if (payload === 'ROVER') this.sparesLeft = 0;
     this.phase = start;
     this.phasesDone = phasesDone;
+    if (payload && start === 'ORBIT') this.hazardPlan = planHazards(random);
     this.enter(start);
   }
 
@@ -388,10 +441,13 @@ export class PhaseRunner {
     this.problem = null;
     this.dropReady = false;
     this.rover = null;
+    this.deployReady = false;
     if (phase === 'ROVER') {
-      this.queue = [...(ROVER_CFG.problemOrder as OrbitProblemId[])];
-      this.gap = ROVER_CFG.secondsBetweenProblems;
+      // With a chosen payload the hazards are scheduled separately, so the rover is ready at once.
+      this.queue = this.payload ? [] : [...(ROVER_CFG.problemOrder as OrbitProblemId[])];
+      this.gap = this.payload ? 0 : ROVER_CFG.secondsBetweenProblems;
     }
+    if (phase === 'DEPLOY') this.deployReady = true;
     if (phase === 'LANDING') {
       this.site = { ...LANDING_SITE };
       this.triggered.clear();
@@ -404,8 +460,22 @@ export class PhaseRunner {
     clearDisturbances(sim);
     this.events.push({ kind: 'PHASE_DONE', phase: this.phase });
     this.phasesDone++;
-    if (this.phase === 'ORBIT') this.enter('ROVER');
-    else if (this.phase === 'ROVER') this.enter('LANDING');
+    const next = this.chain[this.chain.indexOf(this.phase) + 1];
+    if (next) this.enter(next);
+    else {
+      this.complete = true;
+      this.events.push({ kind: 'COMPLETE', onSite: true });
+    }
+  }
+
+  /** Eject the satellite (SATELLITE payload) while the orbit is stable. */
+  public deploySatellite(sim: FlightSim): boolean {
+    if (this.phase !== 'DEPLOY' || !this.deployReady || sim.phase !== 'FLYING' || this.over) return false;
+    if (!isStableOrbit(sim.getTelemetry())) return false;
+    this.satellite = { x: sim.state.x, y: sim.state.y, vx: sim.state.vx, vy: sim.state.vy, landed: false, angle: null, inZone: false };
+    this.events.push({ kind: 'SATELLITE_DEPLOYED' });
+    this.finishPhase(sim);
+    return true;
   }
 
   private fail(sim: FlightSim, reason: string): void {
@@ -451,6 +521,11 @@ export class PhaseRunner {
     }
     if (sim.phase !== 'FLYING') return;
 
+    if (sim.hull <= 0) {
+      this.fail(sim, "Your ship's health ran out");
+      return;
+    }
+
     if (sim.stats.reachedMoonSoi && !t.moonOrbit && sim.state.y > MOON_CENTER.y) {
       this.fail(sim, 'Flew past the Moon into deep space');
       return;
@@ -458,11 +533,15 @@ export class PhaseRunner {
 
     switch (this.phase) {
       case 'ORBIT':
+        if (this.payload) this.updateHazards(sim, t, dt, input);
         this.stableFor = isStableOrbit(t) ? this.stableFor + dt : 0;
         if (this.stableFor >= ORBIT_CFG.holdSeconds) this.finishPhase(sim);
         break;
       case 'ROVER':
         this.updateRoverPhase(sim, t, dt, input);
+        break;
+      case 'DEPLOY':
+        if (!t.moonOrbit) this.fail(sim, 'Drifted out of the Moon’s gravity');
         break;
       case 'LANDING':
         this.updateLandingPhase(sim, t, dt, input);
@@ -479,6 +558,20 @@ export class PhaseRunner {
     else this.failedProblems++;
     this.events.push({ kind: 'PROBLEM_END', problem: p });
     this.problem = null;
+  }
+
+  /** Trouble on the way up: run the active hazard, or start the next one when its altitude is reached. */
+  private updateHazards(sim: FlightSim, t: FlightTelemetry, dt: number, input: ProblemInput): void {
+    if (this.problem) {
+      this.runProblem(sim, dt, input);
+      return;
+    }
+    const next = this.hazardPlan[0];
+    if (!next || t.moonOrbit || t.earthAltitude < next.altitude) return;
+    this.hazardPlan.shift();
+    if (!next.id) return;
+    this.problem = startProblem(next.id, sim, this.random);
+    this.events.push({ kind: 'PROBLEM_START', problem: this.problem });
   }
 
   private updateRoverPhase(sim: FlightSim, t: FlightTelemetry, dt: number, input: ProblemInput): void {
@@ -527,7 +620,7 @@ export class PhaseRunner {
 
   private updateLandingPhase(sim: FlightSim, t: FlightTelemetry, dt: number, input: ProblemInput): void {
     if (this.problem) this.runProblem(sim, dt, input);
-    if (!onImpactCourse(t)) return;
+    if (!onImpactCourse(t) || !CONFIG.hazards.enabled) return;
     const order: LandingProblemId[] = ['BOULDERS', 'FLAMEOUT', 'RADAR_FAILURE'];
     for (const id of order) {
       if (this.triggered.has(id) || this.problem) continue;

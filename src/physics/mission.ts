@@ -2,12 +2,13 @@ import { CONFIG } from '../config';
 import { FINS, LIMITS, MOON, WORLD } from './constants';
 import { FlightPhase, FlightStats } from './FlightSim';
 import { VehicleReport } from './vehicle';
+import { PayloadKind } from '../core/types';
 
 /**
  * How far the three-phase mission got: crew on the Moon > rover delivered >
  * in lunar orbit > reached the Moon's pull > space > sky > nothing.
  */
-export type MissionOutcome = 'CREW_LANDED' | 'ROVER_DEPLOYED' | 'IN_ORBIT' | 'MOON_SOI' | 'SPACE' | 'SKY' | 'FAILED';
+export type MissionOutcome = 'CREW_LANDED' | 'SATELLITE_DEPLOYED' | 'ROVER_DEPLOYED' | 'IN_ORBIT' | 'MOON_SOI' | 'SPACE' | 'SKY' | 'FAILED';
 
 export interface MissionResult {
   outcome: MissionOutcome;
@@ -25,8 +26,10 @@ export interface MissionInput {
   stats: FlightStats;
   report: VehicleReport;
   fuelFraction: number;
-  /** Mission phases finished (0 = none, 1 = orbit, 2 = rover, 3 = crew landed). */
+  /** Mission phases finished (0 = none, 1 = orbit, 2 = rover or satellite out, 3 = crew landed). */
   phasesDone: number;
+  /** What the rocket carries; a satellite flight ends one step short of a rover's. */
+  payload?: PayloadKind;
   /** Points from stunts, rocks and pickups, added on top. */
   bonus?: number;
   /** Why the current phase failed, if it did. */
@@ -46,13 +49,14 @@ export const OUTCOME_PAYOUT: Record<MissionOutcome, number> = {
   SPACE: ECON.partialRewards.SPACE,
   MOON_SOI: ECON.partialRewards.MOON_SOI,
   IN_ORBIT: ECON.phaseRewards.ORBIT,
+  SATELLITE_DEPLOYED: ECON.phaseRewards.ORBIT + ECON.phaseRewards.DEPLOY,
   ROVER_DEPLOYED: ECON.phaseRewards.ORBIT + ECON.phaseRewards.ROVER,
   CREW_LANDED: ECON.phaseRewards.ORBIT + ECON.phaseRewards.ROVER + ECON.phaseRewards.LANDING
 };
 
-export function outcomeFor(stats: FlightStats, phasesDone: number): MissionOutcome {
+export function outcomeFor(stats: FlightStats, phasesDone: number, payload?: PayloadKind): MissionOutcome {
   if (phasesDone >= 3) return 'CREW_LANDED';
-  if (phasesDone === 2) return 'ROVER_DEPLOYED';
+  if (phasesDone === 2) return payload === 'SATELLITE' ? 'SATELLITE_DEPLOYED' : 'ROVER_DEPLOYED';
   if (phasesDone === 1) return 'IN_ORBIT';
   if (stats.reachedMoonSoi) return 'MOON_SOI';
   if (stats.reachedSpace) return 'SPACE';
@@ -62,6 +66,7 @@ export function outcomeFor(stats: FlightStats, phasesDone: number): MissionOutco
 
 const TEXT: Record<MissionOutcome, { title: string; stars: number }> = {
   CREW_LANDED: { title: 'CREW ON THE MOON', stars: 5 },
+  SATELLITE_DEPLOYED: { title: 'SATELLITE DEPLOYED', stars: 4 },
   ROVER_DEPLOYED: { title: 'ROVER DELIVERED', stars: 4 },
   IN_ORBIT: { title: 'LUNAR ORBIT ACHIEVED', stars: 3 },
   MOON_SOI: { title: 'REACHED THE MOON', stars: 2 },
@@ -70,13 +75,16 @@ const TEXT: Record<MissionOutcome, { title: string; stars: number }> = {
   FAILED: { title: 'MISSION FAILED', stars: 0 }
 };
 
-export function evaluateMission({ phase, stats, report, fuelFraction, phasesDone, bonus = 0, failure }: MissionInput): MissionResult {
-  const outcome = outcomeFor(stats, phasesDone);
+export function evaluateMission({ phase, stats, report, fuelFraction, phasesDone, payload, bonus = 0, failure }: MissionInput): MissionResult {
+  const outcome = outcomeFor(stats, phasesDone, payload);
   const { title, stars } = TEXT[outcome];
   let summary: string;
   switch (outcome) {
     case 'CREW_LANDED':
       summary = `All three phases done — the crew touched down at ${stats.impactSpeed.toFixed(1)} m/s.`;
+      break;
+    case 'SATELLITE_DEPLOYED':
+      summary = 'The satellite is in a stable lunar orbit.';
       break;
     case 'ROVER_DEPLOYED':
       summary = failure ?? 'The rover is on the Moon, but the crew didn’t make it down.';

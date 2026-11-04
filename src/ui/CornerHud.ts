@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { GAME_ASSETS } from '../core/assets';
 import { FUEL_KINDS } from '../core/partDefinitions';
 import { FuelKind } from '../core/types';
-import { PHASE_INFO, PHASES, PhaseId } from '../game/phases';
+import { PHASE_INFO, PhaseId, phaseNumber } from '../game/phases';
 import { PX } from './pixel';
 import { formatDistance, UI } from './theme';
 
@@ -101,9 +101,9 @@ export class GoalChip {
     this.container.setVisible(v);
   }
 
-  public update(current: PhaseId, done: number, goal: string): void {
-    const now = PHASES.indexOf(current);
-    const key = `${now}|${done}|${goal}`;
+  public update(chain: readonly PhaseId[], current: PhaseId, done: number, goal: string): void {
+    const now = chain.indexOf(current);
+    const key = `${chain.length}|${now}|${done}|${goal}`;
     if (key === this.key) return;
     this.key = key;
     this.phase.setText(PHASE_INFO[current].title);
@@ -115,11 +115,11 @@ export class GoalChip {
     this.tab.forEach(t => t.destroy());
     this.tab.length = 0;
     hudFrame(g, this.x, this.y, w, h, PX.border, 0.55);
-    const tab = headerTab(this.scene, g, this.x + 12, this.y, `PHASE ${PHASE_INFO[current].number}/3`);
+    const tab = headerTab(this.scene, g, this.x + 12, this.y, `PHASE ${phaseNumber(chain, current)}/${chain.length}`);
     this.container.add(tab);
     this.tab.push(tab);
     // Phase pips: done = green, now = gold, later = hollow.
-    PHASES.forEach((_, i) => {
+    chain.forEach((_, i) => {
       const px = this.x + 14 + i * 12;
       const py = this.y + 13;
       g.fillStyle(0x07060b, 1);
@@ -209,6 +209,8 @@ export interface Instruments {
   wetMass: number;
   /** Sky colour for the horizon (follows the launch time). */
   sky: number;
+  /** Health of the ship, 0..100 (100 at launch, every lost part costs some). */
+  health: number;
 }
 
 /** Fuel capsules: size, spacing, and how many fit before same-fuel tanks are grouped. */
@@ -220,6 +222,8 @@ const CAP_MAX = 4;
 const COLUMN_SCALE = 1.2;
 /** Top of each instrument well inside the column (lift, tilt, mass). */
 const WELL_Y = [106, 192, 278];
+/** Top of the health bar under the last well. */
+const HEALTH_Y = 366;
 
 export const TILT_AMBER = 20;
 export const TILT_RED = 35;
@@ -235,7 +239,7 @@ export class InstrumentChip {
   private readonly massText: Phaser.GameObjects.Text;
   private readonly container: Phaser.GameObjects.Container;
   private static readonly W = 108;
-  private static readonly H = 368;
+  private static readonly H = 410;
   private readonly x: number;
   private readonly y: number;
   private needle = 0;
@@ -275,7 +279,10 @@ export class InstrumentChip {
         g.fillRect(wx0 + sx, y + wy0 + sy, 1, 1);
       }
     }
+    // Health: a slim bar in its own well, label underneath.
+    well(g, x + 10, y + HEALTH_Y, 88, 16);
     const texts: Phaser.GameObjects.Text[] = [];
+    texts.push(scene.add.text(x + InstrumentChip.W / 2, y + HEALTH_Y + 29, 'HEALTH', title(6)).setOrigin(0.5, 0.5));
 
     // --- Lift dial (static parts): bezel, face, ticks, numerals ---
     const lx = x + 54;
@@ -363,7 +370,11 @@ export class InstrumentChip {
     texts.push(scene.add.text(x + 10, y + 78, 'FUEL', title(6)).setOrigin(0, 0.5));
 
     this.fuelPct = scene.add.text(x + W - 10, y + 78, '', body(20)).setOrigin(1, 0.5);
-    this.lowTag = scene.add.text(x + W / 2, y + 90, 'LOW FUEL', title(5, UI.redText)).setOrigin(0.5, 0.5).setVisible(false);
+    // A solid red plate with white lettering, so it reads against any sky.
+    this.lowTag = scene.add
+      .text(x + W / 2, y + 89, 'LOW FUEL', { ...title(7, '#ffffff'), backgroundColor: '#c4261a', padding: { x: 5, y: 3 } })
+      .setOrigin(0.5, 0.5)
+      .setVisible(false);
     for (let i = 0; i < CAP_MAX; i++) this.badges.push(scene.add.text(0, 0, '', title(5, PX.text.cream)).setOrigin(1, 1).setVisible(false));
     this.twrText = scene.add.text(lx, ly + 15, '', body(17, '#7dffa8')).setOrigin(0.5, 0.5);
     this.tiltText = scene.add.text(hx, hy + 38, '', body(16)).setOrigin(0.5, 0.5);
@@ -391,6 +402,7 @@ export class InstrumentChip {
     this.drawLift(g, r, dt);
     this.drawHorizon(g, r, time);
     this.drawMass(g, r);
+    this.drawHealth(g, r);
   }
 
   /**
@@ -606,6 +618,19 @@ export class InstrumentChip {
   }
 
   /** Mass in kg, and an 8-segment gauge of how much of the liftoff mass is left. */
+  /** Ship health: green, then amber, then red as parts are lost. */
+  private drawHealth(g: Phaser.GameObjects.Graphics, r: Instruments): void {
+    const health = Phaser.Math.Clamp(r.health, 0, 100);
+    const bx = this.x + 12;
+    const by = this.y + HEALTH_Y + 2;
+    const bw = 84;
+    const fill = Math.round((bw * health) / 100);
+    g.fillStyle(health > 60 ? UI.green : health > 30 ? UI.gold : 0xf04a3a, 1);
+    g.fillRect(bx, by, fill, 12);
+    g.fillStyle(0xffffff, 0.3);
+    g.fillRect(bx, by, fill, 2);
+  }
+
   private drawMass(g: Phaser.GameObjects.Graphics, r: Instruments): void {
     const wx = this.x + 54;
     const y0 = this.y + WELL_Y[2] + 56;

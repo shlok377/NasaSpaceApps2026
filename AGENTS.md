@@ -22,6 +22,25 @@
 
 ### 📝 Message Stream
 
+#### 🟣 [Claude] - 2026-11-03 (Playtest fixes — branch `fixing_gameplay`)
+Played the build in a headless browser against the original brief; fixed what the user flagged. Touched your files again (`RocketTree`, `BuilderScene`). `typecheck` + 135 tests green.
+- **RCS mounting**: side-only (LEFT / RIGHT of a part); never on top of or below a part.
+- **Shell separation**: each RCS now shows its own open/closed art in flight (was: all opened when any key was pressed). `FlightSim.isShellOpen(id)`.
+- **Lab**: payload cards say it in a few words ("Orbit, then eject."); TWIN LEG card shows the bare engine (the shell appears once placed); mission panel follows the chosen payload live (`currentMission(completed, payload)`); tooltip says SEPARATION KEY with a big key box, RCS parts carry a pulsing "!" badge.
+- **Hazards are OFF** (`game.json` → `hazards.enabled: false`): none on the way up or on the Moon landing until we tune them. Tests flip the switch on when they need them.
+- **Texts per payload**: satellite deploy phase has its own goal chip / hint / banner; crew-only "landed on the site" banner + bullseye; pad verdict judges the payload's own mission; rover chip no longer says "spares: 0".
+- **Lab "!" badge** on an RCS disappears once that engine has been hovered.
+
+#### 🟣 [Claude] - 2026-11-03 (Payload objectives, RCS shell keys — branch `fixing_gameplay`)
+**Hi Gemini — heads up, I touched your files (RocketTree port/mass/key rules + a lab tooltip).** Tickets in `.scratch/payload-objectives/issues/`. `npm run typecheck` and `npx vitest run` (124 tests) green.
+- **Payload = objective** (`PhaseRunner(..., payload)`, `chainFor`): SATELLITE = stable orbit then SPACE ejects it; ROVER = orbit then a one-shot rover drop; CREW = orbit then soft landing. Payload masses in `game.json` → `payloads` (set in `RocketTree.setPayload`). Payload cards say how to win.
+- **Rewards**: per-phase payouts (`economy.phaseRewards`), clean/cheap bonus (`economy.objectiveBonus`), mission ladder rewritten around the payload.
+- **RCS** (`RocketTree`, `BuilderScene`): mounts only LEFT/RIGHT of other parts; has all four ports of its own. Hovering an RCS in the lab shows a tooltip: press a key to bind its shell-separation key (default B; reserved keys refused; warning if nothing hangs on it). Keys live in `core/separationKeys.ts`; no change to the controls menu.
+- **Flight**: shells separate any time with their key (`FlightSim.separate(key)`, `openShells`); a shell with nothing on it is ready from launch. Hull integrity (`game.json` → `hull`) fails the flight at 0.
+- **Also**: an open RCS steers in air at `rcs.airFraction` of its space power; no collectible power-ups in the rock belt; hull bar under the goal chip; readouts drift below 50% hull.
+- **Hazards on the way up** (`game.json` → `hazards`, `planHazards`): a seeded roll at 3 altitudes (air / space) can trigger a leak, stuck thruster or flameout. The mission HUD follows each payload's own chain; the ejected satellite and falling rover show as sprites in the orbit view.
+- **Open**: hazards during lunar orbit for rover/satellite flights, art for the sprites, playtest balance.
+
 #### 🟣 [Claude] - 2026-11-02 (Handover: state of the game after PRs #40 and #49)
 **Hi Gemini — here is where everything stands.** Two stacked PRs bring `main` up to date; merge **#40 first, then #49** (GitHub retargets #49 to `main` once #40 lands). Neither touches the same lines as `main`, so both merge clean. `npm run typecheck` and `npx vitest run` (101 tests) are green.
 
@@ -32,7 +51,7 @@
 
 **Launch & flight (my domain):**
 - **Seaside spaceport** (`flight/LaunchSite.ts`): unique centre piece (pad, complex, cliff, lighthouse) plus endless land tiles west, sea tiles east, pixel dirt / deep water below. `WorldRenderer.drawSiteLife` animates flags, sea glints, birds, pad steam and night lamps; `drawPad` draws the gantry.
-- **Launch time** (`game/timeOfDay.ts`, `game.json` → `timeOfDay`): DAWN / NOON / DUSK / NIGHT picked on the pad with painted sky cards (`ui/SkyCards.ts`). Later = windier (`windScale`), denser rock belt (`rocks`), bigger payout (`reward`). Each time has its own dithered pixel sky (8×8 Bayer blend, no sun) in `LaunchSite.createDaySkyTexture`; night has the Milky Way, a moonlight path and a distant storm front.
+- **Launch time** (`game/timeOfDay.ts`, `game.json` → `timeOfDay`): DAWN / NOON / DUSK / NIGHT picked on the pad with painted sky cards (`ui/SkyCards.ts`). Later = windier (`windScale`), denser rock belt (`rocks`), bigger payout (`reward`). Each time has its own dithered pixel sky (8×8 Bayer blend, no sun) in `LaunchSite.createDaySkyTexture`; night has the Milky Way, a moonlight path.
 - **Flight HUD** (`ui/CornerHud.ts`): goal panel top-left, money top-right, a tall **ROCKET** column bottom-left (per-tank capsule fuel tanks in fuel colours that drop out on staging, lift dial, attitude horizon, mass) and a tall **HEIGHT** tube on the right. Both columns are ~55 % see-through. The mission result panel keeps its classic look (`CLASSIC_TEXT_STYLE`).
 - **Rock belt** (`game/rocks.ts`, `game.json` → `rockBelt` / `evasiveRunner`): now 2.7–3.9 km, ~30 s, 5 lanes. Climb speed ramps 63 → 90 m/s (`runnerSpeedAt`, `beltTimeAt`), ~2.5× more rocks at random heights, drifters from mid-belt, two-lane boulders, shields removed, always one reachable route (tested). Crashing into the sea splashes instead of exploding.
 
@@ -56,7 +75,9 @@ Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLA
 - [x] Seaside spaceport, endless scenery, launch time of day, pixel skies.
 - [x] Corner flight HUD with ROCKET and HEIGHT columns.
 - [x] Fast staggered rock belt with boulders and drifters.
+- [x] Payload objectives, rewards, shell separation keys, hull integrity (`fixing_gameplay`).
 - [ ] Restyle the orbit gauge and problem cards to match the new HUD.
+- [x] Satellite / rover sprites, hazard scheduling, two-step mission HUD.
 
 ---
 

@@ -48,6 +48,12 @@
     "isp": 70,
     "gimbalDegrees": 5
   },
+  "payloads": {
+    "_note": "Total mass (kg) of the root slot for each payload. Heavier payloads need a bigger rocket.",
+    "CREW": { "mass": 60 },
+    "ROVER": { "mass": 45 },
+    "SATELLITE": { "mass": 30 }
+  },
   "fuelTypes": {
     "_note": "Per fuel: kg per litre (a tank holds parts.FUEL_TANK.fuelLiters), and multipliers on a booster's efficiency (isp) and push (thrust) while it burns this fuel. COLD_GAS only feeds RCS thrusters. unlockCost: one-time price to unlock the fuel in the lab (0 = open from the start).",
     "KEROSENE": { "density": 1.0, "isp": 1.0, "thrust": 1.0, "unlockCost": 0 },
@@ -58,7 +64,8 @@
     "_note": "Per RCS thruster, once its shell has separated: turning torque, sideways push (m/s^2) and cold gas burned per second at full steer. Boosters cannot steer in space.",
     "torque": 700,
     "accel": 2.5,
-    "gasPerSecond": 0.4
+    "gasPerSecond": 8.4,
+    "airFraction": 0.3
   },
   "world": {
     "surfaceGravity": 9.81,
@@ -85,7 +92,7 @@
     "densityTop": 3.5,
     "nearMissMargin": 6,
     "comboWindow": 10,
-    "fuelCans": 3,
+    "fuelCans": 0,
     "fuelCanRefill": 0.12,
     "rockRadiusMin": 1.5,
     "rockRadiusMax": 5,
@@ -181,9 +188,16 @@
     "startingMoney": 100000000,
     "grantFloor": 50,
     "phaseRewards": {
-      "ORBIT": 220,
-      "ROVER": 250,
-      "LANDING": 400
+      "ORBIT": 120,
+      "ROVER": 330,
+      "DEPLOY": 150,
+      "LANDING": 700
+    },
+    "objectiveBonus": {
+      "_note": "Extra share of the objective payout: no part lost in flight, and a cheap rocket.",
+      "noDamage": 0.2,
+      "cheapCost": 90,
+      "cheap": 0.15
     },
     "partialRewards": {
       "SKY": 10,
@@ -192,6 +206,24 @@
     },
     "padBonus": 100,
     "recoveryRefund": 0.5
+  },
+  "hazards": {
+    "_note": "Switch: with enabled=false no hazard strikes (neither on the way up nor on the Moon landing) until they are tuned. Trouble on the way to the Moon (flights with a chosen payload). At each altitude (m above Earth) the dice roll: with chance `chance` one hazard from that band's list strikes. The seed comes from the flight, so every flight differs.",
+    "enabled": false,
+    "chance": 0.6,
+    "stages": [
+      { "altitude": 1200, "band": "AIR" },
+      { "altitude": 4600, "band": "SPACE" },
+      { "altitude": 5400, "band": "SPACE" }
+    ],
+    "bands": {
+      "AIR": ["STUCK_THRUSTER", "FUEL_LEAK", "FLAMEOUT"],
+      "SPACE": ["STUCK_THRUSTER", "FUEL_LEAK"]
+    }
+  },
+  "hull": {
+    "_note": "Hull integrity is 100 at launch; every part knocked or snapped off costs perPart. At 0 the flight is lost.",
+    "perPart": 25
   },
   "gameSpeed": 1.5,
   "phases": {

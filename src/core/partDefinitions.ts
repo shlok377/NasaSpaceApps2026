@@ -15,10 +15,10 @@ export const isBoosterFuel = (kind: FuelKind | undefined): boolean => (kind ?? '
 export const fuelUnlockCost = (kind: FuelKind): number => CONFIG.fuelTypes[kind].unlockCost;
 
 /** Payload choices for the root slot, in picker order. `extraCost` is added to the cockpit's base price. */
-export const PAYLOADS: Record<PayloadKind, { label: string; color: number; extraCost: number; description: string }> = {
-  CREW: { label: 'CREW', color: 0xe8e4f0, extraCost: 0, description: 'Seats for a brave crew.' },
-  SATELLITE: { label: 'SATELLITE', color: 0x4fa3ff, extraCost: 10, description: 'No crew. Goes into orbit.' },
-  ROVER: { label: 'ROVER', color: 0xf0c040, extraCost: 15, description: 'Drives on the Moon.' }
+export const PAYLOADS: Record<PayloadKind, { label: string; color: number; extraCost: number; description: string; mass: number }> = {
+  CREW: { label: 'CREW', color: 0xe8e4f0, extraCost: 0, mass: CONFIG.payloads.CREW.mass, description: 'Land softly.' },
+  SATELLITE: { label: 'SATELLITE', color: 0x4fa3ff, extraCost: 10, mass: CONFIG.payloads.SATELLITE.mass, description: 'Orbit, then eject.' },
+  ROVER: { label: 'ROVER', color: 0xf0c040, extraCost: 15, mass: CONFIG.payloads.ROVER.mass, description: 'Orbit, then drop.' }
 };
 
 /** How each fuel behaves: kg per litre, and multipliers on engine efficiency and push while burning it. */
@@ -78,8 +78,8 @@ export const PART_DEFINITIONS: Record<PartType, PartDefinition> = {
   RCS: {
     type: 'RCS',
     label: 'RCS',
-    // Bolts to the side of the rocket; parts can hang below its shell.
-    defaultPorts: ['EAST', 'WEST', 'SOUTH'],
+    // Bolts to the left or right of another part; parts can hang on any other side of its shell.
+    defaultPorts: ['NORTH', 'SOUTH', 'EAST', 'WEST'],
     ...stats('RCS'),
     color: 0x9fe8ff,
     textureKey: 'tex_rcs'

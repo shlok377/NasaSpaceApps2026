@@ -1,12 +1,13 @@
 import Phaser from 'phaser';
 import { RocketTree } from '../core/RocketTree';
-import { currentMission, rocketCost } from '../game/missions';
+import { payloadObjective, rocketCost } from '../game/missions';
 import { loadProgress, saveProgress, withGrant } from '../game/progress';
 import { FUEL_KINDS, fuelUnlockCost, PART_DEFINITIONS, PAYLOADS, partCost } from '../core/partDefinitions';
 import { FuelKind, PartType, PayloadKind, PortDirection, RocketNode } from '../core/types';
 import { ParticleManager } from '../particles';
 import { preloadGameAssets, getPartTextureKey, GAME_ASSETS } from '../core/assets';
 import { PX, drawPixelPanel, drawSparkle, pixelBody, pixelTitle } from '../ui/pixel';
+import { normalizeKey } from '../core/separationKeys';
 import { BACKDROP_SCALE, createBackdropTexture } from '../ui/backdrop';
 
 interface PaletteBay {
@@ -44,7 +45,7 @@ const VARIANTS: Record<VariantPart, Array<{ kind: PartKind; label: string; color
     }
   ]
 };
-/** RCS thrusters sit on the sides with their nozzle facing outward. */
+/** RCS thrusters face their nozzle outward: left, right or up (the art points down at 0). */
 const rcsAngle = (type: PartType, side?: 'LEFT' | 'RIGHT') => (type !== 'RCS' ? 0 : side === 'RIGHT' ? -90 : 90);
 const isVariantPart = (type: PartType): type is VariantPart => type in VARIANTS;
 /** Variant swatches on a slot, in slot-local coordinates (centre of the slot is 0,0). */
@@ -110,6 +111,16 @@ export class BuilderScene extends Phaser.Scene {
   private flyCards: Array<{ kind: PartKind; card: Phaser.GameObjects.Container; frame: Phaser.GameObjects.Graphics }> = [];
   private flyHoverKind: PartKind | null = null;
   private payloadTag?: Phaser.GameObjects.Container;
+  /** Tooltip over the RCS shell under the pointer, where its separation key is bound. */
+  private shellTip?: Phaser.GameObjects.Container;
+  private shellTipId: string | null = null;
+  private shellTipNote = '';
+  private shellTipSig = '';
+  /** RCS the player has already hovered: their "!" badge is gone for good. */
+  private seenShells = new Set<string>();
+  /** RCS just placed: the pointer still rests on it, so that hover does not count as having found the tooltip. */
+  private freshShells = new Set<string>();
+  private shellBadges = new Map<string, Phaser.GameObjects.Container>();
 
   // HUD objects
   private statValues: Record<'mass' | 'thrust' | 'fuel' | 'twr', Phaser.GameObjects.Text> = {} as never;
@@ -561,10 +572,15 @@ export class BuilderScene extends Phaser.Scene {
     if (grant > 0) saveProgress(progress);
     this.money = progress.money;
     this.unlockedFuels = progress.unlockedFuels;
-    const mission = currentMission(progress.completedMissions);
-    this.missionText.setText(mission ? mission.goal : 'All missions complete — chase the high score!');
-    const reward = mission ? `REWARD +$${mission.reward}` : '';
-    this.rewardText.setText(grant > 0 ? `GRANT +$${grant}!  ${reward}` : reward);
+    this.showMission(progress.completedMissions, grant);
+  }
+
+  /** The mission panel shows the chosen payload's own objective and what finishing it pays. */
+  private showMission(_completed: readonly string[], grant = 0): void {
+    const { goal, reward } = payloadObjective(this.rocketTree.getRootNode().payload ?? 'CREW');
+    this.missionText.setText(goal);
+    const pay = `REWARD +$${reward}`;
+    this.rewardText.setText(grant > 0 ? `GRANT +$${grant}!  ${pay}` : pay);
   }
 
   /** Hand the assembled rocket to the flight simulator; the builder sleeps so the design is kept. */
@@ -637,7 +653,11 @@ export class BuilderScene extends Phaser.Scene {
   /** Texture for a part in its current look; falls back to the plain sprite if that art isn't loaded. */
   private partTexture(type: PartType, finOrientation?: 'LEFT' | 'RIGHT', kind?: PartKind): string {
     const look = kind ?? (isVariantPart(type) ? this.partKinds[type] : undefined);
-    if (type === 'ENGINE' && look === 'RCS') return this.partTexture('RCS', finOrientation);
+    // The picker shows the bare engine; the shell only appears once it is bolted onto the rocket.
+    if (type === 'ENGINE' && look === 'RCS') {
+      const bare = getPartTextureKey('RCS', finOrientation, undefined, undefined, true);
+      return this.textures.exists(bare) ? bare : this.partTexture('RCS', finOrientation);
+    }
     const key = getPartTextureKey(type, finOrientation, undefined, look as FuelKind | PayloadKind | undefined);
     return this.textures.exists(key) ? key : getPartTextureKey(type, finOrientation);
   }
@@ -848,6 +868,7 @@ export class BuilderScene extends Phaser.Scene {
       this.payloadTag = tag;
       this.tweens.add({ targets: tag, y: -18, alpha: 0, delay: 1600, duration: 500, onComplete: () => tag.destroy() });
     }
+    this.showMission(loadProgress().completedMissions);
     this.syncExportableState();
   }
 
@@ -888,6 +909,16 @@ export class BuilderScene extends Phaser.Scene {
     });
 
     this.input.keyboard?.on('keydown-ENTER', () => this.launchFlight());
+    // Hovering an RCS shell and pressing a key binds that key to separate it in flight.
+    this.input.keyboard?.on('keydown', (e: KeyboardEvent) => {
+      if (!this.shellTipId || e.ctrlKey || e.metaKey || e.altKey) return;
+      const key = normalizeKey(e.key.length === 1 ? e.key : '');
+      if (!key) return;
+      const res = this.rocketTree.setSeparationKey(this.shellTipId, key);
+      this.shellTipNote = res.success ? '' : res.reason ?? '';
+      this.shellTipSig = '';
+      this.drawShellTip();
+    });
 
     // Coming back from a flight: the design is untouched, just reset the cursor.
     this.events.on(Phaser.Scenes.Events.WAKE, () => {
@@ -1000,8 +1031,51 @@ export class BuilderScene extends Phaser.Scene {
     }
   }
 
+  /** Show the key tooltip while the pointer is over an RCS shell in the build bay. */
+  private updateShellTip(pointer: Phaser.Input.Pointer): void {
+    const { col, row, inside } = this.getGridCellAtPointer(pointer);
+    const node = inside && !this.isOverSidePanels(pointer) ? this.rocketTree.getNodeAt(col, row) : undefined;
+    const id = node?.type === 'RCS' ? node.id : null;
+    const sig = id ? `${id}|${this.rocketTree.getSeparationKey(id)}|${this.rocketTree.shellWarning(id)}` : '';
+    for (const fresh of this.freshShells) if (fresh !== id) this.freshShells.delete(fresh);
+    if (id === this.shellTipId && sig === this.shellTipSig) return;
+    if (id !== this.shellTipId) this.shellTipNote = '';
+    if (id && !this.freshShells.has(id)) this.markShellSeen(id);
+    this.shellTipId = id;
+    this.shellTipSig = sig;
+    this.drawShellTip();
+  }
+
+  private drawShellTip(): void {
+    this.shellTip?.destroy();
+    this.shellTip = undefined;
+    const node = this.shellTipId ? this.rocketTree.getAllNodes().find(n => n.id === this.shellTipId) : undefined;
+    if (!node) return;
+    const size = BuilderScene.CELL_SIZE;
+    // Only a refused key shows a note; an RCS with nothing on it just works (its key does nothing).
+    const warning = this.shellTipNote;
+    const w = 250;
+    const h = warning ? 112 : 86;
+    const x = Math.min(this.gridOriginX + node.gridX * size + size / 2 - w / 2, this.scale.width - w - 8);
+    const y = this.gridOriginY + node.gridY * size - h - 10;
+    const g = this.add.graphics();
+    drawPixelPanel(g, 0, 0, w, h);
+    const title = pixelTitle(this, 12, 10, 'SEPARATION KEY', 9, PX.text.accent);
+    // The bound key in a big framed box, so it reads at a glance.
+    g.fillStyle(0x01020a, 1);
+    g.fillRect(12, 30, 46, 46);
+    g.lineStyle(2, PX.accent, 1);
+    g.strokeRect(13, 31, 44, 44);
+    const key = pixelTitle(this, 35, 54, this.rocketTree.getSeparationKey(node.id), 26, PX.text.cream).setOrigin(0.5);
+    const how = pixelBody(this, 70, 40, 'Press a key\nto rebind', 18, PX.text.muted);
+    const items: Phaser.GameObjects.GameObject[] = [g, title, key, how];
+    if (warning) items.push(pixelBody(this, 12, 84, warning, 15, '#ff8a8a').setWordWrapWidth(w - 24));
+    this.shellTip = this.add.container(Math.max(8, x), Math.max(8, y), items).setDepth(60);
+  }
+
   private updateGhostPreview(pointer: Phaser.Input.Pointer): void {
     this.updateCursorStyle(pointer);
+    this.updateShellTip(pointer);
 
     const overFlyout = this.flyoutFor !== null && this.flyoutRect.contains(pointer.worldX, pointer.worldY);
     if (overFlyout && this.game.canvas) this.game.canvas.style.cursor = 'pointer';
@@ -1111,6 +1185,9 @@ export class BuilderScene extends Phaser.Scene {
       const size = BuilderScene.CELL_SIZE;
       this.particleManager.triggerEffect('PART_DISASSEMBLE', this.gridOriginX + col * size + size / 2, this.gridOriginY + row * size + size / 2);
       this.renderRocket();
+      this.shellTipId = null;
+      this.shellTipSig = '';
+      this.drawShellTip();
       this.syncExportableState('[RocketBuilder] Part removed:');
     } else {
       console.warn(`[RocketBuilder] ${removeResult.reason}`);
@@ -1167,6 +1244,8 @@ export class BuilderScene extends Phaser.Scene {
         this.tweens.killTweensOf(container);
         container.destroy();
         this.blockDisplayMap.delete(id);
+        this.shellBadges.delete(id);
+        this.freshShells.delete(id);
       }
     }
 
@@ -1190,8 +1269,36 @@ export class BuilderScene extends Phaser.Scene {
       .setDisplaySize(size, size)
       .setAngle(rcsAngle(node.type, node.finOrientation));
     blockContainer.add(sprite);
+    if (node.type === 'RCS' && !this.seenShells.has(node.id)) {
+      const badge = this.shellBadge(size);
+      blockContainer.add(badge);
+      this.shellBadges.set(node.id, badge);
+      this.freshShells.add(node.id);
+    }
     this.blocksContainer.add(blockContainer);
     this.blockDisplayMap.set(node.id, blockContainer);
+  }
+
+  /** A small "!" on an RCS: hover it to set the key that separates its shell. */
+  private shellBadge(size: number): Phaser.GameObjects.Container {
+    const g = this.add.graphics();
+    g.fillStyle(0x01020a, 1);
+    g.fillRect(-12, -12, 24, 24);
+    g.fillStyle(PX.accent, 1);
+    g.fillRect(-10, -10, 20, 20);
+    const mark = pixelTitle(this, 0, 1, '!', 16, '#1a1020').setOrigin(0.5);
+    const badge = this.add.container(size / 2 - 12, -size / 2 + 12, [g, mark]);
+    const pulse = this.tweens.add({ targets: badge, scale: 1.15, duration: 600, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    badge.once(Phaser.GameObjects.Events.DESTROY, () => pulse.remove());
+    return badge;
+  }
+
+  /** First hover over an RCS: the player has found its key tooltip, so its "!" badge goes away. */
+  private markShellSeen(id: string): void {
+    if (this.seenShells.has(id)) return;
+    this.seenShells.add(id);
+    this.shellBadges.get(id)?.destroy();
+    this.shellBadges.delete(id);
   }
 
   private renderAvailableSockets(): void {

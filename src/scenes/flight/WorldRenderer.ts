@@ -90,6 +90,8 @@ export interface MissionOverlay {
   site: SurfaceZone | null;
   boulders: boolean;
   rover: RoverCapsule | null;
+  /** The ejected satellite, if any. */
+  satellite?: RoverCapsule | null;
   landedRovers: number[];
   /** Predicted landing point of the rover if dropped now. */
   dropMarker: { x: number; y: number } | null;
@@ -150,6 +152,8 @@ export class WorldRenderer {
   private readonly skyMoonSprite: Phaser.GameObjects.Image;
   private readonly mapMoonSprite: Phaser.GameObjects.Image;
   private readonly roverFlagSprite: Phaser.GameObjects.Image;
+  /** The rover falling to the Moon or the ejected satellite (they never show together). */
+  private readonly payloadSprite: Phaser.GameObjects.Image;
   private readonly landingFlagSprite: Phaser.GameObjects.Image;
   private readonly smokeSpritesContainer: Phaser.GameObjects.Container;
   private readonly smokeSpritesPool: Phaser.GameObjects.Image[] = [];
@@ -157,7 +161,7 @@ export class WorldRenderer {
   private lastSkyMode: CameraMode | null = null;
   public skyRedrawCount = 0;
   private readonly daySky: Phaser.GameObjects.TileSprite;
-  /** Sun, sun glow and the night storm front: behind the land and sea, in front of the sky. */
+  /** Sun, sun glow: behind the land and sea, in front of the sky. */
   private readonly celestialGfx: Phaser.GameObjects.Graphics;
   /** The launch time's wind multiplier: drives cloud drift, flags, sea chop and pad steam. */
   private wind = 1;
@@ -225,6 +229,9 @@ export class WorldRenderer {
     this.mapMoonSprite?.setOrigin?.(0.5, 0.5);
     this.mapMoonSprite?.setVisible?.(false);
     this.mapMoonSprite?.setDepth?.(-2);
+    this.payloadSprite = scene.add.image(0, 0, GAME_ASSETS.PART_ROVER.key);
+    this.payloadSprite?.setVisible?.(false);
+    this.payloadSprite?.setDepth?.(6);
     this.roverFlagSprite = scene.add.image(0, 0, GAME_ASSETS.FLAG_GREEN.key);
     this.roverFlagSprite?.setOrigin?.(0.08, 0.97);
     this.roverFlagSprite?.setVisible?.(false);
@@ -481,7 +488,8 @@ export class WorldRenderer {
 
   public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, overlay: MissionOverlay, runnerState?: EvasiveRunnerState): void {
     this.labelIndex = 0;
-    this.rcsRevealed = sim.separated;
+    // On the pad every shell is still shut; an empty one opens as the rocket lifts off.
+    this.openRcs = sim.phase === 'PRELAUNCH' ? new Set() : new Set(sim.vehicle.parts.filter(p => p.type === 'RCS' && sim.isShellOpen(p.id)).map(p => p.id));
     this.drawSky(sim, t);
     const g = this.worldGfx;
     g.clear();
@@ -491,6 +499,7 @@ export class WorldRenderer {
     } else if (this.camera.mode === 'ASCENT') {
       this.mapMoonSprite?.setVisible?.(false);
       this.roverFlagSprite?.setVisible?.(false);
+      this.payloadSprite?.setVisible?.(false);
       this.landingFlagSprite?.setVisible?.(false);
       this.drawAscent(sim, t, rocks, runnerState);
     } else {
@@ -733,26 +742,12 @@ export class WorldRenderer {
     }
   }
 
-  /** Night only: a dark storm front far out over the sea. Drawn behind the land and sea. */
-  private drawCelestial(horizonY: number, alpha: number): void {
+  /** Reserved for celestial bodies; the skies are painted, so nothing is drawn here now. */
+  private drawCelestial(_horizonY: number, alpha: number): void {
     const g = this.celestialGfx;
     g?.clear?.();
     if (!g || alpha <= 0.01) return;
-    // A disc built from 4 px rows, so it matches the pixel art.
-    const disc = (cx: number, cy: number, r: number, color: number, a: number) => {
-      g.fillStyle(color, a * alpha);
-      for (let y = -r; y < r; y += PIXEL) {
-        const half = Math.floor(Math.sqrt(Math.max(0, r * r - (y + PIXEL / 2) ** 2)) / PIXEL) * PIXEL;
-        if (half > 0) g.fillRect(Math.round(cx - half), Math.round(cy + y), half * 2, PIXEL);
-      }
-    };
-    // No sun in any sky: the daytime skies carry their light in their colours.
-    if (this.time === 'NIGHT') {
-      // Night storm front out over the sea on the right, under the stars (no lightning).
-      const lumps = [[880, 26], [930, 34], [990, 30], [1050, 40], [1120, 34], [1190, 44], [1260, 38]];
-      for (const [x, r] of lumps) disc(x, horizonY - 6, r, 0x1a2038, 1);
-      for (const [x, r] of lumps) disc(x - 6, horizonY - 12, r - 10, 0x232b48, 1);
-    }
+    // No sun and no storm front: the skies carry their light in their colours.
   }
 
   /** Concrete pad with a flame trench, and a red lattice gantry whose arm holds the rocket's nose until launch. */
@@ -1153,11 +1148,11 @@ export class WorldRenderer {
     }
 
     // Rover capsule on its way down.
-    if (overlay.rover && !overlay.rover.landed) {
-      const p = this.toScreen(overlay.rover.x, overlay.rover.y);
-      g.fillStyle(WORLD_COLORS.rover, 1);
-      g.fillRect(p.x - 4, p.y - 4, 8, 8);
-    }
+    const body = overlay.rover && !overlay.rover.landed ? { b: overlay.rover, key: GAME_ASSETS.PART_ROVER.key } : overlay.satellite && !overlay.satellite.landed ? { b: overlay.satellite, key: GAME_ASSETS.PART_SATELLITE.key } : null;
+    if (body) {
+      const p = this.toScreen(body.b.x, body.b.y);
+      this.payloadSprite?.setTexture?.(body.key)?.setDisplaySize?.(22, 22)?.setPosition?.(p.x, p.y)?.setVisible?.(true);
+    } else this.payloadSprite?.setVisible?.(false);
 
     // Direction of travel.
     const s = sim.state;
@@ -1212,6 +1207,7 @@ export class WorldRenderer {
       this.label(top.x, top.y - 12, 'ROVER ZONE', '#4ade80', 12);
     } else {
       this.roverFlagSprite?.setVisible?.(false);
+      this.payloadSprite?.setVisible?.(false);
     }
     for (const angle of overlay.landedRovers) {
       const p = moonSurfacePoint(angle, map ? 0 : 0.8);
@@ -1368,8 +1364,8 @@ export class WorldRenderer {
     }
   }
 
-  /** RCS thrusters show their launch shell until separation cracks it off. */
-  private rcsRevealed = false;
+  /** RCS thrusters show their launch shell until their own separation cracks it off. */
+  private openRcs = new Set<string>();
 
   private renderPartSprite(p: FlightPart, sx: number, sy: number, rot: number, cellPx: number, alpha: number, fuelRemaining?: number): void {
     let img = this.partSpritesPool[this.activeSpriteCount];
@@ -1380,7 +1376,7 @@ export class WorldRenderer {
     }
     this.activeSpriteCount++;
 
-    const texKey = getPartTextureKey(p.type, p.finOrientation, fuelRemaining, p.fuelKind, this.rcsRevealed);
+    const texKey = getPartTextureKey(p.type, p.finOrientation, fuelRemaining, p.fuelKind ?? p.payload, this.openRcs.has(p.id));
     img.setTexture(texKey);
     img.setPosition(sx, sy);
     // RCS nozzles face outward from the side they hang on.

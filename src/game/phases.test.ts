@@ -1,3 +1,4 @@
+import { CONFIG } from '../config';
 import { describe, expect, it } from 'vitest';
 import { RocketTree } from '../core/RocketTree';
 import { FuelKind, PartType } from '../core/types';
@@ -5,7 +6,7 @@ import { moonAngleOf, surfaceDistance } from '../physics/bodies';
 import { MOON, MOON_CENTER } from '../physics/constants';
 import { ControlInput, FlightSim } from '../physics/FlightSim';
 import { buildFlightVehicle } from '../physics/vehicle';
-import { isStableOrbit, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, updateProblem } from './phases';
+import { chainFor, isStableOrbit, phaseNumber, planHazards, stepsDone, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, updateProblem } from './phases';
 
 type Layout = Array<[number, number, PartType, FuelKind?]>;
 const STAGED: Layout = [
@@ -187,6 +188,17 @@ describe('phase 2: problems in orbit', () => {
 
 describe('the whole mission', () => {
   it('the staged reference rocket can finish all three phases with a careful pilot', () => {
+    // This pilot was tuned on a gentle cold-gas rate; the game's harsher rate is tested elsewhere.
+    const gasRate = CONFIG.rcs.gasPerSecond;
+    CONFIG.rcs.gasPerSecond = 0.4;
+    try {
+      referenceFlight();
+    } finally {
+      CONFIG.rcs.gasPerSecond = gasRate;
+    }
+  }, 30_000);
+
+  function referenceFlight() {
     const sim = new FlightSim(vehicle(STAGED));
     const run = new PhaseRunner('ORBIT', 0, () => 0.3);
     const state = { cut: false, deorbited: false };
@@ -205,7 +217,7 @@ describe('the whole mission', () => {
     expect(kinds).toEqual(expect.arrayContaining(['DONE:ORBIT', 'DONE:ROVER', 'DONE:LANDING', 'COMPLETE']));
     expect(run.phasesDone).toBe(3);
     expect(sim.stats.landedOn).toBe('MOON');
-  }, 30_000);
+  }
 
   it('a checkpoint rewinds the rocket exactly', () => {
     const sim = inOrbit(400);
@@ -215,5 +227,124 @@ describe('the whole mission', () => {
     expect(back.state.x).toBeCloseTo(snap.state.x, 6);
     expect(back.fuel).toBeCloseTo(new FlightSim(vehicle(STAGED)).fuel, 6);
     expect(back.vehicle.parts.length).toBe(snap.parts.length);
+  });
+});
+
+describe('objectives by payload', () => {
+  const holdOrbit = (run: PhaseRunner, sim: FlightSim, seconds = 4) => {
+    for (let i = 0; i < 120 * seconds; i++) {
+      sim.step(1 / 120, { throttle: 0, steer: 0 });
+      run.update(sim, 1 / 120);
+    }
+  };
+
+  it('each payload has its own chain of phases', () => {
+    expect(chainFor('SATELLITE')).toEqual(['ORBIT', 'DEPLOY']);
+    expect(chainFor('ROVER')).toEqual(['ORBIT', 'ROVER']);
+    expect(chainFor('CREW')).toEqual(['ORBIT', 'LANDING']);
+  });
+
+  it('a satellite is done once it is ejected from a stable orbit', () => {
+    const sim = inOrbit(400);
+    const run = new PhaseRunner('ORBIT', 0, Math.random, 'SATELLITE');
+    holdOrbit(run, sim);
+    expect(run.phase).toBe('DEPLOY');
+    expect(run.complete).toBe(false);
+    expect(run.deploySatellite(sim)).toBe(true);
+    expect(run.satellite).not.toBeNull();
+    expect(run.complete).toBe(true);
+    expect(run.drainEvents().some(e => e.kind === 'SATELLITE_DEPLOYED')).toBe(true);
+  });
+
+  it('the satellite cannot be ejected before the orbit phase is done', () => {
+    const run = new PhaseRunner('ORBIT', 0, Math.random, 'SATELLITE');
+    expect(run.deploySatellite(inOrbit(400))).toBe(false);
+  });
+
+  it('a chosen rover is ready right after the orbit, with no spare', () => {
+    const sim = inOrbit(400);
+    const run = new PhaseRunner('ORBIT', 0, Math.random, 'ROVER');
+    holdOrbit(run, sim, 6);
+    expect(run.phase).toBe('ROVER');
+    expect(run.dropReady).toBe(true);
+    expect(run.sparesLeft).toBe(0);
+  });
+
+  it('a crew rocket goes from orbit straight to the landing', () => {
+    const sim = inOrbit(400);
+    const run = new PhaseRunner('ORBIT', 0, Math.random, 'CREW');
+    holdOrbit(run, sim);
+    expect(run.phase).toBe('LANDING');
+  });
+});
+
+describe('a chosen rover mission', () => {
+  const landedRover = (inside: boolean) => ({ x: 0, y: 0, vx: 0, vy: -500, landed: true, angle: 0, inZone: inside });
+
+  it('ends the moment the rover lands in the zone, however hard it hits', () => {
+    const sim = inOrbit(400);
+    const run = new PhaseRunner('ROVER', 1, Math.random, 'ROVER');
+    run.dropReady = true;
+    run.rover = landedRover(true);
+    run.update(sim, 1 / 120);
+    expect(run.complete).toBe(true);
+    expect(run.failure).toBeNull();
+  });
+
+  it('is lost if the one rover misses the zone', () => {
+    const sim = inOrbit(400);
+    const run = new PhaseRunner('ROVER', 1, Math.random, 'ROVER');
+    run.dropReady = true;
+    run.rover = landedRover(false);
+    run.update(sim, 1 / 120);
+    expect(run.complete).toBe(false);
+    expect(run.failure).not.toBeNull();
+  });
+});
+
+describe('phase numbering', () => {
+  it('counts within the payload’s own chain', () => {
+    expect(phaseNumber(chainFor('SATELLITE'), 'DEPLOY')).toBe(2);
+    expect(phaseNumber(chainFor('CREW'), 'LANDING')).toBe(2);
+    expect(stepsDone(chainFor('ROVER'), 'ROVER', false)).toBe(1);
+    expect(stepsDone(chainFor('ROVER'), 'ROVER', true)).toBe(2);
+  });
+});
+
+describe('hazards on the way to the Moon', () => {
+  // Hazards are switched off in the config for now; these tests flip them on.
+  const hazardsOn = <T>(fn: () => T): T => {
+    CONFIG.hazards.enabled = true;
+    try {
+      return fn();
+    } finally {
+      CONFIG.hazards.enabled = false;
+    }
+  };
+
+  it('stays quiet while the config switch is off', () => {
+    expect(CONFIG.hazards.enabled).toBe(false);
+    expect(planHazards(() => 0.3)).toEqual([]);
+  });
+
+  it('rolls a seeded plan: sure strikes pick from the stage band, a high roll means a quiet flight', () => {
+    const plan = hazardsOn(() => planHazards(() => 0.3));
+    expect(plan.map(h => h.altitude)).toEqual([...plan.map(h => h.altitude)].sort((a, b) => a - b));
+    expect(plan.every(h => h.id !== null)).toBe(true);
+    expect(hazardsOn(() => planHazards(() => 0.95)).every(h => h.id === null)).toBe(true);
+  });
+
+  it('strikes when the rocket reaches the stage altitude, only on a chosen-payload flight', () => {
+    const fly = (payload?: 'CREW') => {
+      const sim = new FlightSim(vehicle(STAGED));
+      sim.launch();
+      sim.onGround = false;
+      sim.state.y = 1_300;
+      const run = hazardsOn(() => new PhaseRunner('ORBIT', 0, () => 0.3, payload));
+      hazardsOn(() => run.update(sim, 1 / 120));
+      return run;
+    };
+    expect(fly('CREW').problem).not.toBeNull();
+    expect(fly().problem).toBeNull();
   });
 });

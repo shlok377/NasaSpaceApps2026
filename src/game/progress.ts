@@ -86,7 +86,37 @@ export interface FlightEarnings {
   mission: number;
   /** Half the rocket's price back for landing it intact back home (reusable rockets!). */
   recovery: number;
+  /** Extra for a clean flight (no part lost) and a cheap rocket, on a finished objective. */
+  bonus: number;
   total: number;
+}
+
+/** The bonus lines on top of a finished objective's base payout ($). All 0 unless the objective was finished. */
+export interface PayoutBreakdown {
+  base: number;
+  /** No part lost in flight. */
+  clean: number;
+  /** A cheap rocket. */
+  cheap: number;
+  /** Extra from launching later in the day. */
+  time: number;
+}
+
+export function payoutBreakdown(objectiveDone: boolean, basePayout: number, partsLost: number, rocketCost: number, rewardScale = 1): PayoutBreakdown {
+  if (!objectiveDone) return { base: basePayout, clean: 0, cheap: 0, time: 0 };
+  const cfg = CONFIG.economy.objectiveBonus;
+  return {
+    base: basePayout,
+    clean: partsLost === 0 ? Math.round(basePayout * cfg.noDamage) : 0,
+    cheap: rocketCost <= cfg.cheapCost ? Math.round(basePayout * cfg.cheap) : 0,
+    time: Math.round(basePayout * (rewardScale - 1))
+  };
+}
+
+/** Clean + cheap bonus on a finished objective ($), before the time-of-day scale. */
+export function objectiveBonus(objectiveDone: boolean, basePayout: number, partsLost: number, rocketCost: number): number {
+  const b = payoutBreakdown(objectiveDone, basePayout, partsLost, rocketCost);
+  return b.clean + b.cheap;
 }
 
 /** `phasePaid`: phase rewards already paid out during the flight (so they aren't paid twice). */
@@ -98,15 +128,17 @@ export function flightEarnings(
   landedHome: boolean,
   phasePaid = 0,
   /** Launch-time bonus on the outcome and mission payouts (phasePaid is already scaled). */
-  rewardScale = 1
+  rewardScale = 1,
+  bonus = 0
 ): FlightEarnings {
   const e = {
     outcome: Math.max(0, Math.round(OUTCOME_PAYOUT[outcome] * rewardScale) - phasePaid),
     awards: cashFromAwards(awards),
     mission: Math.round(missionReward * rewardScale),
-    recovery: landedHome ? Math.round(rocketCost * CONFIG.economy.recoveryRefund) : 0
+    recovery: landedHome ? Math.round(rocketCost * CONFIG.economy.recoveryRefund) : 0,
+    bonus: Math.round(bonus * rewardScale)
   };
-  return { ...e, total: e.outcome + e.awards + e.mission + e.recovery };
+  return { ...e, total: e.outcome + e.awards + e.mission + e.recovery + e.bonus };
 }
 
 /** Never let the player get stuck unable to afford a rocket. */

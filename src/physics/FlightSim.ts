@@ -1,4 +1,5 @@
 import { CONFIG } from '../config';
+import { DEFAULT_SEPARATION_KEY } from '../core/separationKeys';
 import { isBoosterFuel } from '../core/partDefinitions';
 import { AIRFRAME, ENGINE, FINS, G0, LIMITS, MOON, MOON_CENTER, STEERING, WORLD } from './constants';
 import { OrbitElements, orbitFromState } from './orbit';
@@ -133,8 +134,8 @@ export interface FlightSnapshot {
   stats: FlightStats;
   startFuel: number;
   initialVehicle: FlightVehicle;
-  /** RCS shells already off. */
-  separated: boolean;
+  /** Ids of RCS shells already cracked open. */
+  openShells: string[];
 }
 
 export interface FlightState {
@@ -157,6 +158,9 @@ function wrapAngle(a: number): number {
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(Math.max(v, lo), hi);
 }
+
+/** Hull integrity of an undamaged rocket. */
+export const FULL_HULL = 100;
 
 export class FlightSim {
   public vehicle: FlightVehicle;
@@ -243,32 +247,62 @@ export class FlightSim {
     return kg;
   }
 
-  /** RCS shells still on (separation not done yet). */
-  public separated = false;
-
-  /** The rocket carries RCS thrusters whose shells haven't come off yet. */
-  public get canSeparate(): boolean {
-    return this.phase === 'FLYING' && !this.separated && this.vehicle.rcsCount > 0;
+  /** Hull integrity, FULL_HULL at launch: every part lost costs a share, and at 0 the flight is lost. */
+  public get hull(): number {
+    return Math.max(0, FULL_HULL - this.stats.partsLost * CONFIG.hull.perPart);
   }
 
-  /** RCS can steer: shells off, thrusters aboard and cold gas left. */
+  /** RCS shells already cracked open (by their key, in any phase of flight). */
+  public openShells = new Set<string>();
+
+  /** A shell is open once separated, or from the start if nothing hangs on it. */
+  public isShellOpen(rcsId: string): boolean {
+    return this.openShells.has(rcsId) || !this.vehicle.parts.some(p => p.parentId === rcsId);
+  }
+
+  /** RCS thrusters that can fire: shell open and still aboard. */
+  public get activeRcsCount(): number {
+    return this.vehicle.parts.filter(p => p.type === 'RCS' && this.isShellOpen(p.id)).length;
+  }
+
+  /** At least one RCS is free to steer (used by the renderer and hints). */
+  public get separated(): boolean {
+    return this.activeRcsCount > 0;
+  }
+
+  /** Keys of the RCS shells still closed (parts hang on them), without repeats. */
+  public get closedShellKeys(): string[] {
+    const keys = this.vehicle.parts.filter(p => p.type === 'RCS' && !this.isShellOpen(p.id)).map(p => p.separationKey ?? DEFAULT_SEPARATION_KEY);
+    return [...new Set(keys)];
+  }
+
+  /** Some RCS shell with parts hanging on it is still closed. */
+  public get canSeparate(): boolean {
+    return this.phase === 'FLYING' && this.vehicle.parts.some(p => p.type === 'RCS' && !this.isShellOpen(p.id));
+  }
+
+  /** RCS can steer: a shell open, thrusters aboard and cold gas left. */
   public get rcsReady(): boolean {
-    return this.separated && this.vehicle.rcsCount > 0 && this.coldGas > 1e-9;
+    return this.activeRcsCount > 0 && this.coldGas > 1e-9;
   }
 
   /**
-   * Phase separation: every RCS shell cracks open, and whatever hangs below a shell
-   * falls away and tumbles back down. The RCS thrusters can then steer in space.
+   * Shell separation, any time in flight. Every closed RCS shell bound to `key` (all of them with no key)
+   * cracks open: whatever hangs on it falls away and tumbles back down, the RCS thruster stays.
    */
-  public separate(): boolean {
-    if (!this.canSeparate) return false;
-    for (const rcs of this.vehicle.parts.filter(p => p.type === 'RCS')) {
+  public separate(key?: string): boolean {
+    if (this.phase !== 'FLYING') return false;
+    const shells = this.vehicle.parts.filter(
+      p => p.type === 'RCS' && !this.isShellOpen(p.id) && (key === undefined || (p.separationKey ?? DEFAULT_SEPARATION_KEY) === key.toUpperCase())
+    );
+    if (shells.length === 0) return false;
+    for (const rcs of shells) {
+      this.openShells.add(rcs.id);
       for (const child of this.vehicle.parts.filter(p => p.parentId === rcs.id)) {
         if (this.vehicle.parts.some(p => p.id === child.id)) this.detach(subtreeIds(this.vehicle.parts, child.id), 2);
       }
     }
-    this.separated = true;
-    this.emit('SEPARATION', 'SEPARATION — shells off, RCS ready (A / D)');
+    this.emit('SEPARATION', 'SEPARATION — shell off, RCS ready (A / D)');
     return true;
   }
 
@@ -427,13 +461,15 @@ export class FlightSim {
     const qA = q * v.referenceArea;
     // In space the boosters can't steer at all: only RCS thrusters (shells off, cold gas left) can.
     const inSpace = rho <= 0;
-    const rcsOn = inSpace && this.rcsReady && steer !== 0;
-    if (rcsOn) this.drawFuel(Math.abs(steer) * CONFIG.rcs.gasPerSecond * v.rcsCount * dt, false);
+    // An open RCS also works in air, but thick air smothers its puffs: only a fraction of its space power.
+    const rcsPower = inSpace ? 1 : CONFIG.rcs.airFraction * Math.max(0.25, 1 - q / 2000);
+    const rcsOn = this.rcsReady && steer !== 0;
+    if (rcsOn) this.drawFuel(Math.abs(steer) * CONFIG.rcs.gasPerSecond * this.activeRcsCount * rcsPower * dt, false);
+    const rcsTorque = rcsOn ? CONFIG.rcs.torque * this.activeRcsCount * rcsPower : 0;
     const steerAuthority = inSpace
-      ? rcsOn
-        ? CONFIG.rcs.torque * v.rcsCount
-        : 0
+      ? rcsTorque
       : (v.hasCommandModule ? AIRFRAME.reactionWheelTorque + (thrust === 0 ? STEERING.rcsTorque : 0) : 0) +
+        rcsTorque +
         thrust * Math.sin(ENGINE.gimbalRange) * gimbalArm +
         FINS.controlAuthority * v.finCount * qA * v.length * 0.5;
     const controlTorque = steer * steerAuthority;
@@ -441,7 +477,7 @@ export class FlightSim {
     const rcsAeroAtten = Math.max(0.25, 1 - q / 2000);
     const rcs = inSpace
       ? rcsOn
-        ? steer * CONFIG.rcs.accel * v.rcsCount * mass
+        ? steer * CONFIG.rcs.accel * this.activeRcsCount * mass
         : 0
       : v.hasCommandModule
         ? steer * STEERING.rcsAcceleration * mass * rcsAeroAtten
@@ -858,7 +894,7 @@ export class FlightSim {
       stats: { ...this.stats },
       startFuel: this.startFuel,
       initialVehicle: this.initialVehicle,
-      separated: this.separated
+      openShells: [...this.openShells]
     };
   }
 
@@ -871,7 +907,7 @@ export class FlightSim {
     sim.onGround = snap.onGround;
     sim.hasLeftGround = snap.hasLeftGround;
     sim.stats = { ...snap.stats };
-    sim.separated = snap.separated;
+    sim.openShells = new Set(snap.openShells);
     sim.version = 1;
     return sim;
   }

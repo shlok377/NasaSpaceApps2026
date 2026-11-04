@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { RocketTree } from './RocketTree';
 import { CONFIG } from '../config';
+import { PAYLOADS } from './partDefinitions';
 
 describe('RocketTree', () => {
   it('initializes with immovable Cockpit as root node at Col 7, Row 5', () => {
@@ -165,5 +166,59 @@ describe('RocketTree Full Lifecycle & Telemetry', () => {
     const southPort = availablePorts.find(p => p.direction === 'SOUTH' && p.nodeId === '0');
     expect(southPort).toBeDefined();
     expect(southPort?.targetGridY).toBe(6);
+  });
+});
+
+describe('payload mass', () => {
+  it('SATELLITE < ROVER < CREW and the root mass follows the payload', () => {
+    expect(PAYLOADS.SATELLITE.mass).toBeLessThan(PAYLOADS.ROVER.mass);
+    expect(PAYLOADS.ROVER.mass).toBeLessThan(PAYLOADS.CREW.mass);
+    const tree = new RocketTree();
+    const root = () => tree.getRootNode().mass;
+    tree.setPayload('SATELLITE');
+    expect(root()).toBe(PAYLOADS.SATELLITE.mass);
+    tree.setPayload('CREW');
+    expect(root()).toBe(PAYLOADS.CREW.mass);
+  });
+});
+
+describe('RCS mounting', () => {
+  it('bolts only to the left or right side of another part, never on top or below', () => {
+    const tree = new RocketTree(7, 5);
+    expect(tree.attachPart(7, 6, 'RCS').success).toBe(false); // below the cockpit
+    expect(tree.attachPart(7, 4, 'RCS').success).toBe(false); // on top of it
+    expect(tree.attachPart(8, 5, 'RCS').node?.finOrientation).toBe('RIGHT');
+    expect(tree.attachPart(6, 5, 'RCS').node?.finOrientation).toBe('LEFT');
+  });
+
+  it('lets other parts hang on its top, bottom and free side', () => {
+    const tree = new RocketTree(7, 5);
+    const rcs = tree.attachPart(8, 5, 'RCS').node!;
+    const open = tree.getAvailablePorts().filter(p => p.nodeId === rcs.id).map(p => p.direction).sort();
+    expect(open).toEqual(['EAST', 'NORTH', 'SOUTH']);
+    expect(tree.attachPart(8, 4, 'STRUCTURAL').success).toBe(true);
+    expect(tree.attachPart(8, 6, 'FUEL_TANK').success).toBe(true);
+    expect(tree.attachPart(9, 5, 'STRUCTURAL').success).toBe(true);
+  });
+});
+
+describe('RCS separation keys', () => {
+  it('defaults to B, accepts free keys and refuses reserved ones', () => {
+    const tree = new RocketTree(7, 5);
+    const rcs = tree.attachPart(8, 5, 'RCS').node!;
+    expect(tree.getSeparationKey(rcs.id)).toBe('B');
+    expect(tree.setSeparationKey(rcs.id, 'g').success).toBe(true);
+    expect(tree.getSeparationKey(rcs.id)).toBe('G');
+    expect(tree.setSeparationKey(rcs.id, 'A').success).toBe(false);
+    expect(tree.setSeparationKey(rcs.id, ' ').success).toBe(false);
+    expect(tree.getSeparationKey(rcs.id)).toBe('G');
+  });
+
+  it('warns while nothing hangs on the shell', () => {
+    const tree = new RocketTree(7, 5);
+    const rcs = tree.attachPart(8, 5, 'RCS').node!;
+    expect(tree.shellWarning(rcs.id)).not.toBeNull();
+    tree.attachPart(8, 6, 'FUEL_TANK');
+    expect(tree.shellWarning(rcs.id)).toBeNull();
   });
 });
