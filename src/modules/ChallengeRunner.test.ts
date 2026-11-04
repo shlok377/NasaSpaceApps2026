@@ -12,10 +12,18 @@ describe('Challenge runner', () => {
 
   it('marks every height challenge on the climb, low to high, without overlapping each other', () => {
     const bands = createChallenges().bands;
-    expect(bands.map(b => b.label)).toEqual(['max-Q', 'wind', 'radiation', 'TLI']);
+    expect(bands.map(b => b.label)).toEqual(['max-Q', 'wind', 'rocks', 'radiation', 'TLI']);
     for (let i = 1; i < bands.length; i++) expect(bands[i].from).toBeGreaterThanOrEqual(bands[i - 1].to);
-    // None of them sits inside the rock belt.
-    for (const b of bands) expect(b.to <= CONFIG.rockBelt.bottom || b.from >= CONFIG.rockBelt.top).toBe(true);
+    expect(bands[2]).toMatchObject({ from: CONFIG.rockBelt.bottom, to: CONFIG.rockBelt.top });
+  });
+
+  it('runs game time slower only while the rock belt asks for it', () => {
+    const sim = flyingSim();
+    const r = createChallenges(() => 0.99);
+    expect(r.timeScale).toBe(1);
+    sim.state.y = CONFIG.rockBelt.bottom + 50;
+    for (let i = 0; i < 40; i++) r.update(frame(sim, { earthAltitude: sim.state.y }, 0.1));
+    expect(r.timeScale).toBeCloseTo(CONFIG.rockBelt.slowMotion);
   });
 
   it('each challenge has its own switch', () => {

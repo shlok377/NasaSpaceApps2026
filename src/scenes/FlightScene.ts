@@ -19,8 +19,6 @@ import {
 } from '../game/phases';
 import { DEFAULT_SEPARATION_KEY, normalizeKey } from '../core/separationKeys';
 import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, objectiveBonus, payoutBreakdown, PlayerProgress, saveProgress } from '../game/progress';
-import { anchorBelt, checkBelt, Combo, generateBelt, generateLaneWaves, Rock, runnerSpeedAt } from '../game/rocks';
-import { createEvasiveRunnerState, EvasiveRunnerState, updateEvasiveRunner, RUNNER_CONFIG } from '../game/evasiveRunner';
 import { Award, StuntTracker } from '../game/stunts';
 import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay, timeOfDayReward, timeOfDayWind } from '../game/timeOfDay';
 import { moonSoiAltitude } from '../physics/bodies';
@@ -38,7 +36,7 @@ import { OrbitGauge, ProblemCard } from '../ui/PhaseHud';
 import { formatDistance, TEXT_STYLE, TITLE_STYLE, UI } from '../ui/theme';
 import { preloadGameAssets } from '../core/assets';
 import { EngineLoop, LoopSfx, playSfx } from '../core/sound';
-import { ChallengeCard, ChallengeContext, ChallengeEvent, ChallengeRunner, createChallenges } from '../modules';
+import { ChallengeCard, ChallengeContext, ChallengeEvent, ChallengeRunner, Combo, createChallenges } from '../modules';
 import { Effects } from './flight/Effects';
 import { CameraMode, MissionOverlay, WorldRenderer, WORLD_COLORS } from './flight/WorldRenderer';
 
@@ -187,18 +185,11 @@ export class FlightScene extends Phaser.Scene {
   private phasePaid = 0;
   private mission: Mission | null = null;
   private stunts = new StuntTracker();
-  private rocks: Rock[] = [];
   private combo = new Combo();
-  /** The runner belt's drifters start moving when the rocket enters the belt. */
-  private beltAnchored = false;
   private passed: boolean[] = [];
   private dropMarker: { x: number; y: number } | null = null;
   private impactMarker: { x: number; y: number } | null = null;
   private markerAt = -Infinity;
-  public runnerState: EvasiveRunnerState = createEvasiveRunnerState();
-  private spacePressedThisFrame = false;
-  private laneSteerInput = 0;
-  private runnerEntryVy = 0;
 
   constructor() {
     super('FlightScene');
@@ -225,10 +216,6 @@ export class FlightScene extends Phaser.Scene {
     this.repairPressed = false;
     this.timeScale = 1;
     this.titleTimer = 0;
-    this.runnerState = createEvasiveRunnerState();
-    this.spacePressedThisFrame = false;
-    this.laneSteerInput = 0;
-    this.runnerEntryVy = 0;
     this.progress = loadProgress();
     this.progressBeforeFinish = null;
     this.separatePromptShown = false;
@@ -237,9 +224,7 @@ export class FlightScene extends Phaser.Scene {
     this.phasePaid = 0;
     this.mission = currentMission(this.progress.completedMissions, this.payload);
     this.stunts = new StuntTracker();
-    this.rocks = generateBelt(Math.floor(Math.random() * 1e9));
     this.combo = new Combo();
-    this.beltAnchored = false;
     this.passed = MILESTONES.map(() => false);
     this.dropMarker = null;
     this.impactMarker = null;
@@ -300,7 +285,7 @@ export class FlightScene extends Phaser.Scene {
         { label: 'Space', height: WORLD.atmosphereTop },
         { label: 'Moon', height: SOI_ALTITUDE }
       ],
-      [{ from: ROCK_BELT.bottom, to: ROCK_BELT.top, label: 'rocks', color: 0xc9b08f }, ...this.challenges.bands]
+      [...this.challenges.bands].sort((a, b) => a.from - b.from)
     );
     this.instruments = new InstrumentChip(this);
     this.coins = new MoneyChip(this);
@@ -382,19 +367,16 @@ export class FlightScene extends Phaser.Scene {
     this.keys = this.input.keyboard!.addKeys('W,S,SHIFT,CTRL,Z,X,A,D,E,F,LEFT,RIGHT,UP,DOWN,SPACE,ENTER,ESC,R,B') as Keys;
     this.keys.SPACE.on('down', () => {
       if (this.sim.phase === 'PRELAUNCH') this.startCountdown();
-      else if (this.runnerState.promptActive) this.spacePressedThisFrame = true;
       else if (this.runner.deploySatellite(this.sim) || this.runner.dropRover(this.sim)) {
         const at = this.world.rocketScreen(this.sim);
         this.fx.ring(at.x, at.y, WORLD_COLORS.rover, 50, 0.5);
       }
     });
     const onLeftDown = () => {
-      if (this.runnerState.active) this.laneSteerInput = -1;
-      else if (this.sim.phase === 'PRELAUNCH') this.stepTimeOfDay(-1);
+      if (this.sim.phase === 'PRELAUNCH') this.stepTimeOfDay(-1);
     };
     const onRightDown = () => {
-      if (this.runnerState.active) this.laneSteerInput = 1;
-      else if (this.sim.phase === 'PRELAUNCH') this.stepTimeOfDay(1);
+      if (this.sim.phase === 'PRELAUNCH') this.stepTimeOfDay(1);
     };
     this.keys.A.on('down', onLeftDown);
     this.keys.LEFT.on('down', onLeftDown);
@@ -450,8 +432,7 @@ export class FlightScene extends Phaser.Scene {
   }
 
   private currentInput(_t: FlightTelemetry): ControlInput {
-    const steer = this.runnerState.active ? 0 : this.steerKey();
-    return { throttle: this.throttle, steer };
+    return { throttle: this.throttle, steer: this.steerKey() };
   }
 
   // ---------------------------------------------------------------------------
@@ -463,60 +444,12 @@ export class FlightScene extends Phaser.Scene {
     let t = this.sim.getTelemetry();
 
     if (!this.result) {
-      const ev = updateEvasiveRunner(
-        this.runnerState,
-        t.earthAltitude,
-        dt,
-        this.spacePressedThisFrame,
-        this.laneSteerInput,
-        this.sim.state.x
-      );
-      this.spacePressedThisFrame = false;
-      this.laneSteerInput = 0;
-
-      if (ev.promptTriggered) {
-        this.showBanner(`DEBRIS FIELD AHEAD: PRESS [SPACE] TO ENGAGE EVASIVE RUNNER (${Math.ceil(this.runnerState.promptTimer)}s)`, '#38bdf8');
-      }
-      if (ev.engaged) {
-        this.runnerEntryVy = Math.max(this.sim.state.vy, RUNNER_CONFIG.cruiseSpeed ?? 45);
-        this.rocks = generateLaneWaves(Math.floor(Math.random() * 1e9), this.timeOfDay);
-        // Predict the belt clock from here (as if climbing at the cruise speed); it is re-anchored at the real entry.
-        anchorBelt(this.rocks, this.sim.state.time, this.sim.state.y);
-        this.beltAnchored = false;
-        const p = this.world.rocketScreen(this.sim);
-        this.fx.ring(p.x, p.y, WORLD_COLORS.site, 180, 0.6);
-        this.showBanner('EVASIVE RUNNER ENGAGED // TIME DILATION 35%', '#22d3ee');
-      }
-      if (ev.cleared) {
-        this.showBanner('DEBRIS CLEARED // FULL THRUST RESTORED', '#34d399');
-        if (this.runnerEntryVy > this.sim.state.vy) {
-          this.sim.state.vy = this.runnerEntryVy;
-        }
-      }
-
       this.readThrottle(dt);
       this.tickCountdown(dt);
-      this.timeScale = this.runnerState.active ? RUNNER_CONFIG.timeScale : this.runner.timeScale(this.sim);
+      // The rock belt eases time down a little; the phases fast-forward quiet orbits.
+      this.timeScale = this.runner.timeScale(this.sim) * this.challenges.timeScale;
       const gameDt = dt * GAME_SPEED * this.timeScale;
       this.sim.advance(gameDt, this.currentInput(t));
-
-      if (this.runnerState.active) {
-        const inBelt = this.sim.state.y >= ROCK_BELT.bottom;
-        if (!this.beltAnchored && inBelt) {
-          this.beltAnchored = true;
-          anchorBelt(this.rocks, this.sim.state.time, this.sim.state.y);
-        }
-        this.sim.state.x = this.runnerState.currentX;
-        this.sim.state.vx = 0;
-        this.sim.state.omega = 0;
-        this.sim.state.theta = Math.PI / 2 + this.runnerState.tilt;
-        // Govern the climb to the cruise speed so the rocks come down at a readable pace: eased on
-        // the approach, then held exactly inside the belt, where the reserved safe route assumes it.
-        // Inside the belt the climb follows the speed ramp exactly (faster the higher you get).
-        const cruise = runnerSpeedAt(this.sim.state.y);
-        if (inBelt) this.sim.state.vy = cruise;
-        else this.sim.state.vy += (cruise - this.sim.state.vy) * (1 - Math.exp(-dt * 6));
-      }
 
       if (this.runner.satellite) stepRover(this.runner.satellite, gameDt);
       if (this.launched) this.runner.update(this.sim, gameDt, { repairPressed: this.repairPressed, relightHeld: this.keys.E.isDown });
@@ -528,10 +461,7 @@ export class FlightScene extends Phaser.Scene {
       this.handleEvents(events);
       this.handlePhaseEvents(this.runner.drainEvents());
       for (const a of this.stunts.update(this.sim, t, events)) this.celebrate(a);
-      if (this.world.camera.mode === 'ASCENT') {
-        this.checkRocks();
-        this.checkMilestones(t);
-      }
+      if (this.world.camera.mode === 'ASCENT') this.checkMilestones(t);
       this.checkWobble(t);
       this.refreshApex();
       this.refreshMarkers();
@@ -562,9 +492,9 @@ export class FlightScene extends Phaser.Scene {
       this.cameras.main.shake(180, 0.006);
     }
 
-    this.world.updateCamera(this.sim, t, dt, this.chooseCameraMode(t), this.runnerState.active);
-    this.world.updateSmoke(dt * GAME_SPEED * this.timeScale, this.sim, t, !this.exploded, this.runnerState);
-    this.world.render(this.sim, t, this.rocks, !this.exploded, this.overlay(), this.runnerState);
+    this.world.updateCamera(this.sim, t, dt, this.chooseCameraMode(t));
+    this.world.updateSmoke(dt * GAME_SPEED * this.timeScale, this.sim, t, !this.exploded);
+    this.world.render(this.sim, t, this.challenges.rocks, !this.exploded, this.overlay());
     this.fx.update(dt, t, false);
     this.fx.draw(t, this.world.rocketScreen(this.sim), !this.exploded, false);
     this.updateHud(t, dt);
@@ -675,12 +605,28 @@ export class FlightScene extends Phaser.Scene {
   }
 
   private challengeContext(dt: number, realDt: number, t: FlightTelemetry = this.sim.getTelemetry()): ChallengeContext {
-    return { sim: this.sim, t, dt, realDt, payload: this.payload };
+    return { sim: this.sim, t, dt, realDt, payload: this.payload, timeOfDay: this.timeOfDay };
   }
 
   /** Banners, alarms and awards for the flight challenges. */
   private handleChallengeEvents(events: ChallengeEvent[]): void {
     for (const e of events) {
+      if (e.kind === 'ROCK_HIT') {
+        // A boulder's lost part already shakes and sounds through the sim's PART_LOST event.
+        this.combo.reset();
+        const at = this.world.toScreen(e.x, e.y);
+        this.fx.burst(at.x, at.y, WORLD_COLORS.rock);
+        if (!e.boulder) {
+          playSfx(this, 'ROCKET_DAMAGE');
+          this.cameras.main.shake(200, 0.008);
+        }
+        continue;
+      }
+      if (e.kind === 'NEAR_MISS') {
+        const n = this.combo.nearMiss(this.sim.state.time);
+        this.celebrate({ id: 'NEAR_MISS', label: n > 1 ? `NEAR MISS ×${n}` : 'NEAR MISS', points: 100 * n });
+        continue;
+      }
       if (e.kind === 'START') {
         playSfx(this, 'BUZZER');
         this.cameras.main.flash(160, 120, 60, 20);
@@ -801,10 +747,6 @@ export class FlightScene extends Phaser.Scene {
     this.bannerQueue = [];
     this.dropMarker = null;
     this.impactMarker = null;
-    this.runnerState = createEvasiveRunnerState();
-    this.spacePressedThisFrame = false;
-    this.laneSteerInput = 0;
-    this.runnerEntryVy = 0;
   }
 
   private showBanner(message: string, color = '#ffffff'): void {
@@ -825,27 +767,6 @@ export class FlightScene extends Phaser.Scene {
         this.celebrate({ id: 'MILESTONE', label: m.label.toUpperCase(), points: 150 });
       }
     });
-  }
-
-  /** Rocks knock parts off; close shaves build a combo; fuel cans help. */
-  private checkRocks(): void {
-    if (this.sim.phase !== 'FLYING' || this.sim.state.y < ROCK_BELT.bottom - 50) return;
-    const parts = this.world.partPointsAsDrawn(this.sim);
-    const r = checkBelt(this.rocks, parts, this.sim.state.time, this.world.partRadiusMetres(), 1);
-    const at = this.world.rocketScreen(this.sim);
-    for (const hit of r.hits) {
-      this.combo.reset();
-      this.fx.burst(at.x, at.y, WORLD_COLORS.rock);
-      this.sim.hitPart(hit.partId);
-    }
-    for (const _ of r.nearMisses) {
-      const n = this.combo.nearMiss(this.sim.state.time);
-      this.celebrate({ id: 'NEAR_MISS', label: n > 1 ? `NEAR MISS ×${n}` : 'NEAR MISS', points: 100 * n });
-    }
-    for (const _ of r.pickups) {
-      const added = this.sim.refuel(this.vehicle.fuelCapacity * CONFIG.rockBelt.fuelCanRefill);
-      this.celebrate({ id: 'PICKUP_FUEL', label: added > 0 ? `+${Math.round(added)} kg FUEL` : 'FUEL (full)', points: 50 });
-    }
   }
 
   private checkWobble(t: FlightTelemetry): void {
@@ -1022,7 +943,8 @@ export class FlightScene extends Phaser.Scene {
     if (r.problem?.id === 'FLAMEOUT') return 'ENGINE OUT: HOLD E to relight!';
     if (r.problem) return PROBLEM_INFO[r.problem.id].howTo;
     if (mode === 'ASCENT') {
-      if (t.earthAltitude > ROCK_BELT.bottom - 300 && t.earthAltitude < ROCK_BELT.top) return 'ROCK BELT: red arrows show rocks coming  ·  A / D dodge  ·  near misses build a combo';
+      if (t.earthAltitude > ROCK_BELT.bottom - 300 && t.earthAltitude < ROCK_BELT.top)
+        return this.sim.rcsReady ? 'ROCK BELT: W speed through the gaps  ·  A / D nudge with RCS  ·  near misses build a combo' : 'ROCK BELT: W speed through the gaps  ·  near misses build a combo';
       if (this.coastApex !== null && this.coastApex >= SOI_ALTITUDE && t.thrust > 0) return 'You’ll coast to the Moon now: X cuts the engines to save fuel';
       if (this.coastApex !== null && this.coastApex >= SOI_ALTITUDE) return 'Coasting to the Moon: save fuel for the orbit burn';
       if (t.fuelFraction <= 0) return 'Out of fuel: coasting';

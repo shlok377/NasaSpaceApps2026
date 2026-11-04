@@ -1,7 +1,8 @@
 import { PayloadKind } from '../core/types';
+import { TimeOfDay } from '../game/timeOfDay';
 import { FlightSim, FlightTelemetry } from '../physics/FlightSim';
 
-export type ChallengeId = 'MAX_Q' | 'WIND_SHEAR' | 'STAGING_FAULT' | 'RADIATION_BELT' | 'TRANS_LUNAR_BURN';
+export type ChallengeId = 'MAX_Q' | 'WIND_SHEAR' | 'STAGING_FAULT' | 'RADIATION_BELT' | 'TRANS_LUNAR_BURN' | 'ROCK_BELT';
 
 /** What a challenge sees each frame. */
 export interface ChallengeContext {
@@ -12,6 +13,8 @@ export interface ChallengeContext {
   /** Real seconds since the last update (for timers the player races with the keyboard). */
   realDt: number;
   payload: PayloadKind;
+  /** Launch time picked on the pad (sets the rock belt's difficulty). */
+  timeOfDay: TimeOfDay;
 }
 
 /** A stretch of the climb, drawn on the HEIGHT panel. */
@@ -44,7 +47,11 @@ export interface ChallengeStatus {
 
 export type ChallengeEvent =
   | { kind: 'START'; id: ChallengeId; message: string; height: number }
-  | { kind: 'END'; id: ChallengeId; message: string; good: boolean; award?: { label: string; points: number } };
+  | { kind: 'END'; id: ChallengeId; message: string; good: boolean; award?: { label: string; points: number } }
+  /** A rock struck the rocket at (x, y): a boulder knocked a part off, a small one chipped the health. */
+  | { kind: 'ROCK_HIT'; id: ChallengeId; x: number; y: number; boulder: boolean }
+  /** A rock passed close without touching. */
+  | { kind: 'NEAR_MISS'; id: ChallengeId };
 
 /** One self-contained flight challenge. Modules only touch the sim through its public hooks. */
 export interface ChallengeModule {
@@ -53,6 +60,8 @@ export interface ChallengeModule {
   readonly band: ChallengeBand | null;
   /** Readouts scramble while this is true. */
   readonly glitch: boolean;
+  /** Game-speed multiplier this challenge asks for (1 = normal). */
+  readonly timeScale?: number;
   update(ctx: ChallengeContext): void;
   status(): ChallengeStatus | null;
   /** A separation key was pressed; return true to swallow it. */

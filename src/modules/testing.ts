@@ -21,5 +21,5 @@ export function flyingSim(): FlightSim {
 
 /** A frame's context, with the telemetry overridden where the test cares. */
 export function frame(sim: FlightSim, t: Partial<FlightTelemetry> = {}, dt = 0.1, payload: ChallengeContext['payload'] = 'SATELLITE'): ChallengeContext {
-  return { sim, t: { ...sim.getTelemetry(), ...t }, dt, realDt: dt, payload };
+  return { sim, t: { ...sim.getTelemetry(), ...t }, dt, realDt: dt, payload, timeOfDay: 'DAWN' };
 }

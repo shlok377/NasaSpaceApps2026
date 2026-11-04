@@ -5,4 +5,6 @@
  */
 export { ChallengeRunner, createChallenges } from './ChallengeRunner';
 export { ChallengeCard } from './hud/ChallengeCard';
+export { Combo, rockX } from './rockBelt/RockField';
+export type { Rock } from './rockBelt/RockField';
 export type { ChallengeBand, ChallengeContext, ChallengeEvent, ChallengeId, ChallengeModule, ChallengeStatus } from './types';
