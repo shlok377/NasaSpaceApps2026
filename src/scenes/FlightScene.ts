@@ -129,6 +129,8 @@ export class FlightScene extends Phaser.Scene {
   private problemCard!: ProblemCard;
   private ladder!: HeightLadder;
   private instruments!: InstrumentChip;
+  /** 0 = ROCKET / HEIGHT panels parked off-screen (on the pad), 1 = in place. */
+  private sideSlide = 0;
   private coins!: MoneyChip;
   private launchButton!: LaunchButton;
   private missionText!: Phaser.GameObjects.Text;
@@ -194,6 +196,7 @@ export class FlightScene extends Phaser.Scene {
   }
 
   init(data: FlightSceneData): void {
+    this.sideSlide = 0;
     this.tree = data.tree;
     this.throttle = 1;
     this.countdown = null;
@@ -819,12 +822,18 @@ export class FlightScene extends Phaser.Scene {
     this.goalChip.update(r.chain, r.phase, stepsDone(r.chain, r.phase, r.complete), this.objective(t));
 
     const ascent = mode === 'ASCENT';
-    this.ladder.setVisible(ascent && !this.result);
+    // The ROCKET column and HEIGHT tube fly in from their edges once LAUNCH is pressed.
+    this.sideSlide += ((onPad ? 0 : 1) - this.sideSlide) * Math.min(1, dt * 5);
+    const slideOut = (1 - this.sideSlide) * 320;
+    this.instruments.setOffsetX(-slideOut);
+    this.ladder.setOffsetX(slideOut);
+    const slidIn = this.sideSlide > 0.01;
+    this.ladder.setVisible(ascent && !this.result && slidIn);
     this.ladder.update(Math.max(0, t.earthAltitude), best);
     this.orbitGauge.setVisible(mode === 'ORBIT' && !this.result);
     this.orbitGauge.update(t.moonOrbit, r.phase === 'ORBIT' ? r.stableFor / CONFIG.phases.orbit.holdSeconds : null, now);
     this.problemCard.update(flying ? (r.problem as ActiveProblem | null) : null, { periapsis: t.moonOrbit?.periapsisAltitude ?? null }, now);
-    this.instruments.setVisible(!this.result);
+    this.instruments.setVisible(!this.result && slidIn);
     this.instruments.update(
       {
         // One reading per tank still on the rocket, left to right.

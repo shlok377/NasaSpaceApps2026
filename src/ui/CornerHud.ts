@@ -250,6 +250,7 @@ export class InstrumentChip {
   private readonly badges: Phaser.GameObjects.Text[] = [];
   private readonly lowTag: Phaser.GameObjects.Text;
   private lastTime = 0;
+  private baseX = 0;
 
   constructor(scene: Phaser.Scene, left = 20, bottom = 700) {
     const { W, H } = InstrumentChip;
@@ -385,12 +386,18 @@ export class InstrumentChip {
       .setDepth(20)
       .setScale(COLUMN_SCALE)
       .setPosition(left, bottom - H * COLUMN_SCALE);
+    this.baseX = left;
     // Keep text crisp after the scale-up.
     for (const o of this.container.list) if (o instanceof Phaser.GameObjects.Text) o.setResolution(2);
   }
 
   public setVisible(v: boolean): void {
     this.container.setVisible(v);
+  }
+
+  /** Slide sideways from its resting place (used to fly in from the left edge). */
+  public setOffsetX(dx: number): void {
+    this.container.x = this.baseX + dx;
   }
 
   public update(r: Instruments, time: number): void {
@@ -727,6 +734,11 @@ export class HeightLadder {
 
   public setVisible(v: boolean): void {
     this.container.setVisible(v);
+  }
+
+  /** Slide sideways from its resting place (used to fly in from the right edge). */
+  public setOffsetX(dx: number): void {
+    this.container.x = dx;
   }
 
   public update(height: number, best: number): void {
