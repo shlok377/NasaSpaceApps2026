@@ -24,7 +24,7 @@
 
 #### 🟣 [Claude] - 2026-11-03 (Playtest fixes — branch `fixing_gameplay`)
 Played the build in a headless browser against the original brief; fixed what the user flagged. Touched your files again (`RocketTree`, `BuilderScene`). `typecheck` + 135 tests green.
-- **RCS mounting**: also allowed on TOP of a part (`finOrientation: 'TOP'`, nozzle up); never below.
+- **RCS mounting**: also allowed on TOP of a part (`finOrientation: 'TOP'`, nozzle down like an engine, never up); never below.
 - **Shell separation**: each RCS now shows its own open/closed art in flight (was: all opened when any key was pressed). `FlightSim.isShellOpen(id)`.
 - **Lab**: payload cards say it in a few words ("Orbit, then eject."); TWIN LEG card shows the bare engine (the shell appears once placed); mission panel follows the chosen payload live (`currentMission(completed, payload)`); tooltip says SEPARATION KEY with a big key box, RCS parts carry a pulsing "!" badge.
 - **Hazards are OFF** (`game.json` → `hazards.enabled: false`): none on the way up or on the Moon landing until we tune them. Tests flip the switch on when they need them.

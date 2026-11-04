@@ -46,7 +46,7 @@ const VARIANTS: Record<VariantPart, Array<{ kind: PartKind; label: string; color
   ]
 };
 /** RCS thrusters face their nozzle outward: left, right or up (the art points down at 0). */
-const rcsAngle = (type: PartType, side?: 'LEFT' | 'RIGHT' | 'TOP') => (type !== 'RCS' ? 0 : side === 'TOP' ? 180 : side === 'RIGHT' ? -90 : 90);
+const rcsAngle = (type: PartType, side?: 'LEFT' | 'RIGHT' | 'TOP') => (type !== 'RCS' || side === 'TOP' ? 0 : side === 'RIGHT' ? -90 : 90);
 const isVariantPart = (type: PartType): type is VariantPart => type in VARIANTS;
 /** Variant swatches on a slot, in slot-local coordinates (centre of the slot is 0,0). */
 const CHIP = 12;

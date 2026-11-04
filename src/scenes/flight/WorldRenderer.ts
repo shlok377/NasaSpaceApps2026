@@ -1393,7 +1393,7 @@ export class WorldRenderer {
     img.setTexture(texKey);
     img.setPosition(sx, sy);
     // RCS nozzles face outward from the side they hang on.
-    img.setRotation(rot + (p.type === 'RCS' ? (p.finOrientation === 'TOP' ? Math.PI : p.finOrientation === 'RIGHT' ? -Math.PI / 2 : Math.PI / 2) : 0));
+    img.setRotation(rot + (p.type === 'RCS' && p.finOrientation !== 'TOP' ? (p.finOrientation === 'RIGHT' ? -Math.PI / 2 : Math.PI / 2) : 0));
     img.setDisplaySize(cellPx, cellPx);
     img.setAlpha(alpha);
     img.setVisible(true);
