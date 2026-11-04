@@ -63,7 +63,7 @@ export class Effects {
     }
   }
 
-  /** Rocket hits the sea: a tall spray column, droplets raining back down, foam and ripples on the water. */
+  /** Rocket hits the sea: a tall spray column, droplets raining back down, and foam on the water. */
   public splash(x: number, y: number): void {
     const water = [0xffffff, 0xe2f3fb, 0xb4dcef, 0x8cc6e6, 0x5197cb];
     for (let i = 0; i < 34; i++) {
@@ -80,7 +80,6 @@ export class Effects {
       // Foam boiling up where it went in.
       this.sparks.push({ x: x + (i - 3) * 16, y: y - 6, vx: (i - 3) * 6, vy: -4, age: 0, life: 1.4 + Math.random() * 0.8, color: 0xffffff, fireball: true, size: 10 + Math.random() * 8 });
     }
-    for (let i = 0; i < 4; i++) this.rings.push({ x, y, age: -i * 0.35, life: 1.6, maxRadius: 220 + i * 50, color: 0xe2f3fb, squash: 0.18 });
   }
 
   /** A little burst of coloured confetti (pickups). */
