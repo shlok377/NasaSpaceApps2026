@@ -11,7 +11,7 @@ async function main() {
   await page.setViewport({ width: 1280, height: 720 });
 
   console.log('Navigating to http://localhost:3000...');
-  await page.goto('http://localhost:3000');
+  await page.goto("http://localhost:3000/?skipMenu");
   await page.waitForFunction(() => !!window.__BUILDER_SCENE__);
 
   const artifactDir = '/home/shlok377/.gemini/antigravity/brain/88c294bd-cde1-4b98-a017-e10cc6b0d395';

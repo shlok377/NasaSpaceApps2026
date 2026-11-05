@@ -17,7 +17,7 @@ async function main() {
     }
   });
 
-  await page.goto('http://localhost:3000');
+  await page.goto("http://localhost:3000/?skipMenu");
   await page.waitForFunction(() => !!window.__BUILDER_SCENE__);
 
   // Transition to FlightScene

@@ -16,7 +16,7 @@ async function main() {
   const page = await browser.newPage();
   await page.setViewport({ width: 1440, height: 900 });
 
-  await page.goto('http://localhost:3456');
+  await page.goto("http://localhost:3456/?skipMenu");
   await page.waitForFunction(() => !!window.__BUILDER_SCENE__);
 
   const result = await page.evaluate(() => {
