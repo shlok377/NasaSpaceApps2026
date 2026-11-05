@@ -22,7 +22,7 @@ class FakeSprite {
   setTint(c: number) { this.tint = c; return this; }
   destroy() { this.destroyed = true; }
   removeAllListeners() { this.done = []; return this; }
-  play(key: string) { this.played.push(key); return this; }
+  play(key: string | { key: string; delay: number }) { this.played.push(typeof key === 'string' ? key : key.key); return this; }
   once(_event: string, fn: () => void) { this.done.push(fn); return this; }
   /** The clip that is playing ends. */
   finishClip() { const fns = this.done; this.done = []; fns.forEach((f) => f()); }

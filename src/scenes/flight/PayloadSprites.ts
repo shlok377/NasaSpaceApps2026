@@ -32,6 +32,8 @@ export interface CrewSpot extends SpriteSpot {
 /** Where the ground sits inside each frame, so a sprite can be pinned to a point on the surface. */
 const ROVER_FALL_CENTRE_Y = 43 / 64;
 const ROVER_GROUND_Y = 58 / 64;
+/** The astronaut waits this long after the rocket lands before stepping out. */
+const CREW_START_DELAY_MS = 700;
 const CREW_HATCH_X = 6 / 48;
 const CREW_GROUND_Y = 45 / 48;
 
@@ -119,7 +121,7 @@ export class PayloadSprites {
     if (!this.crew) {
       const sprite = this.make('crew');
       this.crew = { sprite, onSite: at.onSite };
-      this.playClips(sprite, 'crew', at.onSite ? ['exit', 'plant', 'wave_flag'] : ['exit', 'wave']);
+      this.playClips(sprite, 'crew', at.onSite ? ['exit', 'plant', 'wave_flag'] : ['exit', 'wave'], CREW_START_DELAY_MS);
     }
     this.place(this.crew.sprite, at, CREW_HATCH_X, CREW_GROUND_Y);
     this.crew.sprite.setDepth?.(DEPTH + 1);
@@ -169,10 +171,10 @@ export class PayloadSprites {
   }
 
   /** Play the clips one after the other; a looping clip (always last) never ends, so it keeps going. */
-  private playClips(sprite: Sprite, sheet: SheetName, clips: readonly string[]): void {
+  private playClips(sprite: Sprite, sheet: SheetName, clips: readonly string[], delay = 0): void {
     const [first, ...rest] = clips;
     sprite.removeAllListeners?.('animationcomplete');
-    sprite.play?.(animKey(sheet, first));
+    sprite.play?.(delay > 0 ? { key: animKey(sheet, first), delay } : animKey(sheet, first));
     if (rest.length > 0) sprite.once?.('animationcomplete', () => this.playClips(sprite, sheet, rest));
   }
 }
