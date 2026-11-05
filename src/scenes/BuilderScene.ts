@@ -104,7 +104,7 @@ export class BuilderScene extends Phaser.Scene {
   public particleManager!: ParticleManager;
   private hoveredBay: PartType | null = null;
   /** Current look for each variant part; COCKPIT is what sits in the root slot. */
-  private partKinds: Record<VariantPart, PartKind> = { COCKPIT: 'CREW', FUEL_TANK: 'KEROSENE', ENGINE: 'BOOSTER' };
+  private partKinds: Record<VariantPart, PartKind> = { COCKPIT: 'SATELLITE', FUEL_TANK: 'KEROSENE', ENGINE: 'BOOSTER' };
   private unlockedFuels: string[] = [];
   private flyout!: Phaser.GameObjects.Container;
   private flyoutFor: VariantPart | null = null;
@@ -156,6 +156,7 @@ export class BuilderScene extends Phaser.Scene {
 
     // 2. Core RocketTree model (immovable Cockpit at column 7, row 8) & ParticleManager
     this.rocketTree = new RocketTree(7, 8);
+    this.rocketTree.setPayload(this.partKinds.COCKPIT as PayloadKind); // the satellite mission is the default
     this.particleManager = new ParticleManager(this);
 
     // 3. Rendering layers in order

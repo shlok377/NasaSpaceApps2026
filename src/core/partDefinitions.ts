@@ -16,7 +16,7 @@ export const fuelUnlockCost = (kind: FuelKind): number => CONFIG.fuelTypes[kind]
 
 /** Payload choices for the root slot, in picker order. `extraCost` is added to the cockpit's base price. */
 export const PAYLOADS: Record<PayloadKind, { label: string; color: number; extraCost: number; description: string; mass: number }> = {
-  CREW: { label: 'CREW', color: 0xe8e4f0, extraCost: 0, mass: CONFIG.payloads.CREW.mass, description: 'Land softly.' },
+  CREW: { label: 'CREW', color: 0xe8e4f0, extraCost: 21, mass: CONFIG.payloads.CREW.mass, description: 'Land softly.' },
   SATELLITE: { label: 'SATELLITE', color: 0x4fa3ff, extraCost: 10, mass: CONFIG.payloads.SATELLITE.mass, description: 'Orbit, then eject.' },
   ROVER: { label: 'ROVER', color: 0xf0c040, extraCost: 15, mass: CONFIG.payloads.ROVER.mass, description: 'Orbit, then drop.' }
 };

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FlightStats } from '../physics/FlightSim';
 import { VehicleReport } from '../physics/vehicle';
+import { PAYLOADS } from '../core/partDefinitions';
 import { currentMission, MISSIONS, newlyCompleted, rocketCost } from './missions';
 import { flightEarnings, objectiveBonus, payoutBreakdown, GRANT_FLOOR, loadProgress, saveProgress, STARTING_MONEY, withGrant } from './progress';
 
@@ -84,7 +85,7 @@ describe('missions', () => {
       { type: 'FUEL_TANK', fuelKind: 'HYDROGEN' },
       { type: 'ENGINE' }
     ]);
-    expect(standard).toBe(base);
+    expect(standard).toBe(base + PAYLOADS.CREW.extraCost); // the crew cockpit costs extra
     expect(fancy).toBe(base + 15 + 10);
   });
 });
