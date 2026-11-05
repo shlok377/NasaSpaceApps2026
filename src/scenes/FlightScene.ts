@@ -164,6 +164,7 @@ export class FlightScene extends Phaser.Scene {
   private launched = false;
   private exploded = false;
   private engineSound: EngineLoop | null = null;
+  private rcsSound: EngineLoop | null = null;
   /** Loops while any warning lasts. */
   private buzzer: LoopSfx | null = null;
   /** When each fuel type went low (scene time, ms): its buzzer gives up after FUEL_BUZZ_MS. */
@@ -266,11 +267,13 @@ export class FlightScene extends Phaser.Scene {
     this.fx = new Effects(this);
     this.createHud();
     this.setupInput();
-    this.engineSound = new EngineLoop(this);
+    this.engineSound = new EngineLoop(this, 'ROCKET_FLYING');
+    this.rcsSound = new EngineLoop(this, 'ROCKET_ENGINE');
     this.buzzer = new LoopSfx(this, 'BUZZER');
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.input.keyboard?.removeAllKeys(true);
       this.engineSound?.stop();
+      this.rcsSound?.stop();
       this.buzzer?.stop();
     });
   }
@@ -438,6 +441,7 @@ export class FlightScene extends Phaser.Scene {
     saveProgress(this.progress);
     this.countdown = COUNTDOWN_SECONDS;
     this.countdownText.setVisible(true);
+    playSfx(this, 'ROCKET_LAUNCH');
   }
 
   private steerKey(): number {
@@ -512,7 +516,10 @@ export class FlightScene extends Phaser.Scene {
     this.fx.update(dt, t, false);
     this.fx.draw(t, this.world.rocketScreen(this.sim), !this.exploded, false);
     this.updateHud(t, dt);
-    this.engineSound?.update(!this.result && !this.exploded && t.thrust > 0 ? 0.35 + 0.65 * t.throttle : 0, dt);
+    const alive = !this.result && !this.exploded;
+    this.engineSound?.update(alive && t.thrust > 0 ? 0.35 + 0.65 * t.throttle : 0, dt);
+    // The RCS thrusters hiss only while A / D steer with a shell open and cold gas left.
+    this.rcsSound?.update(alive && this.launched && this.sim.rcsReady && this.steerKey() !== 0 ? 1 : 0, dt);
 
     if (t.thrust > 0 && t.earthAltitude < 60 && !this.cameras.main.shakeEffect.isRunning) {
       this.cameras.main.shake(120, 0.003 * t.throttle);

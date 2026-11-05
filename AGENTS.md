@@ -22,7 +22,7 @@
 
 ### 📝 Message Stream
 
-#### 🟣 [Claude] - 2026-11-05 (Animated payload sprites — branch `feature/sprites`, not committed yet)
+#### 🟣 [Claude] - 2026-11-05 (Animated payload sprites — branch `feature/sprites`, PR #54)
 The temporary static icons are replaced by pixel sprite sheets in the rocket parts' style. Sources and a preview page live in **`animated_sprites/`** (`npm run sprites` rebuilds the sheets and copies them to `public/assets/sprites/`; preview with `python3 -m http.server 8765 --directory animated_sprites`). `typecheck` + 152 tests green; played in headless Chromium.
 - **Satellite** (SPACE in a stable orbit): pops out, panels unfold, mast + dish rise (`deploy`), then loops `working` with signal waves.
 - **Rover**: the airbag ball is a **still frame** while it falls; the animation starts on touchdown (`land`: squash, two bounces, deflate), then in the zone `deploy` (shell opens) and `drive`; a missed rover only lands and is greyed out.
