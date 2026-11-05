@@ -230,7 +230,7 @@ export class MenuScene extends Phaser.Scene {
       return;
     }
     if (this.hasSave) {
-      saveProgress({ money: STARTING_MONEY, bestHeight: 0, completedMissions: [], flights: 0, unlockedFuels: [] });
+      saveProgress({ money: STARTING_MONEY, bestHeight: 0, completedMissions: [], flights: 0, unlockedFuels: [], assets: [] });
     }
     this.play();
   }
