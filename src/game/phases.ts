@@ -1,6 +1,7 @@
 import { CONFIG, deg } from '../config';
 import { gravityAt, insideMoonSoi, moonAltitude, moonAngleOf, surfaceDistance } from '../physics/bodies';
 import { MOON, MOON_CENTER } from '../physics/constants';
+import { orbitFromState } from '../physics/orbit';
 import { FlightSim, FlightSnapshot, FlightTelemetry } from '../physics/FlightSim';
 import { momentOfInertia } from '../physics/vehicle';
 import { PayloadKind } from '../core/types';
@@ -64,6 +65,7 @@ export const PROBLEM_INFO: Record<ProblemId, { title: string; howTo: string }> =
 
 const ORBIT_CFG = CONFIG.phases.orbit;
 const ROVER_CFG = CONFIG.phases.rover;
+const SATELLITE_CFG = CONFIG.phases.satellite;
 const LANDING_CFG = CONFIG.phases.landing;
 
 export interface SurfaceZone {
@@ -318,6 +320,24 @@ export function predictRoverLanding(sim: FlightSim): { angle: number; x: number;
   return sim.predictMoonImpact(k.x, k.y);
 }
 
+/** Would the orbit survive this push? (Above the surface, and still inside the Moon's pull.) */
+function orbitHolds(sim: FlightSim, vx: number, vy: number): boolean {
+  const o = orbitFromState({ x: sim.state.x - MOON_CENTER.x, y: sim.state.y - MOON_CENTER.y }, { x: vx, y: vy }, MOON.mu, MOON.radius);
+  return !o.escaping && o.periapsisAltitude >= 30 && o.apoapsisRadius <= MOON.sphereOfInfluence - 100;
+}
+
+/** The biggest push (up to `kick`, along the direction of travel) after which the orbit still holds. */
+function safeKick(sim: FlightSim, kick: number): number {
+  const speed = Math.hypot(sim.state.vx, sim.state.vy) || 1;
+  const dx = sim.state.vx / speed;
+  const dy = sim.state.vy / speed;
+  for (const scale of [1, 0.6, 0.3]) {
+    const k = kick * scale;
+    if (orbitHolds(sim, sim.state.vx + dx * k, sim.state.vy + dy * k)) return k;
+  }
+  return 0;
+}
+
 export function releaseRover(sim: FlightSim): RoverCapsule {
   const k = dropKick(sim);
   return { x: sim.state.x, y: sim.state.y, vx: sim.state.vx + k.x, vy: sim.state.vy + k.y, landed: false, angle: null, inZone: false };
@@ -472,7 +492,15 @@ export class PhaseRunner {
   public deploySatellite(sim: FlightSim): boolean {
     if (this.phase !== 'DEPLOY' || !this.deployReady || sim.phase !== 'FLYING' || this.over) return false;
     if (!isStableOrbit(sim.getTelemetry())) return false;
-    this.satellite = { x: sim.state.x, y: sim.state.y, vx: sim.state.vx, vy: sim.state.vy, landed: false, angle: null, inZone: false };
+    // A spring pushes the satellite on ahead while the spent stage backs off: two different orbits, so they drift apart.
+    const speed = Math.hypot(sim.state.vx, sim.state.vy) || 1;
+    const dx = sim.state.vx / speed;
+    const dy = sim.state.vy / speed;
+    const ahead = safeKick(sim, SATELLITE_CFG.ejectKick);
+    const back = safeKick(sim, -SATELLITE_CFG.stageKick);
+    this.satellite = { x: sim.state.x, y: sim.state.y, vx: sim.state.vx + dx * ahead, vy: sim.state.vy + dy * ahead, landed: false, angle: null, inZone: false };
+    sim.state.vx += dx * back;
+    sim.state.vy += dy * back;
     this.events.push({ kind: 'SATELLITE_DEPLOYED' });
     this.finishPhase(sim);
     return true;
@@ -487,6 +515,8 @@ export class PhaseRunner {
 
   /** How fast the scene may run time right now (quiet stretches in orbit go by faster). */
   public timeScale(sim: FlightSim): number {
+    // The satellite has just left: speed up so it and the stage visibly part ways.
+    if (this.complete && this.satellite && !this.satellite.landed && sim.phase === 'FLYING') return SATELLITE_CFG.fastForward;
     if (this.over || sim.phase !== 'FLYING' || this.phase !== 'ROVER' || this.problem) return 1;
     if (this.rover && !this.rover.landed) return ROVER_CFG.orbitFastForward;
     if (this.dropReady && !this.rover) {

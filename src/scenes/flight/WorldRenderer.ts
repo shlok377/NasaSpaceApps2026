@@ -44,10 +44,12 @@ export const CELL_PX = CONFIG.camera.ascentScale;
 /** In the orbit map the rocket is drawn this many pixels per part, so its heading stays readable. */
 const MAP_ROCKET_PX = 12;
 /** Drawn size (px) of one animated sprite frame in the orbit map. */
-const SATELLITE_PX = 48;
+const SATELLITE_PX = 96;
+/** On the orbit map a freshly ejected satellite is drawn pulled further from the stage (up to this many px extra), like a map symbol, so the two parting ways are easy to see. */
+const SATELLITE_PARTING_PX = 150;
 const ROVER_PX = 64;
 /** The astronaut's frame, in rocket cells, so it stands next to the rocket at a believable size (and never gets tiny). */
-const CREW_CELLS = 2.4;
+const CREW_CELLS = 4.5;
 
 export const WORLD_COLORS = {
   skyLow: 0x6fb1e6,
@@ -1098,7 +1100,16 @@ export class WorldRenderer {
 
     // The ejected satellite (deploys, then works) and the rover's airbag on its way down.
     const still = overlay.rover && !overlay.rover.landed ? { b: overlay.rover, key: GAME_ASSETS.PART_ROVER.key } : overlay.satellite && !overlay.satellite.landed ? { b: overlay.satellite, key: GAME_ASSETS.PART_SATELLITE.key } : null;
-    const sat = overlay.satellite && !overlay.satellite.landed ? this.toScreen(overlay.satellite.x, overlay.satellite.y) : null;
+    let sat = overlay.satellite && !overlay.satellite.landed ? this.toScreen(overlay.satellite.x, overlay.satellite.y) : null;
+    if (sat) {
+      // Small gaps are stretched (11x up to +SATELLITE_PARTING_PX); far apart, the true position shows.
+      const r = this.rocketScreen(sim);
+      const gap = Math.hypot(sat.x - r.x, sat.y - r.y);
+      if (gap > 0.01) {
+        const extra = Math.min(gap * 10, SATELLITE_PARTING_PX) / gap;
+        sat = { x: sat.x + (sat.x - r.x) * extra, y: sat.y + (sat.y - r.y) * extra };
+      }
+    }
     const ball = overlay.rover && !overlay.rover.landed ? this.toScreen(overlay.rover.x, overlay.rover.y) : null;
     const animated = this.payloads.updateSatellite(sat && { ...sat, size: SATELLITE_PX });
     const falling = this.payloads.updateRoverFall(ball && { ...ball, size: ROVER_PX });
@@ -1161,7 +1172,7 @@ export class WorldRenderer {
     const rocket = this.rocketScreen(sim);
     const surface = moonSurfacePoint(moonAngleOf(sim.state.x, sim.state.y), 0);
     const ground = this.toScreen(surface.x, surface.y);
-    this.payloads.updateCrew({ x: rocket.x + half * cell, y: ground.y, size: Math.max(64, cell * CREW_CELLS), onSite: overlay.crew.onSite });
+    this.payloads.updateCrew({ x: rocket.x + half * cell, y: ground.y, size: Math.max(110, cell * CREW_CELLS), onSite: overlay.crew.onSite });
   }
 
   /** Zones, sites, rovers and markers on the Moon's surface (map or close-up). */

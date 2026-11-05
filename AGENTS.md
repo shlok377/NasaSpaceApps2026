@@ -28,7 +28,8 @@ The temporary static icons are replaced by pixel sprite sheets in the rocket par
 - **Rover**: the airbag ball is a **still frame** while it falls; the animation starts on touchdown (`land`: squash, two bounces, deflate), then in the zone `deploy` (shell opens) and `drive`; a missed rover only lands and is greyed out.
 - **Crew** (after the rocket lands): astronaut beside the rocket's base: `exit`, then `plant` + `wave_flag` on the landing site, or `wave` (no flag) when down safely off the site. The flag is the cyan pennant from `flag_blue.png`.
 - Code: `core/spriteSheets.ts` (load + anim keys; clip timings come from each sheet's JSON), `scenes/flight/PayloadSprites.ts` (+ test) draws them; `WorldRenderer` feeds it positions (`MissionOverlay.landedRoverOk`, `.crew`), `FlightScene` sets them on `ROVER_LANDED` / `COMPLETE`. If a sheet is missing, the old still sprite shows.
-- The result panel now waits longer after a successful flight (3.4 s satellite, 5.2 s rover and crew) so the animation can play.
+- The result panel now waits longer after a successful flight (6.5 s satellite, 5.2 s rover and crew) so the animation can play.
+- **Satellite ejection**: the satellite is pushed ahead and the spent stage backs off (`phases.satellite` in `game.json`, `deploySatellite`; both pushes are checked so each orbit holds), time runs ×3 so they drift apart, and on the orbit map the gap is stretched (`SATELLITE_PARTING_PX`) so it is easy to see. Satellite sprite is 96 px, crew `CREW_CELLS` 4.5.
 - **Open**: the missed-rover and crash cases have no special clip; no sound yet; crew size is `CREW_CELLS` in `WorldRenderer` if it looks too small or big next to big rockets.
 
 #### 🟣 [Claude] - 2026-11-05 (Lab animation: block placement — on `main`)

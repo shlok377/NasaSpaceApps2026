@@ -1007,7 +1007,7 @@ export class FlightScene extends Phaser.Scene {
   /** How long the result panel waits: long enough to watch the payload's own animation (the satellite opening, the rover driving off, the astronaut planting the flag). */
   private resultDelayMs(): number {
     if (!this.runner.complete || this.exploded) return 2200;
-    return this.payload === 'SATELLITE' ? 3400 : 5200;
+    return this.payload === 'SATELLITE' ? 6500 : 5200;
   }
 
   private finishMission(): void {
