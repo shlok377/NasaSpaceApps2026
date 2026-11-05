@@ -1,6 +1,7 @@
 import type Phaser from 'phaser';
 import { FuelKind, PartType, PayloadKind } from './types';
 import { preloadSounds } from './sound';
+import { applySpriteSheetFilters, preloadSpriteSheets } from './spriteSheets';
 
 export const GAME_ASSETS = {
   // Rocket Parts
@@ -50,6 +51,7 @@ export function applyPixelArtTextureFilters(scene: Phaser.Scene): void {
       tex.setFilter(1); // NEAREST
     }
   }
+  applySpriteSheetFilters(scene);
 }
 
 /**
@@ -57,7 +59,7 @@ export function applyPixelArtTextureFilters(scene: Phaser.Scene): void {
  */
 export function preloadGameAssets(scene: Phaser.Scene): void {
   preloadSounds(scene);
-  let hasPendingLoads = false;
+  let hasPendingLoads = preloadSpriteSheets(scene);
   for (const asset of Object.values(GAME_ASSETS)) {
     if (!scene.textures.exists(asset.key)) {
       scene.load.image(asset.key, asset.path);

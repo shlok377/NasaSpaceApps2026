@@ -35,6 +35,7 @@ import { drawPixelPanel, pixelBody, pixelTitle, PX } from '../ui/pixel';
 import { OrbitGauge, ProblemCard } from '../ui/PhaseHud';
 import { formatDistance, TEXT_STYLE, TITLE_STYLE, UI } from '../ui/theme';
 import { preloadGameAssets } from '../core/assets';
+import { createSpriteAnimations } from '../core/spriteSheets';
 import { EngineLoop, LoopSfx, playSfx } from '../core/sound';
 import { ChallengeCard, ChallengeContext, ChallengeEvent, ChallengeRunner, Combo, createChallenges } from '../modules';
 import { Effects } from './flight/Effects';
@@ -77,6 +78,7 @@ const AWARD_COLORS: Partial<Record<Award['id'], string>> = {
 /** A checkpoint plus the scene-side bits needed to rewind. */
 interface SceneCheckpoint extends Checkpoint {
   landedRovers: number[];
+  landedRoverOk: boolean[];
   sparesLeft: number;
   solved: number;
   failedProblems: number;
@@ -186,6 +188,10 @@ export class FlightScene extends Phaser.Scene {
   private progressBeforeFinish: PlayerProgress | null = null;
   private checkpoint: SceneCheckpoint | null = null;
   private landedRovers: number[] = [];
+  /** For each landed rover: did it land in the zone (it unpacks and drives) or miss (it stays dead)? */
+  private landedRoverOk: boolean[] = [];
+  /** Set when the crew lands: the astronaut gets out beside the rocket. */
+  private crewLanding: { onSite: boolean } | null = null;
   private phasePaid = 0;
   private mission: Mission | null = null;
   private stunts = new StuntTracker();
@@ -226,6 +232,8 @@ export class FlightScene extends Phaser.Scene {
     this.separatePromptShown = false;
     this.checkpoint = null;
     this.landedRovers = [];
+    this.landedRoverOk = [];
+    this.crewLanding = null;
     this.phasePaid = 0;
     this.mission = currentMission(this.progress.completedMissions, this.payload);
     this.stunts = new StuntTracker();
@@ -252,6 +260,7 @@ export class FlightScene extends Phaser.Scene {
     this.exposeForDebug();
     if (this.game.canvas) this.game.canvas.style.cursor = 'default';
 
+    createSpriteAnimations(this);
     this.world = new WorldRenderer(this);
     this.world.updateCamera(this.sim, this.sim.getTelemetry(), 0, 'ASCENT');
     this.fx = new Effects(this);
@@ -489,7 +498,7 @@ export class FlightScene extends Phaser.Scene {
           }
         }
       }
-      if (this.finishedAt !== null && this.time.now - this.finishedAt > 2200) this.finishMission();
+      if (this.finishedAt !== null && this.time.now - this.finishedAt > this.resultDelayMs()) this.finishMission();
     }
 
     if (this.sim.version !== this.lastVersion) {
@@ -536,6 +545,8 @@ export class FlightScene extends Phaser.Scene {
       rover: r.rover,
       satellite: r.satellite,
       landedRovers: this.landedRovers,
+      landedRoverOk: this.landedRoverOk,
+      crew: this.crewLanding,
       dropMarker: this.dropMarker,
       debrisRing: problem?.id === 'DEBRIS' ? problem.data.ringRadius : null,
       impactMarker: this.impactMarker
@@ -678,7 +689,10 @@ export class FlightScene extends Phaser.Scene {
           this.showBanner('Rover away!', UI.goldText);
           break;
         case 'ROVER_LANDED':
-          if (e.angle !== null) this.landedRovers.push(e.angle);
+          if (e.angle !== null) {
+            this.landedRovers.push(e.angle);
+            this.landedRoverOk.push(e.inZone);
+          }
           this.showBanner(
             e.inZone ? 'The rover bounced down in the zone!' : e.sparesLeft > 0 ? 'Missed the zone! One spare rover left: wait for the next pass' : 'The rover missed the zone!',
             e.inZone ? UI.greenText : '#fca5a5'
@@ -693,6 +707,7 @@ export class FlightScene extends Phaser.Scene {
           // The rover already got its own banner when it landed; the satellite and the crew get theirs here.
           if (this.payload === 'SATELLITE') this.showBanner('Satellite deployed: mission complete!', UI.greenText);
           else if (this.payload === 'CREW') {
+            this.crewLanding = { onSite: e.onSite };
             if (e.onSite) this.celebrate({ id: 'BULLSEYE', label: 'ON THE SITE', points: 1_000 });
             this.showBanner(e.onSite ? 'The crew landed right on the site!' : 'The crew is down safely!', UI.greenText);
           }
@@ -711,6 +726,7 @@ export class FlightScene extends Phaser.Scene {
       snapshot: this.sim.snapshot(),
       awardCount: this.stunts.awards.length,
       landedRovers: [...this.landedRovers],
+      landedRoverOk: [...this.landedRoverOk],
       sparesLeft: this.runner.sparesLeft,
       solved: this.runner.solved,
       failedProblems: this.runner.failedProblems
@@ -741,6 +757,8 @@ export class FlightScene extends Phaser.Scene {
     this.stunts.awards.length = cp.awardCount;
     this.stunts.total = this.stunts.awards.reduce((s, a) => s + a.points, 0);
     this.landedRovers = [...cp.landedRovers];
+    this.landedRoverOk = [...cp.landedRoverOk];
+    this.crewLanding = null;
     this.result = null;
     this.earnings = null;
     this.completedNow = [];
@@ -978,6 +996,12 @@ export class FlightScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
   // End of flight
   // ---------------------------------------------------------------------------
+
+  /** How long the result panel waits: long enough to watch the payload's own animation (the satellite opening, the rover driving off, the astronaut planting the flag). */
+  private resultDelayMs(): number {
+    if (!this.runner.complete || this.exploded) return 2200;
+    return this.payload === 'SATELLITE' ? 3400 : 5200;
+  }
 
   private finishMission(): void {
     if (this.result) return;
