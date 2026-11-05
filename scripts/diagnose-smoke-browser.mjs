@@ -13,7 +13,7 @@ async function main() {
 
   page.on('console', msg => console.log('PAGE LOG:', msg.text()));
 
-  await page.goto('http://localhost:3000');
+  await page.goto("http://localhost:3000/?skipMenu");
   await page.waitForFunction(() => !!window.__BUILDER_SCENE__);
 
   // Transition to FlightScene with a basic rocket
