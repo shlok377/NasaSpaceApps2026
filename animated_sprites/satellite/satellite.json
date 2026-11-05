@@ -1,0 +1,19 @@
+{
+  "image": "satellite.png",
+  "frameWidth": 48,
+  "frameHeight": 48,
+  "animations": {
+    "deploy": {
+      "row": 0,
+      "frames": 10,
+      "frameMs": 110,
+      "loop": false
+    },
+    "working": {
+      "row": 1,
+      "frames": 8,
+      "frameMs": 130,
+      "loop": true
+    }
+  }
+}

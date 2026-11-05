@@ -1,0 +1,31 @@
+{
+  "image": "crew.png",
+  "frameWidth": 48,
+  "frameHeight": 48,
+  "animations": {
+    "exit": {
+      "row": 0,
+      "frames": 10,
+      "frameMs": 110,
+      "loop": false
+    },
+    "plant": {
+      "row": 1,
+      "frames": 8,
+      "frameMs": 140,
+      "loop": false
+    },
+    "wave_flag": {
+      "row": 2,
+      "frames": 6,
+      "frameMs": 150,
+      "loop": true
+    },
+    "wave": {
+      "row": 3,
+      "frames": 6,
+      "frameMs": 150,
+      "loop": true
+    }
+  }
+}

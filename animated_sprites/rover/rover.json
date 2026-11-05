@@ -1,0 +1,31 @@
+{
+  "image": "rover.png",
+  "frameWidth": 64,
+  "frameHeight": 64,
+  "animations": {
+    "fall": {
+      "row": 0,
+      "frames": 1,
+      "frameMs": 800,
+      "loop": false
+    },
+    "land": {
+      "row": 1,
+      "frames": 7,
+      "frameMs": 130,
+      "loop": false
+    },
+    "deploy": {
+      "row": 2,
+      "frames": 10,
+      "frameMs": 130,
+      "loop": false
+    },
+    "drive": {
+      "row": 3,
+      "frames": 8,
+      "frameMs": 110,
+      "loop": true
+    }
+  }
+}

@@ -4,7 +4,7 @@ import type Phaser from 'phaser';
 export const SFX = {
   UI_CLICK: { key: 'sfx_ui_click', path: 'assets/sound/UI_click.wav', volume: 0.5 },
   UI_HOVER: { key: 'sfx_ui_hover', path: 'assets/sound/UI_hover.wav', volume: 0.25 },
-  UI_BLOCK_DELETE: { key: 'sfx_ui_block_delete', path: 'assets/sound/UI_block_delete.wav', volume: 0.5 },
+  UI_BLOCK_DELETE: { key: 'sfx_ui_block_delete', path: 'assets/sound/UI_delete.ogg', volume: 0.5 },
   CLICK_FAIL: { key: 'sfx_click_fail', path: 'assets/sound/click_fail.wav', volume: 0.5 },
   BUZZER: { key: 'sfx_buzzer', path: 'assets/sound/buzzer.wav', volume: 0.45 },
   EXPLOSION: { key: 'sfx_explosion', path: 'assets/sound/explosion.wav', volume: 0.7 },
@@ -12,7 +12,12 @@ export const SFX = {
   SPLASH: { key: 'sfx_splash', path: 'assets/sound/splash.wav', volume: 1 },
   GAME_OVER: { key: 'sfx_game_over', path: 'assets/sound/game_over.wav', volume: 0.6 },
   ROCKET_DAMAGE: { key: 'sfx_rocket_damage', path: 'assets/sound/rocket_damage.wav', volume: 0.6 },
-  ROCKET_ENGINE: { key: 'sfx_rocket_engine', path: 'assets/sound/rocket_engine.wav', volume: 0.4 },
+  /** The RCS thrusters: heard while A / D steer with an open shell. */
+  ROCKET_ENGINE: { key: 'sfx_rocket_engine', path: 'assets/sound/rocket_engine.wav', volume: 0.55 },
+  /** The main engine's roar while the rocket flies. */
+  ROCKET_FLYING: { key: 'sfx_rocket_flying', path: 'assets/sound/rocket_flying.wav', volume: 0.85 },
+  /** Lift-off: plays once the countdown hits GO!. */
+  ROCKET_LAUNCH: { key: 'sfx_rocket_launch', path: 'assets/sound/rocket_launch.wav', volume: 1 },
   ROCKET_SEPARATION: { key: 'sfx_rocket_separation', path: 'assets/sound/rocket_separation.wav', volume: 0.6 }
 } as const;
 
@@ -54,23 +59,23 @@ export class LoopSfx {
   }
 }
 
-/** The engine roar: a loop whose volume follows the throttle (0 = silent). */
+/** An engine loop whose volume follows a level (0 = silent), eased so it swells and fades instead of cutting. */
 export class EngineLoop {
   private sound: Phaser.Sound.BaseSound | null = null;
   private level = 0;
 
-  constructor(private readonly scene: Phaser.Scene) {}
+  constructor(private readonly scene: Phaser.Scene, private readonly name: SfxName = 'ROCKET_FLYING') {}
 
   public update(throttle: number, dt: number): void {
+    const s = SFX[this.name];
     const target = Math.max(0, Math.min(1, throttle));
     this.level += (target - this.level) * (1 - Math.exp(-dt * 8));
     if (!this.sound) {
-      if (target <= 0 || !this.scene.cache?.audio?.exists(SFX.ROCKET_ENGINE.key)) return;
-      this.sound = this.scene.sound?.add?.(SFX.ROCKET_ENGINE.key, { loop: true, volume: 0 }) ?? null;
+      if (target <= 0 || !this.scene.cache?.audio?.exists(s.key)) return;
+      this.sound = this.scene.sound?.add?.(s.key, { loop: true, volume: 0 }) ?? null;
       this.sound?.play();
     }
-    const s = this.sound as Phaser.Sound.WebAudioSound | null;
-    s?.setVolume?.(SFX.ROCKET_ENGINE.volume * this.level);
+    (this.sound as Phaser.Sound.WebAudioSound | null)?.setVolume?.(s.volume * this.level);
   }
 
   public stop(): void {

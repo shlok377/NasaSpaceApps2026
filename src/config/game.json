@@ -264,6 +264,12 @@
       "maxApoapsis": 1200,
       "holdSeconds": 3
     },
+    "satellite": {
+      "_note": "Ejection: the satellite is pushed ahead and the spent stage backs off (m/s along the orbit); time speeds up so they visibly part.",
+      "ejectKick": 6,
+      "stageKick": 3,
+      "fastForward": 3
+    },
     "rover": {
       "_goal": "Survive the problems in orbit, then drop the rover into the target zone.",
       "secondsBetweenProblems": 6,

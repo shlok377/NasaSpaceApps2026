@@ -1,10 +1,11 @@
 import Phaser from 'phaser';
 import { CONFIG } from '../../config';
 import { PART_DEFINITIONS } from '../../core/partDefinitions';
-import { BOULDER_FIELD, ROVER_ZONE, RoverCapsule, SurfaceZone } from '../../game/phases';
+import { BOULDER_FIELD, positionAfter, ROVER_ZONE, RoverCapsule, SurfaceZone } from '../../game/phases';
 import { Rock, rockX } from '../../modules/rockBelt/RockField';
-import { gravityAt, insideMoonSoi, localUp, moonAltitude, moonSurfacePoint } from '../../physics/bodies';
+import { gravityAt, insideMoonSoi, localUp, moonAltitude, moonAngleOf, moonSurfacePoint } from '../../physics/bodies';
 import { MOON, MOON_CENTER, ROCK_BELT, WORLD } from '../../physics/constants';
+import { orbitFromState } from '../../physics/orbit';
 import { FlightSim, FlightTelemetry } from '../../physics/FlightSim';
 import { FlightPart } from '../../physics/vehicle';
 import { computeScreenRetrograde, ScreenRetrogradeVector } from '../../physics/guidance';
@@ -33,6 +34,7 @@ import {
 } from './LaunchSite';
 import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay, timeOfDayWind } from '../../game/timeOfDay';
 import { hash } from '../../ui/backdrop';
+import { PayloadSprites } from './PayloadSprites';
 
 export const SCREEN_CX = 640;
 export const SCREEN_CY = 400;
@@ -42,6 +44,13 @@ export const SCREEN_CY = 400;
 export const CELL_PX = CONFIG.camera.ascentScale;
 /** In the orbit map the rocket is drawn this many pixels per part, so its heading stays readable. */
 const MAP_ROCKET_PX = 12;
+/** Drawn size (px) of one animated sprite frame in the orbit map. */
+const SATELLITE_PX = 96;
+/** On the orbit map a freshly ejected satellite is drawn pulled further from the stage (up to this many px extra), like a map symbol, so the two parting ways are easy to see. */
+const SATELLITE_PARTING_PX = 150;
+const ROVER_PX = 64;
+/** The astronaut's frame, in rocket cells, so it stands next to the rocket at a believable size (and never gets tiny). */
+const CREW_CELLS = 4.5;
 
 export const WORLD_COLORS = {
   skyLow: 0x6fb1e6,
@@ -92,6 +101,10 @@ export interface MissionOverlay {
   /** The ejected satellite, if any. */
   satellite?: RoverCapsule | null;
   landedRovers: number[];
+  /** For each landed rover (same order): did it come down in the zone? In the zone it unpacks and drives. */
+  landedRoverOk?: boolean[];
+  /** The crew has touched down: where the astronaut gets out and whether the flag goes up (landed on the site). */
+  crew?: { onSite: boolean } | null;
   /** Predicted landing point of the rover if dropped now. */
   dropMarker: { x: number; y: number } | null;
   /** Debris swarm ring (radius from the Moon's centre). */
@@ -153,6 +166,8 @@ export class WorldRenderer {
   private readonly roverFlagSprite: Phaser.GameObjects.Image;
   /** The rover falling to the Moon or the ejected satellite (they never show together). */
   private readonly payloadSprite: Phaser.GameObjects.Image;
+  /** Animated satellite, rover and astronaut (the still `payloadSprite` is only the fallback if their sheets are missing). */
+  private readonly payloads: PayloadSprites;
   private readonly landingFlagSprite: Phaser.GameObjects.Image;
   private readonly smokeSpritesContainer: Phaser.GameObjects.Container;
   private readonly smokeSpritesPool: Phaser.GameObjects.Image[] = [];
@@ -228,6 +243,7 @@ export class WorldRenderer {
     this.mapMoonSprite?.setOrigin?.(0.5, 0.5);
     this.mapMoonSprite?.setVisible?.(false);
     this.mapMoonSprite?.setDepth?.(-2);
+    this.payloads = new PayloadSprites(scene);
     this.payloadSprite = scene.add.image(0, 0, GAME_ASSETS.PART_ROVER.key);
     this.payloadSprite?.setVisible?.(false);
     this.payloadSprite?.setDepth?.(6);
@@ -493,8 +509,11 @@ export class WorldRenderer {
       this.hideSmokeSprites();
       this.drawMoonCloseUp(sim, overlay);
       this.drawRetrogradeArrow(sim);
+      this.drawCrew(sim, overlay);
     }
+    if (!overlay.crew) this.payloads.updateCrew(null);
     this.drawRocketAndDebris(sim, t, alive);
+    this.payloads.endFrame();
     for (let i = this.labelIndex; i < this.labels.length; i++) this.labels[i].setVisible(false);
   }
 
@@ -951,6 +970,27 @@ export class WorldRenderer {
     this.pathColor = hit ? WORLD_COLORS.danger : left ? 0xfbbf24 : WORLD_COLORS.zone;
   }
 
+  /** The satellite's own orbit as a thin dotted line (it keeps to it for good). */
+  private drawSatelliteOrbit(g: Phaser.GameObjects.Graphics, body: RoverCapsule): void {
+    const o = orbitFromState({ x: body.x - MOON_CENTER.x, y: body.y - MOON_CENTER.y }, { x: body.vx, y: body.vy }, MOON.mu, MOON.radius);
+    if (o.escaping || !Number.isFinite(o.period)) return;
+    const steps = 120;
+    const dt = o.period / steps;
+    let { x, y, vx, vy } = body;
+    g.lineStyle(1, 0x7dd3fc, 0.55);
+    let prev = this.toScreen(x, y);
+    for (let i = 0; i < steps; i++) {
+      const gr = gravityAt(x, y);
+      vx += gr.x * dt;
+      vy += gr.y * dt;
+      x += vx * dt;
+      y += vy * dt;
+      const p = this.toScreen(x, y);
+      if (i % 2 === 0) g.lineBetween(prev.x, prev.y, p.x, p.y);
+      prev = p;
+    }
+  }
+
   /** A filled ring between two radii. */
   private annulus(g: Phaser.GameObjects.Graphics, cx: number, cy: number, r0: number, r1: number): void {
     const n = 72;
@@ -1080,11 +1120,30 @@ export class WorldRenderer {
       }
     }
 
-    // Rover capsule on its way down.
-    const body = overlay.rover && !overlay.rover.landed ? { b: overlay.rover, key: GAME_ASSETS.PART_ROVER.key } : overlay.satellite && !overlay.satellite.landed ? { b: overlay.satellite, key: GAME_ASSETS.PART_SATELLITE.key } : null;
-    if (body) {
-      const p = this.toScreen(body.b.x, body.b.y);
-      this.payloadSprite?.setTexture?.(body.key)?.setDisplaySize?.(22, 22)?.setPosition?.(p.x, p.y)?.setVisible?.(true);
+    // The ejected satellite (deploys, then works) and the rover's airbag on its way down.
+    const still = overlay.rover && !overlay.rover.landed ? { b: overlay.rover, key: GAME_ASSETS.PART_ROVER.key } : overlay.satellite && !overlay.satellite.landed ? { b: overlay.satellite, key: GAME_ASSETS.PART_SATELLITE.key } : null;
+    let sat = overlay.satellite && !overlay.satellite.landed ? this.toScreen(overlay.satellite.x, overlay.satellite.y) : null;
+    if (sat && overlay.satellite) {
+      // It flies its own orbit, always. A small gap to the stage is shown larger by looking ahead (or back) along that same orbit,
+      // so the sprite never leaves its path; far apart, the true position shows.
+      const body = overlay.satellite;
+      const r = this.rocketScreen(sim);
+      const gap = Math.hypot(sat.x - r.x, sat.y - r.y);
+      const speed = Math.hypot(body.vx, body.vy);
+      if (gap > 0.01 && speed > 1) {
+        const ahead = (body.x - sim.state.x) * body.vx + (body.y - sim.state.y) * body.vy >= 0 ? 1 : -1;
+        const seconds = (ahead * Math.min(gap * 10, SATELLITE_PARTING_PX)) / this.camera.scale / speed;
+        const shown = positionAfter(body, seconds);
+        sat = this.toScreen(shown.x, shown.y);
+      }
+      this.drawSatelliteOrbit(g, body);
+    }
+    const ball = overlay.rover && !overlay.rover.landed ? this.toScreen(overlay.rover.x, overlay.rover.y) : null;
+    const animated = this.payloads.updateSatellite(sat && { ...sat, size: SATELLITE_PX });
+    const falling = this.payloads.updateRoverFall(ball && { ...ball, size: ROVER_PX });
+    if (still && !(animated || falling)) {
+      const p = this.toScreen(still.b.x, still.b.y);
+      this.payloadSprite?.setTexture?.(still.key)?.setDisplaySize?.(22, 22)?.setPosition?.(p.x, p.y)?.setVisible?.(true);
     } else this.payloadSprite?.setVisible?.(false);
 
     // Direction of travel.
@@ -1131,6 +1190,19 @@ export class WorldRenderer {
     return t;
   }
 
+  /** The astronaut steps out beside the rocket once it has touched down (and plants the flag on the landing site). */
+  private drawCrew(sim: FlightSim, overlay: MissionOverlay): void {
+    if (!overlay.crew) return;
+    const cell = this.camera.rocketScale;
+    const com = sim.com;
+    let half = 0.5;
+    for (const p of sim.vehicle.parts) half = Math.max(half, Math.abs(p.a - com.a) + 0.5);
+    const rocket = this.rocketScreen(sim);
+    const surface = moonSurfacePoint(moonAngleOf(sim.state.x, sim.state.y), 0);
+    const ground = this.toScreen(surface.x, surface.y);
+    this.payloads.updateCrew({ x: rocket.x + half * cell, y: ground.y, size: Math.max(110, cell * CREW_CELLS), onSite: overlay.crew.onSite });
+  }
+
   /** Zones, sites, rovers and markers on the Moon's surface (map or close-up). */
   private drawMissionMarks(g: Phaser.GameObjects.Graphics, overlay: MissionOverlay, map: boolean): void {
     const pulse = 0.65 + 0.35 * Math.sin(this.scene.time.now / 220);
@@ -1142,12 +1214,17 @@ export class WorldRenderer {
       this.roverFlagSprite?.setVisible?.(false);
       this.payloadSprite?.setVisible?.(false);
     }
-    for (const angle of overlay.landedRovers) {
-      const p = moonSurfacePoint(angle, map ? 0 : 0.8);
-      const sp = this.toScreen(p.x, p.y);
-      g.fillStyle(WORLD_COLORS.rover, 1);
-      const s = map ? 4 : Math.max(4, this.camera.scale * 0.9);
-      g.fillRect(sp.x - s, sp.y - s, s * 2, s * 2);
+    const spots = overlay.landedRovers.map((angle, i) => {
+      const surface = moonSurfacePoint(angle, 0);
+      const p = this.toScreen(surface.x, surface.y);
+      return { x: p.x, y: p.y, size: map ? ROVER_PX : Math.max(ROVER_PX, this.camera.scale * 6), rotation: this.screenRotation(angle), ok: overlay.landedRoverOk?.[i] ?? true };
+    });
+    if (!this.payloads.updateLandedRovers(spots)) {
+      for (const spot of spots) {
+        g.fillStyle(WORLD_COLORS.rover, 1);
+        const s = map ? 4 : Math.max(4, this.camera.scale * 0.9);
+        g.fillRect(spot.x - s, spot.y - s, s * 2, s * 2);
+      }
     }
     if (overlay.boulders) {
       this.surfaceArc(g, BOULDER_FIELD, WORLD_COLORS.danger, map ? 5 : 8, 0.8);
