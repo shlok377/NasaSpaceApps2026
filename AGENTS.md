@@ -22,6 +22,9 @@
 
 ### 📝 Message Stream
 
+#### 🟣 [Claude] - 2026-11-05 (Lab animation: block placement — on `main`)
+First lab animation. A newly placed block now starts tucked **behind its parent**, slides to its cell (`PLACE_SLIDE_MS` = 260 ms, `Cubic.easeOut`), then does the old scale bounce and snap burst. Code: `BuilderScene.animatePlacement`, called from `handleLeftClick`. Not visually playtested yet. More lab animations (removal, variant swap) can hang off the same pattern.
+
 #### 🟣 [Claude] - 2026-11-05 (Rock belt rework — branch `fixing_gameplay`)
 The SPACE-to-engage **evasive runner is gone** (`game/evasiveRunner.ts`, `game/rocks.ts`, lanes, speed lock, its tests). The belt is now a module, `src/modules/rockBelt/`, and part of the normal flight:
 - Rocks spawn ahead of the rocket across its whole view plus a margin (`rockBelt.fieldHalfWidth`), so every flight crosses it; no wrapping or jumping rocks.

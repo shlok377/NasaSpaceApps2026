@@ -50,6 +50,9 @@ const VARIANTS: Record<VariantPart, Array<{ kind: PartKind; label: string; color
 const rcsAngle = (type: PartType, side?: 'LEFT' | 'RIGHT') => (type !== 'RCS' ? 0 : side === 'RIGHT' ? -90 : 90);
 const isVariantPart = (type: PartType): type is VariantPart => type in VARIANTS;
 /** Variant swatches on a slot, in slot-local coordinates (centre of the slot is 0,0). */
+/** How long a freshly placed block takes to slide out from behind its parent. */
+const PLACE_SLIDE_MS = 260;
+
 const CHIP = 12;
 const CHIP_GAP = 4;
 const chipX = (i: number) => SLOT_W / 2 - 12 - (2 - i) * (CHIP + CHIP_GAP) - CHIP;
@@ -1167,17 +1170,44 @@ export class BuilderScene extends Phaser.Scene {
       this.updateGhostPreview(pointer);
       this.syncExportableState('[RocketBuilder] Part attached:');
 
-      // Docking tactile bounce + snap burst
-      const blockContainer = this.blockDisplayMap.get(attachResult.node.id);
-      if (blockContainer) {
-        blockContainer.setScale(1.18);
-        this.tweens.add({ targets: blockContainer, scaleX: 1, scaleY: 1, duration: 200, ease: 'Back.easeOut' });
-        this.particleManager.triggerEffect('SOCKET_SNAP', blockContainer.x, blockContainer.y);
-      }
+      this.animatePlacement(attachResult.node);
     } else {
       playSfx(this, 'CLICK_FAIL');
       this.particleManager.triggerEffect('REJECTION_ERROR', pointer.worldX, pointer.worldY);
     }
+  }
+
+  /** The new block starts tucked behind its parent, slides out to its cell, then settles with a bounce and snap burst. */
+  private animatePlacement(node: RocketNode): void {
+    const block = this.blockDisplayMap.get(node.id);
+    if (!block) return;
+    const targetX = block.x;
+    const targetY = block.y;
+    const parent = node.parentId ? this.blockDisplayMap.get(node.parentId) : undefined;
+
+    const settle = (): void => {
+      block.setScale(1.18);
+      this.tweens.add({ targets: block, scaleX: 1, scaleY: 1, duration: 200, ease: 'Back.easeOut' });
+      this.particleManager.triggerEffect('SOCKET_SNAP', targetX, targetY);
+    };
+    if (!parent) {
+      settle();
+      return;
+    }
+
+    block.setPosition(parent.x, parent.y);
+    this.blocksContainer.sendToBack(block); // behind the parent while it emerges
+    this.tweens.add({
+      targets: block,
+      x: targetX,
+      y: targetY,
+      duration: PLACE_SLIDE_MS,
+      ease: 'Cubic.easeOut',
+      onComplete: () => {
+        this.blocksContainer.bringToTop(block);
+        settle();
+      },
+    });
   }
 
   private handleRightClick(pointer: Phaser.Input.Pointer): void {
