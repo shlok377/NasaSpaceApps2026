@@ -173,6 +173,13 @@ export class FlightSim {
   public windScale = 1;
   /** Extra wind on top of the normal profile (m/s, + = east), e.g. a wind-shear gust; air only. */
   public gust = 0;
+  /**
+   * A straight sideways push set each frame by a challenge (the rock belt), or null: A / D slide the
+   * rocket left / right at up to `maxSpeed` without leaning, and it stops sliding as soon as you let go.
+   */
+  public dodge: { accel: number; maxSpeed: number } | null = null;
+  /** The sideways speed the dodge push has added on top of the flight (m/s, + = east). */
+  private dodgeVx = 0;
   public onGround = true;
   public tanks: Map<string, number>;
   public debris: Debris[] = [];
@@ -487,14 +494,15 @@ export class FlightSim {
         rcsTorque +
         thrust * Math.sin(ENGINE.gimbalRange) * gimbalArm +
         FINS.controlAuthority * v.finCount * qA * v.length * 0.5;
-    const controlTorque = steer * steerAuthority;
+    // In the rock belt A / D slide the rocket sideways instead of leaning it (applyDodge).
+    const controlTorque = this.dodge ? 0 : steer * steerAuthority;
     // Small side thrusters push the way you steer (diminished by aerodynamic dynamic pressure in thick air).
     const rcsAeroAtten = Math.max(0.25, 1 - q / 2000);
     const rcs = inSpace
       ? rcsOn
         ? steer * CONFIG.rcs.accel * this.activeRcsCount * mass
         : 0
-      : v.hasCommandModule
+      : v.hasCommandModule && !this.dodge
         ? steer * STEERING.rcsAcceleration * mass * rcsAeroAtten
         : 0;
 
@@ -527,6 +535,7 @@ export class FlightSim {
     s.theta = wrapAngle(s.theta + s.omega * dt);
     s.vx += ax * dt;
     s.vy += ay * dt;
+    this.applyDodge(steer, dt);
     s.x += s.vx * dt;
     s.y += s.vy * dt;
     s.time += dt;
@@ -538,6 +547,15 @@ export class FlightSim {
     this.checkStaging();
     this.checkContact();
     if (!this.isFinished) this.updateStats(q);
+  }
+
+  /** Slide sideways towards the dodge speed A / D ask for (steer + = left), or back to none once released. */
+  private applyDodge(steer: number, dt: number): void {
+    const target = this.dodge ? -steer * this.dodge.maxSpeed : 0;
+    const accel = this.dodge?.accel ?? Math.max(1, Math.abs(this.dodgeVx)) * 2;
+    const step = Math.max(-accel * dt, Math.min(accel * dt, target - this.dodgeVx));
+    this.dodgeVx += step;
+    this.state.vx += step;
   }
 
   /** Push and efficiency multipliers of the booster tanks being drained now (the outermost ones with fuel). */

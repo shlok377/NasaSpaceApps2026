@@ -5,7 +5,7 @@ import { FlightSim } from '../../physics/FlightSim';
 import { buildFlightVehicle } from '../../physics/vehicle';
 import { TimeOfDay } from '../../game/timeOfDay';
 import { flyingSim, frame } from '../testing';
-import { RockBeltChallenge } from './RockBeltChallenge';
+import { dodgeFor, RockBeltChallenge } from './RockBeltChallenge';
 import { Rock } from './RockField';
 
 const CFG = CONFIG.rockBelt;
@@ -73,6 +73,46 @@ describe('Rock belt', () => {
   it('later launch times get a harder rating', () => {
     const r = CONFIG.timeOfDay;
     expect([r.DAWN, r.NOON, r.DUSK, r.NIGHT].map(t => t.rockDifficulty)).toEqual([1, 2, 3, 4]);
+  });
+
+  /** Hold A or D inside the belt for `seconds`, then let go for `coast`; returns the sideways move and speed. */
+  function slide(openRcs: boolean, seconds: number, coast = 0): { moved: number; vx: number; theta: number } {
+    const tree = new RocketTree(7, 8);
+    for (const [x, y, type] of [[7, 9, 'FUEL_TANK'], [7, 10, 'ENGINE'], [6, 9, 'RCS'], [5, 9, 'FUEL_TANK']] as const) tree.attachPart(x, y, type);
+    tree.attachPart(7, 7, 'FUEL_TANK', 'COLD_GAS'); // feeds the RCS once its shell is off
+    const sim = new FlightSim(buildFlightVehicle(tree.getTelemetry().tree));
+    sim.launch();
+    sim.onGround = false;
+    if (openRcs) sim.separate('B');
+    Object.assign(sim.state, { y: CFG.bottom + 50, vy: 150, vx: 0, omega: 0 });
+    const theta0 = sim.state.theta;
+    const belt = new RockBeltChallenge(() => 0.99);
+    const x0 = sim.state.x;
+    for (let t = 0; t < seconds + coast; t += 1 / 120) {
+      belt.update(frame(sim, {}, 1 / 120));
+      sim.step(1 / 120, { throttle: 0, steer: t < seconds ? -1 : 0 });
+    }
+    return { moved: sim.state.x - x0, vx: sim.state.vx, theta: sim.state.theta - theta0 };
+  }
+
+  it('A / D slide the rocket sideways in the belt without leaning it, and it stops when let go', () => {
+    const quick = slide(false, 1);
+    expect(quick.moved).toBeGreaterThan(4); // a rock's width in about a second
+    expect(Math.abs(quick.theta)).toBeLessThan(0.01);
+    const stopped = slide(false, 1, 1.5);
+    expect(Math.abs(stopped.vx)).toBeLessThan(0.5);
+  });
+
+  it('each open RCS makes the dodge quicker', () => {
+    expect(dodgeFor(2).maxSpeed).toBeGreaterThan(dodgeFor(1).maxSpeed);
+    expect(slide(true, 1).moved).toBeGreaterThan(slide(false, 1).moved + 1);
+  });
+
+  it('outside the belt the dodge is off', () => {
+    const sim = flyingSim();
+    const belt = new RockBeltChallenge(() => 0.99);
+    belt.update(frame(sim));
+    expect(sim.dodge).toBeNull();
   });
 
   /** The standard three-booster rocket coasting up through the belt with no hands on the controls. */

@@ -944,7 +944,7 @@ export class FlightScene extends Phaser.Scene {
     if (r.problem) return PROBLEM_INFO[r.problem.id].howTo;
     if (mode === 'ASCENT') {
       if (t.earthAltitude > ROCK_BELT.bottom - 300 && t.earthAltitude < ROCK_BELT.top)
-        return this.sim.rcsReady ? 'ROCK BELT: W speed through the gaps  ·  A / D nudge with RCS  ·  near misses build a combo' : 'ROCK BELT: W speed through the gaps  ·  near misses build a combo';
+        return `ROCK BELT: A / D slide sideways${this.sim.rcsReady ? ' (RCS boost)' : ''}  ·  W speed through the gaps  ·  near misses build a combo`;
       if (this.coastApex !== null && this.coastApex >= SOI_ALTITUDE && t.thrust > 0) return 'You’ll coast to the Moon now: X cuts the engines to save fuel';
       if (this.coastApex !== null && this.coastApex >= SOI_ALTITUDE) return 'Coasting to the Moon: save fuel for the orbit burn';
       if (t.fuelFraction <= 0) return 'Out of fuel: coasting';

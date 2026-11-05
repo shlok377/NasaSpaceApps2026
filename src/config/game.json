@@ -84,8 +84,15 @@
     "sphereOfInfluence": 3400
   },
   "rockBelt": {
-    "_note": "The rock belt (src/modules/rockBelt). Rocks spawn ahead of the rocket across its whole view plus a margin, so it can't be flown around. Throttle timing and RCS nudges dodge them. A small rock costs health; a boulder knocks off the part it hits. Each launch time picks a difficulty (timeOfDay → rockDifficulty).",
+    "_note": "The rock belt (src/modules/rockBelt). Rocks spawn ahead of the rocket across its whole view plus a margin, so it can't be flown around. Throttle timing and sideways dodges (A / D, stronger with each open RCS) avoid them. A small rock costs health; a boulder knocks off the part it hits. Each launch time picks a difficulty (timeOfDay → rockDifficulty).",
     "enabled": true,
+    "dodge": {
+      "_note": "Inside the belt A / D slide the rocket straight sideways (no leaning) and it stops when you let go. Every rocket gets the base; each open RCS (shell off, cold gas left) adds more.",
+      "accel": 14,
+      "maxSpeed": 7,
+      "accelPerRcs": 8,
+      "maxSpeedPerRcs": 4
+    },
     "bottom": 2700,
     "top": 3900,
     "warningDistance": 320,

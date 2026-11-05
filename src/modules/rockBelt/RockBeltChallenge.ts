@@ -9,7 +9,7 @@ const CFG = CONFIG.rockBelt;
 /**
  * The rock belt, part of the normal flight: no lanes, no prompt. Rocks drift across the rocket's
  * path, red chevrons at the top edge show what is coming, and time slows a little inside.
- * Burn (W) to slip through a gap sooner, or nudge sideways with an open RCS (A / D).
+ * Burn (W) to slip through a gap sooner, or slide sideways with A / D (faster with each open RCS).
  * A small rock chips the health; a boulder knocks off the part it hits.
  */
 export class RockBeltChallenge extends Challenge {
@@ -40,6 +40,7 @@ export class RockBeltChallenge extends Challenge {
     const step = (realDt / CFG.slowMotionEaseSeconds) * (1 - CFG.slowMotion);
     this.timeScale += Math.max(-step, Math.min(step, target - this.timeScale));
 
+    sim.dodge = inBelt ? dodgeFor(sim.rcsReady ? sim.activeRcsCount : 0) : null;
     if (!flying) return;
     if (!this.field && y >= CFG.bottom - CFG.warningDistance - SPAWN_EXTRA) {
       this.field = new RockField(this.random, difficultyLevel(timeOfDayRockDifficulty(ctx.timeOfDay)));
@@ -48,7 +49,7 @@ export class RockBeltChallenge extends Challenge {
 
     if (inBelt && !this.inside && !this.done) {
       this.inside = true;
-      this.emit({ kind: 'START', id: this.id, message: 'ROCK BELT! Red arrows show rocks coming: burn (W) through the gaps, nudge with RCS (A / D)', height: y });
+      this.emit({ kind: 'START', id: this.id, message: 'ROCK BELT! Red arrows show rocks coming: burn (W) through the gaps, slide sideways with A / D', height: y });
     }
     if (this.inside && y >= CFG.top) {
       this.inside = false;
@@ -79,4 +80,10 @@ export class RockBeltChallenge extends Challenge {
     if (part && part.parentId !== null) sim.hitPart(partId);
     else sim.damage(CONFIG.hull.perPart);
   }
+}
+
+/** How hard the rocket slides sideways in the belt: a base for every rocket, more for each open RCS. */
+export function dodgeFor(openRcs: number): { accel: number; maxSpeed: number } {
+  const d = CFG.dodge;
+  return { accel: d.accel + d.accelPerRcs * openRcs, maxSpeed: d.maxSpeed + d.maxSpeedPerRcs * openRcs };
 }
