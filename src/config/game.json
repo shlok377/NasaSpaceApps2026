@@ -266,7 +266,7 @@
     "maxSites": 9,
     "minSiteGapMetres": 220,
     "satelliteScale": 0.5,
-    "collision": { "satelliteRadius": 16, "roverRadius": 16, "assetRadius": 10, "damageMin": 5, "damageMax": 10, "fallSpeed": 0.05, "fallTimeScale": 4 }
+    "collision": { "satelliteRadius": 120, "roverRadius": 28, "assetRadius": 60, "damageMin": 5, "damageMax": 10, "fallSpeed": 0.05, "fallTimeScale": 4 }
   },
   "gameSpeed": 1.5,
   "phases": {
