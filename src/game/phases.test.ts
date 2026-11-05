@@ -6,7 +6,7 @@ import { moonAngleOf, surfaceDistance } from '../physics/bodies';
 import { MOON, MOON_CENTER } from '../physics/constants';
 import { ControlInput, FlightSim } from '../physics/FlightSim';
 import { buildFlightVehicle } from '../physics/vehicle';
-import { chainFor, isStableOrbit, phaseNumber, planHazards, stepsDone, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, updateProblem } from './phases';
+import { chainFor, isStableOrbit, phaseNumber, planHazards, stepsDone, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, stepRover, updateProblem } from './phases';
 
 type Layout = Array<[number, number, PartType, FuelKind?]>;
 const STAGED: Layout = [
@@ -254,6 +254,26 @@ describe('objectives by payload', () => {
     expect(run.satellite).not.toBeNull();
     expect(run.complete).toBe(true);
     expect(run.drainEvents().some(e => e.kind === 'SATELLITE_DEPLOYED')).toBe(true);
+  });
+
+  it('the ejected satellite and the spent stage part ways and both stay in orbit', () => {
+    const sim = inOrbit(400);
+    const run = new PhaseRunner('ORBIT', 0, Math.random, 'SATELLITE');
+    holdOrbit(run, sim);
+    const before = Math.hypot(sim.state.vx, sim.state.vy);
+    run.deploySatellite(sim);
+    const sat = run.satellite!;
+    expect(Math.hypot(sat.vx, sat.vy)).toBeGreaterThan(before);
+    expect(Math.hypot(sim.state.vx, sim.state.vy)).toBeLessThan(before);
+    expect(run.timeScale(sim)).toBeGreaterThan(1);
+    const stage = { x: sim.state.x, y: sim.state.y, vx: sim.state.vx, vy: sim.state.vy, landed: false, angle: null, inZone: false };
+    for (let i = 0; i < 300; i++) {
+      stepRover(sat, 0.1);
+      stepRover(stage, 0.1);
+    }
+    expect(sat.landed).toBe(false);
+    expect(stage.landed).toBe(false);
+    expect(Math.hypot(sat.x - stage.x, sat.y - stage.y)).toBeGreaterThan(100);
   });
 
   it('the satellite cannot be ejected before the orbit phase is done', () => {
