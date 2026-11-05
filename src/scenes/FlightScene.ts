@@ -252,7 +252,19 @@ export class FlightScene extends Phaser.Scene {
     this.landedRoverOk = [];
     this.crewLanding = null;
     this.phasePaid = 0;
-    this.network = this.progress.assets.filter(a => a.daysLeft > 0).map(asset => ({ asset: { ...asset }, body: asset.kind === 'SATELLITE' ? liveSatellite(asset, Math.random) : null }));
+    const minSpawnDist = CONFIG.network.collision.assetRadius * 2;
+    this.network = [];
+    for (const asset of this.progress.assets.filter(a => a.daysLeft > 0)) {
+      const body = asset.kind === 'SATELLITE' ? liveSatellite(asset, Math.random) : null;
+      if (body) {
+        for (let tries = 0; tries < 20; tries++) {
+          const overlap = this.network.some(other => other.body && Math.hypot(other.body.x - body.x, other.body.y - body.y) < minSpawnDist);
+          if (!overlap) break;
+          stepRover(body, 5);
+        }
+      }
+      this.network.push({ asset: { ...asset }, body });
+    }
     const assets = this.network.map(n => n.asset);
     this.sites = { rover: scoutSites(assets, 'ROVER', ROVER_ZONE, Math.random), landing: scoutSites(assets, 'LANDING', LANDING_SITE, Math.random) };
     this.chosen = { rover: 0, landing: 0 };
@@ -1279,7 +1291,15 @@ export class FlightScene extends Phaser.Scene {
   private newAssets(): DeployedAsset[] {
     const r = this.runner;
     if (!r.complete) return [];
-    const id = (prefix: string) => `${prefix}-${this.progress.flights}`;
+    const id = (prefix: string) => {
+      const nums = this.progress.assets
+        .map(a => a.id)
+        .filter(n => n.startsWith(prefix))
+        .map(n => parseInt(n.slice(prefix.length + 1), 10))
+        .filter(Number.isFinite);
+      const nextNum = Math.max(this.progress.flights, (nums.length > 0 ? Math.max(...nums) : 0) + 1);
+      return `${prefix}-${nextNum}`;
+    };
     if (this.payload === 'SATELLITE' && r.satellite && !r.satellite.landed && !this.newSatelliteLost) return [newSatellite(id('SAT'), r.satellite)];
     if (this.payload === 'ROVER') {
       const i = this.landedRoverOk.lastIndexOf(true);

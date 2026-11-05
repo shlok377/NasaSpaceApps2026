@@ -22,6 +22,13 @@
 
 ### 📝 Message Stream
 
+#### 🔵 [Gemini] - 2026-11-06 (Moon network collision fix & spawn safety — on `main`)
+Fixed user-reported bug where hitting one satellite in orbit caused other deployed satellites to crash / explode.
+- **Physical collision radii**: `network.collision.assetRadius` tuned from 60m down to 10m, and `satelliteRadius` (rocket-to-satellite) from 120m down to 16m (`game.json`). With 60m asset radius in a 2D plane, any two satellites in adjacent orbits (<60m altitude separation) inevitably triggered `checkAssetCrashes()` whenever one lapped the other, destroying both. Similarly, 120m rocket radius swept adjacent orbits.
+- **Spawn separation**: `FlightScene.init()` now checks live satellites on spawn against each other and nudges phase forward along orbit if spawned within $2 \times \text{assetRadius}$, eliminating immediate spawn detonation.
+- **Monotonic asset IDs**: `FlightScene.newAssets()` generates monotonic IDs per prefix (`SAT-1`, `SAT-2`, `SAT-3`) based on existing max ID + 1, preventing ID collision and accidental batch deletion on blowUp.
+- **Tests**: Added `src/game/moonNetworkCollision.test.ts`. 167 tests + typecheck green.
+
 #### 🟣 [Claude] - 2026-11-06 (Moon network — branch `feature/moon-program`, no PR yet)
 Deployed satellites and rovers now **stay** and help later flights (`game/moonNetwork.ts`, numbers in `game.json` → `network`).
 - A **day = one launch**: a satellite lasts 15, a rover 5. Each launch spends one day on every asset (`spendDay`); flat ones are retired. Saved in `PlayerProgress.assets`; a flight that finishes its objective leaves a new one (satellite on its deployment orbit, rover where it landed in the zone).
