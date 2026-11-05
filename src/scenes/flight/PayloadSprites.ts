@@ -17,6 +17,13 @@ export interface LandedRoverSpot extends SpriteSpot {
   ok: boolean;
 }
 
+/** A satellite or rover from an earlier flight, drawn small so it doesn't take over. */
+export interface NetworkSpot extends SpriteSpot {
+  id: string;
+  kind: 'SATELLITE' | 'ROVER';
+  rotation: number;
+}
+
 export interface CrewSpot extends SpriteSpot {
   /** Landed right on the site: plants the flag. Otherwise it just waves. */
   onSite: boolean;
@@ -25,6 +32,8 @@ export interface CrewSpot extends SpriteSpot {
 /** Where the ground sits inside each frame, so a sprite can be pinned to a point on the surface. */
 const ROVER_FALL_CENTRE_Y = 43 / 64;
 const ROVER_GROUND_Y = 58 / 64;
+/** The astronaut waits this long after the rocket lands before stepping out. */
+const CREW_START_DELAY_MS = 700;
 const CREW_HATCH_X = 6 / 48;
 const CREW_GROUND_Y = 45 / 48;
 
@@ -41,6 +50,7 @@ export class PayloadSprites {
   private roverFall: Sprite | null = null;
   private landed: Array<{ sprite: Sprite; ok: boolean }> = [];
   private crew: { sprite: Sprite; onSite: boolean } | null = null;
+  private network = new Map<string, Sprite>();
   private shown = new Set<Sprite>();
   private animsReady = false;
 
@@ -111,16 +121,33 @@ export class PayloadSprites {
     if (!this.crew) {
       const sprite = this.make('crew');
       this.crew = { sprite, onSite: at.onSite };
-      this.playClips(sprite, 'crew', at.onSite ? ['exit', 'plant', 'wave_flag'] : ['exit', 'wave']);
+      this.playClips(sprite, 'crew', at.onSite ? ['exit', 'plant', 'wave_flag'] : ['exit', 'wave'], CREW_START_DELAY_MS);
     }
     this.place(this.crew.sprite, at, CREW_HATCH_X, CREW_GROUND_Y);
     this.crew.sprite.setDepth?.(DEPTH + 1);
     return true;
   }
 
+  /** Assets left by earlier flights: the satellite keeps working, the rover keeps its wheels turning. */
+  public updateNetwork(spots: readonly NetworkSpot[]): void {
+    for (const spot of spots) {
+      const sheet: SheetName = spot.kind === 'SATELLITE' ? 'satellite' : 'rover';
+      if (!this.ready(sheet)) continue;
+      let sprite = this.network.get(spot.id);
+      if (!sprite) {
+        sprite = this.make(sheet);
+        sprite.setDepth?.(DEPTH - 1);
+        this.network.set(spot.id, sprite);
+        this.playClips(sprite, sheet, [spot.kind === 'SATELLITE' ? 'working' : 'drive']);
+      }
+      this.place(sprite, spot, 0.5, spot.kind === 'SATELLITE' ? 0.5 : ROVER_GROUND_Y);
+      sprite.setRotation?.(spot.rotation);
+    }
+  }
+
   /** Hide whatever was not placed this frame. Call once at the end of rendering. */
   public endFrame(): void {
-    const all = [this.satellite, this.roverFall, this.crew?.sprite, ...this.landed.map((l) => l.sprite)];
+    const all = [this.satellite, this.roverFall, this.crew?.sprite, ...this.landed.map((l) => l.sprite), ...this.network.values()];
     for (const sprite of all) if (sprite && !this.shown.has(sprite)) sprite.setVisible?.(false);
     this.shown.clear();
   }
@@ -144,10 +171,10 @@ export class PayloadSprites {
   }
 
   /** Play the clips one after the other; a looping clip (always last) never ends, so it keeps going. */
-  private playClips(sprite: Sprite, sheet: SheetName, clips: readonly string[]): void {
+  private playClips(sprite: Sprite, sheet: SheetName, clips: readonly string[], delay = 0): void {
     const [first, ...rest] = clips;
     sprite.removeAllListeners?.('animationcomplete');
-    sprite.play?.(animKey(sheet, first));
+    sprite.play?.(delay > 0 ? { key: animKey(sheet, first), delay } : animKey(sheet, first));
     if (rest.length > 0) sprite.once?.('animationcomplete', () => this.playClips(sprite, sheet, rest));
   }
 }

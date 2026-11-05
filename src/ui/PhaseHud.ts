@@ -76,15 +76,15 @@ export class OrbitGauge {
   private readonly gfx: Phaser.GameObjects.Graphics;
   private readonly lowText: Phaser.GameObjects.Text;
   private readonly highText: Phaser.GameObjects.Text;
-  private readonly status: Phaser.GameObjects.Text;
   private readonly container: Phaser.GameObjects.Container;
-  private readonly w = 176;
-  private readonly fx = 1260 - 176;
+  // Same footprint as the HEIGHT panel (right 1260, top 120, bottom 600, 100 wide).
+  private readonly w = 100;
+  private readonly fx = 1260 - 100;
   private readonly top = 120;
-  private readonly h = 380;
-  private readonly tubeX = 1260 - 176 + 28;
-  private readonly tubeTop = 120 + 42;
-  private readonly tubeBottom = 120 + 42 + 220;
+  private readonly h = 480;
+  private readonly tubeX = 1260 - 50;
+  private readonly tubeTop = 120 + 84;
+  private readonly tubeBottom = 120 + 480 - 84;
 
   constructor(scene: Phaser.Scene) {
     const bg = scene.add.graphics();
@@ -95,13 +95,10 @@ export class OrbitGauge {
     bg.fillRect(this.tubeX - 8, this.tubeTop - 2, 16, this.tubeBottom - this.tubeTop + 4);
     bg.fillStyle(0x1f1b27, 1);
     bg.fillRect(this.tubeX - 6, this.tubeTop, 12, this.tubeBottom - this.tubeTop);
-    const top = scene.add.text(this.fx + 14, this.tubeTop - 8, 'PULL EDGE', TEXT_STYLE(11, UI.textMuted)).setOrigin(0, 1);
-    const ground = scene.add.text(this.fx + 14, this.tubeBottom + 6, 'MOON', TEXT_STYLE(11, UI.textMuted)).setOrigin(0, 0);
     this.gfx = scene.add.graphics();
-    this.lowText = scene.add.text(0, 0, '', TEXT_STYLE(13, '#7dd3fc')).setOrigin(0, 0.5).setLineSpacing(-4);
-    this.highText = scene.add.text(0, 0, '', TEXT_STYLE(13, '#fbbf24')).setOrigin(0, 0.5).setLineSpacing(-4);
-    this.status = scene.add.text(this.fx + this.w / 2, this.tubeBottom + 28, '', TEXT_STYLE(13)).setOrigin(0.5, 0).setAlign('center').setWordWrapWidth(this.w - 22).setLineSpacing(-4);
-    this.container = scene.add.container(0, 0, [bg, tab, top, ground, this.gfx, this.lowText, this.highText, this.status]).setDepth(20);
+    this.lowText = scene.add.text(this.tubeX, this.tubeTop - 8, '', TEXT_STYLE(12, '#7dd3fc')).setOrigin(0.5, 1).setAlign('center').setLineSpacing(-4);
+    this.highText = scene.add.text(this.tubeX, this.tubeBottom + 8, '', TEXT_STYLE(12, '#fbbf24')).setOrigin(0.5, 0).setAlign('center').setLineSpacing(-4);
+    this.container = scene.add.container(0, 0, [bg, tab, this.gfx, this.lowText, this.highText]).setDepth(20);
   }
 
   public setVisible(v: boolean): void {
@@ -109,7 +106,7 @@ export class OrbitGauge {
   }
 
   /** `hold` is 0..1 progress of holding a stable orbit (phase 1), or null. */
-  public update(o: OrbitElements | null, hold: number | null, time: number): void {
+  public update(o: OrbitElements | null, hold: number | null, _time: number): void {
     const g = this.gfx;
     g.clear();
     const { minPeriapsis, maxApoapsis } = CONFIG.phases.orbit;
@@ -124,7 +121,6 @@ export class OrbitGauge {
     if (!o) {
       this.lowText.setText('');
       this.highText.setText('');
-      this.status.setText('');
       return;
     }
     const lowOk = o.periapsisAltitude >= minPeriapsis;
@@ -141,31 +137,17 @@ export class OrbitGauge {
     g.fillStyle(highOk ? 0xfbbf24 : UI.red, 1);
     g.fillRect(x - 10, yHi - 2, 20, 5);
 
-    // Readouts beside their markers; the high one is kept above the low one so they never overlap.
-    const lx = x + 16;
-    const lowY = Math.min(yLo, this.tubeBottom - 6);
-    const highY = Math.min(yHi + 6, lowY - 36);
     this.lowText
-      .setText(lo < 0 ? 'LOW\nhits the Moon!' : `LOW ${formatDistance(lo)}${lowOk ? '' : `\nneed ${minPeriapsis}+`}`)
-      .setColor(lo < 0 ? '#f87171' : lowOk ? '#7dd3fc' : '#fbbf24')
-      .setPosition(lx, lowY);
+      .setText(lo < 0 ? 'LOW\ncrash!' : `LOW ${formatDistance(lo)}\nneed ${minPeriapsis}+`)
+      .setColor(lo < 0 ? '#f87171' : lowOk ? '#7dd3fc' : '#fbbf24');
     this.highText
-      .setText(o.escaping ? 'HIGH\nescaping!' : `HIGH ${formatDistance(hi)}${highOk ? '' : `\nmax ${maxApoapsis.toLocaleString()}`}`)
-      .setColor(highOk ? '#fbbf24' : '#f87171')
-      .setPosition(lx, Math.max(highY, this.tubeTop + 4));
+      .setText(o.escaping ? 'HIGH\nescapes!' : `HIGH ${formatDistance(hi)}\nmax ${maxApoapsis.toLocaleString()}`)
+      .setColor(highOk ? '#fbbf24' : '#f87171');
 
     if (hold !== null && lowOk && highOk) {
       g.fillStyle(UI.green, 1);
-      g.fillRect(this.fx + 18, this.top + this.h - 16, (this.w - 36) * hold, 4);
-      this.status.setText('STABLE ORBIT…\nhold it').setColor(UI.greenText);
-    } else if (lowOk && highOk) {
-      this.status.setText('Stable orbit').setColor(UI.greenText);
-    } else if (lo < 0) {
-      this.status.setText('Burn sideways to swing round the Moon').setColor('#f87171').setAlpha(0.7 + 0.3 * Math.sin(time / 150));
-    } else if (!highOk) {
-      this.status.setText('Too fast: point backwards and burn near the low point').setColor('#fbbf24').setAlpha(1);
-    } else {
-      this.status.setText('Low point too low: burn along your motion').setColor('#fbbf24').setAlpha(1);
+      const len = (this.tubeBottom - this.tubeTop) * hold;
+      g.fillRect(this.fx + this.w - 16, this.tubeBottom - len, 4, len);
     }
   }
 }

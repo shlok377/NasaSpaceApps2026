@@ -22,6 +22,15 @@
 
 ### 📝 Message Stream
 
+#### 🟣 [Claude] - 2026-11-06 (Moon network — branch `feature/moon-program`, no PR yet)
+Deployed satellites and rovers now **stay** and help later flights (`game/moonNetwork.ts`, numbers in `game.json` → `network`).
+- A **day = one launch**: a satellite lasts 15, a rover 5. Each launch spends one day on every asset (`spendDay`); flat ones are retired. Saved in `PlayerProgress.assets`; a flight that finishes its objective leaves a new one (satellite on its deployment orbit, rover where it landed in the zone).
+- **Scouted landing spots** (`scoutSites`): satellite = 1 spot, rover = 3 spots, up to 9, new places each flight. Narrow (satellite ×0.7, rover ×0.5 of the mission's zone) but every other asset widens them (+25 % each, cap ×2.5). With nothing deployed the old fixed zone is the only spot. The **crew** gets extra width per rover (+40 %) and per satellite (+20 %), and rovers on the Moon switch the boulder surprise off (`PhaseRunner.scouted`).
+- **Pick a spot** from orbit: number keys, TAB or click on the orbit map (rover: before the drop; crew: before the final descent). `PhaseRunner.roverZone / landingSite` hold the pick, and **landing in any scouted spot counts** (`extraRoverZones / extraLandingSites`).
+- Deployed assets are drawn at half size on the orbit map (`PayloadSprites.updateNetwork`); satellites keep flying their own orbit. Touching one costs 5–10 health once per pass (`checkNetworkCollisions`), and the asset dies: any asset that hits the rocket or another asset falls into the Moon with an explosion and is deleted from the saved list whatever its battery (`doom` / `blowUp`). Name tags (SAT-1, ROV-2) float over each asset; rovers are drawn as big as satellites.
+- **Bottom-right panel** (`ui/NetworkPanel.ts`): a satellite icon and a rover icon, each opens its list with the days of battery left, plus total scout spots and coverage of the Moon.
+- Not flown by hand over many missions; balance numbers are first guesses.
+
 #### 🟣 [Claude] - 2026-11-05 (Main menu — branch `feature/main-menu`)
 New first scene, `src/scenes/MenuScene.ts`: CONTINUE, NEW GAME, FLIGHT SCHOOL, OPTIONS, EXIT (all five always shown; CONTINUE is greyed with no save, NEW GAME asks twice before wiping a save, FLIGHT SCHOOL is a controls guide, OPTIONS has sound and fullscreen, EXIT tries `window.close()`). The rocket stands on a pad in front of the lab's own dusk sky; PLAY/CONTINUE lifts it off and the lab fades in over it.
 - **Shared sky**: the backdrop, stars, Moon and sparkles moved to `src/ui/labSky.ts` (`paintLabSky`); `BuilderScene.drawScenery` now just calls it, so menu and lab are pixel-identical and the hand-over has no cut. Gemini: this is the only change to your scene besides `init(data)` + `playMenuIntro()` (fade-in when `fromMenu`).
@@ -113,6 +122,7 @@ Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLA
 - [x] Rock belt as part of the flight (`src/modules/rockBelt`), difficulty per launch time.
 - [x] Payload objectives, rewards, shell separation keys, hull integrity (`fixing_gameplay`).
 - [x] Flight challenges in `src/modules/` (max-Q, wind shear, staging fault, radiation belt, trans-lunar window).
+- [x] Moon network: deployed assets with batteries, scouted landing spots, bottom-right panel (`feature/moon-program`).
 - [ ] Restyle the orbit gauge and problem cards to match the new HUD.
 - [x] Animated satellite, rover and crew sprites (`animated_sprites/`, `feature/sprites`).
 - [x] Satellite / rover sprites, hazard scheduling, two-step mission HUD.
