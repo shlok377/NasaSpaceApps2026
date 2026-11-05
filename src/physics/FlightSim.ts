@@ -277,9 +277,9 @@ export class FlightSim {
   /** RCS shells already cracked open (by their key, in any phase of flight). */
   public openShells = new Set<string>();
 
-  /** A shell is open once separated, or from the start if nothing hangs on it. */
+  /** A shell is open once its key separated it; every shell starts shut, even one with nothing on it. */
   public isShellOpen(rcsId: string): boolean {
-    return this.openShells.has(rcsId) || !this.vehicle.parts.some(p => p.parentId === rcsId);
+    return this.openShells.has(rcsId);
   }
 
   /** RCS thrusters that can fire: shell open and still aboard. */
@@ -292,13 +292,13 @@ export class FlightSim {
     return this.activeRcsCount > 0;
   }
 
-  /** Keys of the RCS shells still closed (parts hang on them), without repeats. */
+  /** Keys of the RCS shells still closed, without repeats. */
   public get closedShellKeys(): string[] {
     const keys = this.vehicle.parts.filter(p => p.type === 'RCS' && !this.isShellOpen(p.id)).map(p => p.separationKey ?? DEFAULT_SEPARATION_KEY);
     return [...new Set(keys)];
   }
 
-  /** Some RCS shell with parts hanging on it is still closed. */
+  /** Some RCS shell is still closed. */
   public get canSeparate(): boolean {
     return this.phase === 'FLYING' && this.vehicle.parts.some(p => p.type === 'RCS' && !this.isShellOpen(p.id));
   }

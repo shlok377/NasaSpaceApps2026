@@ -217,7 +217,7 @@ export class BuilderScene extends Phaser.Scene {
     }
 
     // The destination looms over the launch site.
-    this.add.image(905, 175, GAME_ASSETS.UI_MOON.key).setScale(6);
+    this.add.image(905, 175, GAME_ASSETS.UI_MOON_BIG.key).setScale(1.5);
 
     // Twinkling plus-shaped sparkles.
     const sparkleColors = [0xfff1d0, 0xffd23f, 0xff8a5c, 0xffffff];
@@ -1063,7 +1063,7 @@ export class BuilderScene extends Phaser.Scene {
     const node = this.shellTipId ? this.rocketTree.getAllNodes().find(n => n.id === this.shellTipId) : undefined;
     if (!node) return;
     const size = BuilderScene.CELL_SIZE;
-    // Only a refused key shows a note; an RCS with nothing on it just works (its key does nothing).
+    // Only a refused key shows a note; an RCS with nothing on it is fine (its key just opens the shell).
     const warning = this.shellTipNote;
     const w = 250;
     const h = warning ? 112 : 86;

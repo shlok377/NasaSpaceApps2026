@@ -46,6 +46,8 @@ export interface FlightSceneData {
 
 const GAME_SPEED = CONFIG.gameSpeed;
 const COUNTDOWN_SECONDS = 3;
+/** How long a low fuel type keeps the buzzer going. */
+const FUEL_BUZZ_MS = 20000;
 const THROTTLE_RATE = 0.9; // per second while a throttle key is held
 /** How often the "coast" apex prediction is refreshed (ms). */
 const APEX_INTERVAL_MS = 200;
@@ -162,6 +164,8 @@ export class FlightScene extends Phaser.Scene {
   private engineSound: EngineLoop | null = null;
   /** Loops while any warning lasts. */
   private buzzer: LoopSfx | null = null;
+  /** When each fuel type went low (scene time, ms): its buzzer gives up after FUEL_BUZZ_MS. */
+  private lowFuelSince = new Map<string, number>();
   private finishedAt: number | null = null;
   private result: MissionResult | null = null;
   private earnings: FlightEarnings | null = null;
@@ -202,6 +206,7 @@ export class FlightScene extends Phaser.Scene {
     this.countdown = null;
     this.launched = false;
     this.exploded = false;
+    this.lowFuelSince = new Map();
     this.finishedAt = null;
     this.result = null;
     this.earnings = null;
@@ -730,6 +735,8 @@ export class FlightScene extends Phaser.Scene {
     // Problems that went wrong before the checkpoint still count.
     this.runner.solved = cp.solved;
     this.runner.failedProblems = cp.failedProblems;
+    // The challenges start over too: a used belt, dose or jam must not carry into the second try.
+    this.challenges = createChallenges();
     this.exposeForDebug();
     this.stunts.awards.length = cp.awardCount;
     this.stunts.total = this.stunts.awards.reduce((s, a) => s + a.points, 0);
@@ -742,6 +749,7 @@ export class FlightScene extends Phaser.Scene {
     this.resultPanel = null;
     this.finishedAt = null;
     this.exploded = false;
+    this.lowFuelSince = new Map();
     this.throttle = 0;
     this.lastVersion = this.sim.version;
     this.bannerQueue = [];
@@ -868,13 +876,19 @@ export class FlightScene extends Phaser.Scene {
       }
     }
 
-    // Buzzer: loops until every warning is gone — the angle corrected, the landing slowed, or a low fuel type run dry.
+    // Buzzer: loops until every warning is gone — the angle corrected (in the air), the landing slowed, or a low fuel type run dry.
+    // Each low fuel type buzzes for at most 20 s (or until it runs dry), then the tag alone keeps blinking.
+    const lowNow = new Set<string>(lowFuelKinds(tanks, false));
+    for (const kind of [...this.lowFuelSince.keys()]) if (!lowNow.has(kind)) this.lowFuelSince.delete(kind);
+    for (const kind of lowNow) if (!this.lowFuelSince.has(kind)) this.lowFuelSince.set(kind, now);
+    const fuelBuzz = [...this.lowFuelSince.values()].some(since => now - since < FUEL_BUZZ_MS);
     const warning =
       flying &&
       this.launched &&
       ((challenge?.danger && !challenge.needle) ||
-        lowFuelKinds(tanks, false).length > 0 ||
-        Math.abs(t.pitchFromVertical * 180) / Math.PI > TILT_RED ||
+        fuelBuzz ||
+        // Leaning only matters in the air: past the edge of space it is how you steer to the Moon.
+        (t.earthAltitude < WORLD.atmosphereTop && Math.abs(t.pitchFromVertical * 180) / Math.PI > TILT_RED) ||
         (landing && t.speed > LIMITS.bounceSpeed) ||
         (landing && Math.abs(t.pitchFromVertical) > LIMITS.maxLandingTilt && t.altitude < 40));
     this.buzzer?.set(warning);

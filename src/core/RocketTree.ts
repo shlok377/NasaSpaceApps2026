@@ -252,7 +252,7 @@ export class RocketTree {
     return this.nodes.get(id)?.separationKey ?? DEFAULT_SEPARATION_KEY;
   }
 
-  /** What is wrong with an RCS shell's setup, or null (nothing hangs on it, so its key does nothing). */
+  /** What is wrong with an RCS shell's setup, or null (an empty shell is fine: its key just opens it). */
   public shellWarning(id: string): string | null {
     const node = this.nodes.get(id);
     if (!node || node.type !== 'RCS') return null;
