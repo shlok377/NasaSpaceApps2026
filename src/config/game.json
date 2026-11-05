@@ -96,11 +96,11 @@
     "comboWindow": 10,
     "difficulty": {
       "_note": "Per rating (1 easy … 5 hardest): rocks per 100 m climbed, share of boulders, fastest sideways drift (m/s), biggest small rock and boulder radius (m), health a small rock costs, near-miss distance (m from the hull).",
-      "1": { "rocksPer100m": 0.65, "boulderShare": 0.05, "driftSpeedMax": 6, "rockRadiusMax": 3.5, "boulderRadius": 6, "smallRockDamage": 8, "nearMissMargin": 6 },
-      "2": { "rocksPer100m": 1.0, "boulderShare": 0.1, "driftSpeedMax": 9, "rockRadiusMax": 4, "boulderRadius": 6, "smallRockDamage": 8, "nearMissMargin": 6 },
-      "3": { "rocksPer100m": 1.35, "boulderShare": 0.15, "driftSpeedMax": 12, "rockRadiusMax": 4.5, "boulderRadius": 6.5, "smallRockDamage": 8, "nearMissMargin": 6 },
-      "4": { "rocksPer100m": 1.7, "boulderShare": 0.2, "driftSpeedMax": 15, "rockRadiusMax": 5, "boulderRadius": 7, "smallRockDamage": 8, "nearMissMargin": 6 },
-      "5": { "rocksPer100m": 2.2, "boulderShare": 0.25, "driftSpeedMax": 18, "rockRadiusMax": 5.5, "boulderRadius": 7.5, "smallRockDamage": 10, "nearMissMargin": 6 }
+      "1": { "rocksPer100m": 0.65, "boulderShare": 0.05, "driftSpeedMax": 0.5, "rockRadiusMax": 3.5, "boulderRadius": 6, "smallRockDamage": 8, "nearMissMargin": 6 },
+      "2": { "rocksPer100m": 1.0, "boulderShare": 0.1, "driftSpeedMax": 0.8, "rockRadiusMax": 4, "boulderRadius": 6, "smallRockDamage": 8, "nearMissMargin": 6 },
+      "3": { "rocksPer100m": 1.35, "boulderShare": 0.15, "driftSpeedMax": 1.2, "rockRadiusMax": 4.5, "boulderRadius": 6.5, "smallRockDamage": 8, "nearMissMargin": 6 },
+      "4": { "rocksPer100m": 1.7, "boulderShare": 0.2, "driftSpeedMax": 1.6, "rockRadiusMax": 5, "boulderRadius": 7, "smallRockDamage": 8, "nearMissMargin": 6 },
+      "5": { "rocksPer100m": 2.2, "boulderShare": 0.25, "driftSpeedMax": 2, "rockRadiusMax": 5.5, "boulderRadius": 7.5, "smallRockDamage": 10, "nearMissMargin": 6 }
     }
   },
   "airframe": {
