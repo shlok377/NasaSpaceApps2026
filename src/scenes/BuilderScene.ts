@@ -6,10 +6,10 @@ import { FUEL_KINDS, fuelUnlockCost, PART_DEFINITIONS, PAYLOADS, partCost } from
 import { FuelKind, PartType, PayloadKind, PortDirection, RocketNode } from '../core/types';
 import { ParticleManager } from '../particles';
 import { preloadGameAssets, getPartTextureKey, GAME_ASSETS } from '../core/assets';
-import { PX, drawPixelPanel, drawSparkle, pixelBody, pixelTitle } from '../ui/pixel';
+import { PX, drawPixelPanel, pixelBody, pixelTitle } from '../ui/pixel';
 import { normalizeKey } from '../core/separationKeys';
 import { playSfx } from '../core/sound';
-import { BACKDROP_SCALE, createBackdropTexture } from '../ui/backdrop';
+import { paintLabSky } from '../ui/labSky';
 
 interface PaletteBay {
   type: PartType;
@@ -147,6 +147,13 @@ export class BuilderScene extends Phaser.Scene {
     super('BuilderScene');
   }
 
+  /** True when the player arrived from the main menu, which fades into this scene. */
+  private fromMenu = false;
+
+  init(data?: { fromMenu?: boolean }): void {
+    this.fromMenu = !!data?.fromMenu;
+  }
+
   preload(): void {
     preloadGameAssets(this);
   }
@@ -197,6 +204,24 @@ export class BuilderScene extends Phaser.Scene {
     window.addEventListener('scroll', () => {
       this.scale.updateBounds();
     });
+
+    if (this.fromMenu) this.playMenuIntro();
+  }
+
+  /**
+   * Arriving from the main menu: fade in over it. The menu draws this very same sky (ui/labSky.ts),
+   * so the backdrop never changes and only the panels appear. The menu is stopped once this is opaque.
+   */
+  private playMenuIntro(): void {
+    const cam = this.cameras.main;
+    cam.setAlpha(0);
+    this.tweens.add({
+      targets: cam,
+      alpha: 1,
+      duration: 900,
+      ease: 'Sine.easeInOut',
+      onComplete: () => this.scene.stop('MenuScene')
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -204,43 +229,8 @@ export class BuilderScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
 
   private drawScenery(): void {
-    const g = this.sceneryGraphics;
-    const w = this.scale.width;
-    const rnd = new Phaser.Math.RandomDataGenerator(['rocket-lab']);
-
-    g.clear();
-    createBackdropTexture(this, 'builder_backdrop');
-    this.add.image(0, 0, 'builder_backdrop').setOrigin(0).setScale(BACKDROP_SCALE).setDepth(-1);
-
-    // Stars fade out toward the warm horizon.
-    const dotColors = [0xffffff, 0xfff1d0, 0xffd6c2, 0xd8d0ff];
-    for (let i = 0; i < 140; i++) {
-      const y = Math.round(Math.pow(rnd.frac(), 1.8) * 420 / 2) * 2;
-      g.fillStyle(rnd.pick(dotColors), rnd.realInRange(0.3, 1) * (1 - y / 520));
-      g.fillRect(Math.round(rnd.between(0, w) / 2) * 2, y, rnd.frac() < 0.85 ? 2 : 3, 2);
-    }
-
-    // The destination looms over the launch site.
-    this.add.image(905, 175, GAME_ASSETS.UI_MOON_BIG.key).setScale(1.5);
-
-    // Twinkling plus-shaped sparkles.
-    const sparkleColors = [0xfff1d0, 0xffd23f, 0xff8a5c, 0xffffff];
-    for (let i = 0; i < 18; i++) {
-      const s = this.add.graphics();
-      drawSparkle(s, rnd.pick(sparkleColors), 3, rnd.frac() < 0.4);
-      s.setPosition(rnd.between(20, w - 20), rnd.between(20, 380));
-      this.tweens.add({
-        targets: s,
-        alpha: { from: 1, to: 0.15 },
-        duration: rnd.between(700, 1800),
-        delay: rnd.between(0, 1500),
-        yoyo: true,
-        repeat: -1,
-        ease: 'Stepped',
-        easeParams: [4]
-      });
-    }
-
+    // Shared with the main menu so the two screens look identical (see ui/labSky.ts).
+    paintLabSky(this, this.sceneryGraphics);
   }
 
   private drawGrid(): void {
