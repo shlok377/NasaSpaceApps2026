@@ -2,8 +2,7 @@ import Phaser from 'phaser';
 import { CONFIG } from '../../config';
 import { PART_DEFINITIONS } from '../../core/partDefinitions';
 import { BOULDER_FIELD, ROVER_ZONE, RoverCapsule, SurfaceZone } from '../../game/phases';
-import { laneThreats, Rock, rockX, runnerSpeedAt } from '../../game/rocks';
-import { EvasiveRunnerState, RUNNER_CONFIG, RUNNER_LANES } from '../../game/evasiveRunner';
+import { Rock, rockX } from '../../modules/rockBelt/RockField';
 import { gravityAt, insideMoonSoi, localUp, moonAltitude, moonSurfacePoint } from '../../physics/bodies';
 import { MOON, MOON_CENTER, ROCK_BELT, WORLD } from '../../physics/constants';
 import { FlightSim, FlightTelemetry } from '../../physics/FlightSim';
@@ -316,7 +315,7 @@ export class WorldRenderer {
    * Frame the flight for the given mode. Scales are fixed per mode; changing
    * mode is a cut, not a zoom.
    */
-  public updateCamera(sim: FlightSim, t: FlightTelemetry, dt: number, mode: CameraMode, runnerActive = false): void {
+  public updateCamera(sim: FlightSim, t: FlightTelemetry, dt: number, mode: CameraMode): void {
     const c = this.camera;
     const snap = mode !== c.mode;
     c.mode = mode;
@@ -334,7 +333,7 @@ export class WorldRenderer {
     }
 
     if (mode === 'ASCENT') {
-      const targetScale = runnerActive ? (RUNNER_CONFIG?.cameraScale ?? 14) : cam.ascentScale;
+      const targetScale = cam.ascentScale;
       if (snap) {
         c.scale = targetScale;
       } else {
@@ -344,7 +343,7 @@ export class WorldRenderer {
       const targetUp = Math.PI / 2;
       const climbFactor = sim.onGround ? 1 : Phaser.Math.Clamp((t.verticalSpeed + 8) / 16, 0, 1);
       const normalRocketY = 260 + (470 - 260) * climbFactor;
-      const targetRocketY = runnerActive ? (RUNNER_CONFIG?.rocketY ?? 560) : normalRocketY;
+      const targetRocketY = normalRocketY;
 
       if (snap) {
         this.smoothedRocketY = targetRocketY;
@@ -353,7 +352,7 @@ export class WorldRenderer {
         this.smoothedRocketY += (targetRocketY - this.smoothedRocketY) * (1 - Math.exp(-dt * 3));
         c.upAngle = targetUp;
       }
-      const targetCameraX = runnerActive ? 0 : s.x;
+      const targetCameraX = s.x;
       if (snap) {
         c.x = targetCameraX;
       } else {
@@ -404,7 +403,7 @@ export class WorldRenderer {
     p.life = life;
   }
 
-  public updateSmoke(simDt: number, sim: FlightSim, t: FlightTelemetry, alive: boolean, runnerState?: EvasiveRunnerState): void {
+  public updateSmoke(simDt: number, sim: FlightSim, t: FlightTelemetry, alive: boolean): void {
     // 1. Advance existing smoke particles first
     const damp = Math.exp(-2.2 * simDt);
     let writeIdx = 0;
@@ -466,18 +465,6 @@ export class WorldRenderer {
       }
     }
 
-    // 3. Lateral RCS puffs during runner lane shift
-    if (alive && runnerState?.active && runnerState.shiftProgress < 1) {
-      const s = sim.state;
-      const visual = this.camera.rocketScale / this.camera.scale;
-      const movingRight = RUNNER_LANES[runnerState.targetLaneIndex] > runnerState.startX;
-      const puffSide = movingRight ? -1 : 1;
-      const puffX = s.x + puffSide * 1.2 * visual;
-      const puffY = s.y;
-      const vx = puffSide * (18 + Math.random() * 6);
-      const vy = (Math.random() - 0.5) * 4;
-      this.spawnSmoke(puffX, puffY, vx, vy, 0.4 + Math.random() * 0.3);
-    }
   }
 
   private hideSmokeSprites(): void {
@@ -486,10 +473,9 @@ export class WorldRenderer {
     }
   }
 
-  public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, overlay: MissionOverlay, runnerState?: EvasiveRunnerState): void {
+  public render(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], alive: boolean, overlay: MissionOverlay): void {
     this.labelIndex = 0;
-    // On the pad every shell is still shut; an empty one opens as the rocket lifts off.
-    this.openRcs = sim.phase === 'PRELAUNCH' ? new Set() : new Set(sim.vehicle.parts.filter(p => p.type === 'RCS' && sim.isShellOpen(p.id)).map(p => p.id));
+    this.openRcs = new Set(sim.vehicle.parts.filter(p => p.type === 'RCS' && sim.isShellOpen(p.id)).map(p => p.id));
     this.drawSky(sim, t);
     const g = this.worldGfx;
     g.clear();
@@ -501,7 +487,7 @@ export class WorldRenderer {
       this.roverFlagSprite?.setVisible?.(false);
       this.payloadSprite?.setVisible?.(false);
       this.landingFlagSprite?.setVisible?.(false);
-      this.drawAscent(sim, t, rocks, runnerState);
+      this.drawAscent(sim, t, rocks);
     } else {
       this.mapMoonSprite?.setVisible?.(false);
       this.hideSmokeSprites();
@@ -581,8 +567,10 @@ export class WorldRenderer {
       // Fully opaque in every time of day: a solid Moon, never a ghost.
       this.skyMoonSprite?.setPosition?.(cx, cy);
       this.skyMoonSprite?.setDisplaySize?.(r * 2, r * 2);
-      this.skyMoonSprite?.setAlpha?.(1);
-      this.skyMoonSprite?.setVisible?.(true);
+      // Day themes: opacity follows height alone, 0 at the top of the clouds to 100% at the space stage, and back down the same way on a fall. Night keeps it solid.
+      const alpha = this.time === 'NIGHT' ? 1 : Phaser.Math.Clamp((y - WORLD.cloudsTo) / (WORLD.atmosphereTop - WORLD.cloudsTo), 0, 1);
+      this.skyMoonSprite?.setAlpha?.(alpha);
+      this.skyMoonSprite?.setVisible?.(alpha > 0);
     } else {
       this.skyMoonSprite?.setVisible?.(false);
     }
@@ -815,37 +803,10 @@ export class WorldRenderer {
   // The climb
   // ---------------------------------------------------------------------------
 
-  private drawAscent(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[], runnerState?: EvasiveRunnerState): void {
+  private drawAscent(sim: FlightSim, t: FlightTelemetry, rocks: readonly Rock[]): void {
     const g = this.worldGfx;
     const scale = this.camera.scale;
     const s = sim.state;
-
-    // Retro dotted runway lines for the 5 lanes during evasive runner mode
-    if (runnerState?.active) {
-      const step = 28;
-      const dash = 14;
-      const scrollOffset = Math.floor((s.y * scale) % step);
-
-      // Subtle outer boundary borders
-      const leftBound = this.toScreen(RUNNER_LANES[0] - 6, s.y).x;
-      const rightBound = this.toScreen(RUNNER_LANES[RUNNER_LANES.length - 1] + 6, s.y).x;
-      g.lineStyle(2, 0x0284c7, 0.4);
-      g.lineBetween(leftBound, 0, leftBound, 720);
-      g.lineBetween(rightBound, 0, rightBound, 720);
-
-      // Dashed lane lines
-      for (let i = 0; i < RUNNER_LANES.length; i++) {
-        const lx = RUNNER_LANES[i];
-        const p = this.toScreen(lx, s.y);
-        const isCurrent = i === runnerState.currentLaneIndex;
-        g.lineStyle(isCurrent ? 2 : 1.5, isCurrent ? 0x38bdf8 : 0x0ea5e9, isCurrent ? 0.65 : 0.35);
-        for (let py = -scrollOffset; py < 720; py += step) {
-          g.lineBetween(p.x, py, p.x, py + dash);
-        }
-        // Lane indicator at the bottom
-        this.label(p.x, 702, `L${i + 1}`, isCurrent ? '#38bdf8' : '#64748b', 12);
-      }
-    }
 
     // The ground itself is the launch-site panorama (see drawSky); here just the pad and its tower.
     if (s.y < 60) this.drawPad(g, sim, scale);
@@ -912,23 +873,20 @@ export class WorldRenderer {
       this.smokeSpritesPool[i].setVisible(false);
     }
 
-    // Rocks and fuel in the belt, with warning chevrons for what's coming.
+    // Rocks in the belt, with warning chevrons for what's coming. A rock that hit is gone (it shattered).
     if (s.y > ROCK_BELT.bottom - CONFIG.rockBelt.warningDistance) {
       const time = s.time;
       const ahead = CONFIG.rockBelt.warningDistance;
-      const runner = runnerState?.active === true;
-      if (runner) this.drawLaneThreats(g, rocks, s.y, time);
       for (const r of rocks) {
-        if (r.spent) continue;
+        if (r.hit) continue;
         const dy = r.y - s.y;
         if (dy < -halfH - 10 || dy > ahead) continue;
         const p = this.toScreen(rockX(r, time), r.y);
         const pr = r.radius * scale;
-        const color = r.kind === 'ROCK' ? WORLD_COLORS.danger : WORLD_COLORS.fuel;
+        const color = WORLD_COLORS.danger;
         if (p.y + pr < 0) {
           // Off the top of the screen: a chevron at the edge, brighter as it closes in.
-          // (In the evasive runner the per-lane look-ahead chevrons replace these.)
-          if (runner || p.x < -40 || p.x > 1320) continue;
+          if (p.x < -40 || p.x > 1320) continue;
           const closeness = 1 - Phaser.Math.Clamp((p.y + pr) / -(ahead * scale), 0, 1);
           const x = Phaser.Math.Clamp(p.x, 16, 1264);
           const size = 6 + Math.min(14, r.radius * 2.5) * (0.5 + closeness * 0.5);
@@ -937,43 +895,18 @@ export class WorldRenderer {
           continue;
         }
         if (p.x < -pr || p.x > 1280 + pr || p.y > 720 + pr) continue;
-        if (r.kind === 'ROCK') {
-          const pts: number[] = [];
-          for (let i = 0; i < 9; i++) {
-            const a = (i / 9) * Math.PI * 2 + r.seed * 6 + time * (r.seed - 0.5) * 0.6;
-            const rr = pr * (0.78 + 0.22 * Math.sin(r.seed * 50 + i * 2.1));
-            pts.push(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr);
-          }
-          g.fillStyle(WORLD_COLORS.rock, 1);
-          polygon(g, pts, true);
-          g.lineStyle(2, WORLD_COLORS.rockEdge, 1);
-          polygon(g, pts, false);
-        } else {
-          g.fillStyle(WORLD_COLORS.fuel, 1);
-          g.fillRoundedRect(p.x - pr * 0.6, p.y - pr, pr * 1.2, pr * 2, 4);
-          g.fillStyle(0xffffff, 0.8);
-          g.fillRect(p.x - pr * 0.3, p.y - pr * 1.15, pr * 0.6, pr * 0.25);
+        const pts: number[] = [];
+        for (let i = 0; i < 9; i++) {
+          const a = (i / 9) * Math.PI * 2 + r.seed * 6 + time * (r.seed - 0.5) * 0.6;
+          const rr = pr * (0.78 + 0.22 * Math.sin(r.seed * 50 + i * 2.1));
+          pts.push(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr);
         }
+        g.fillStyle(WORLD_COLORS.rock, 1);
+        polygon(g, pts, true);
+        g.lineStyle(2, WORLD_COLORS.rockEdge, 1);
+        polygon(g, pts, false);
       }
     }
-  }
-
-  /**
-   * Evasive runner: one red chevron at the top of each lane a rock will cross
-   * within the short look-ahead (drifters at their future x), brighter and
-   * bigger the sooner it arrives. Rocks already on screen speak for themselves.
-   */
-  private drawLaneThreats(g: Phaser.GameObjects.Graphics, rocks: readonly Rock[], y: number, time: number): void {
-    const offScreen = this.toScreen(0, y).y / this.camera.scale;
-    const lookahead = RUNNER_CONFIG.threatLookahead;
-    laneThreats(rocks, y, time, lookahead, offScreen).forEach((eta, i) => {
-      if (eta === null) return;
-      const closeness = 1 - Phaser.Math.Clamp((eta - offScreen / runnerSpeedAt(y)) / lookahead, 0, 1);
-      const x = this.toScreen(RUNNER_LANES[i], y).x;
-      const size = 9 + 7 * closeness;
-      g.fillStyle(WORLD_COLORS.danger, 0.45 + 0.5 * closeness);
-      g.fillTriangle(x - size, 8 + size * 0.2, x + size, 8 + size * 0.2, x, 8 + size * 1.2);
-    });
   }
 
   // ---------------------------------------------------------------------------

@@ -19,8 +19,6 @@ import {
 } from '../game/phases';
 import { DEFAULT_SEPARATION_KEY, normalizeKey } from '../core/separationKeys';
 import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, objectiveBonus, payoutBreakdown, PlayerProgress, saveProgress } from '../game/progress';
-import { anchorBelt, checkBelt, Combo, generateBelt, generateLaneWaves, Rock, runnerSpeedAt } from '../game/rocks';
-import { createEvasiveRunnerState, EvasiveRunnerState, updateEvasiveRunner, RUNNER_CONFIG } from '../game/evasiveRunner';
 import { Award, StuntTracker } from '../game/stunts';
 import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay, timeOfDayReward, timeOfDayWind } from '../game/timeOfDay';
 import { moonSoiAltitude } from '../physics/bodies';
@@ -29,7 +27,7 @@ import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physic
 import { evaluateMission, MAX_STARS, MissionResult, OUTCOME_PAYOUT } from '../physics/mission';
 import { analyzeVehicle, buildFlightVehicle, FlightVehicle, VehicleReport } from '../physics/vehicle';
 import { distortedReading } from '../physics/damage';
-import { GoalChip, HeightLadder, hudFrame, InstrumentChip, MoneyChip } from '../ui/CornerHud';
+import { GoalChip, HeightLadder, hudFrame, InstrumentChip, lowFuelKinds, MoneyChip, TILT_RED } from '../ui/CornerHud';
 import { SkyCards } from '../ui/SkyCards';
 import { Milestone } from '../ui/JourneyArc';
 import { LaunchButton } from '../ui/LaunchButton';
@@ -37,6 +35,8 @@ import { drawPixelPanel, pixelBody, pixelTitle, PX } from '../ui/pixel';
 import { OrbitGauge, ProblemCard } from '../ui/PhaseHud';
 import { formatDistance, TEXT_STYLE, TITLE_STYLE, UI } from '../ui/theme';
 import { preloadGameAssets } from '../core/assets';
+import { EngineLoop, LoopSfx, playSfx } from '../core/sound';
+import { ChallengeCard, ChallengeContext, ChallengeEvent, ChallengeRunner, Combo, createChallenges } from '../modules';
 import { Effects } from './flight/Effects';
 import { CameraMode, MissionOverlay, WorldRenderer, WORLD_COLORS } from './flight/WorldRenderer';
 
@@ -46,6 +46,8 @@ export interface FlightSceneData {
 
 const GAME_SPEED = CONFIG.gameSpeed;
 const COUNTDOWN_SECONDS = 3;
+/** How long a low fuel type keeps the buzzer going. */
+const FUEL_BUZZ_MS = 20000;
 const THROTTLE_RATE = 0.9; // per second while a throttle key is held
 /** How often the "coast" apex prediction is refreshed (ms). */
 const APEX_INTERVAL_MS = 200;
@@ -68,7 +70,8 @@ const AWARD_COLORS: Partial<Record<Award['id'], string>> = {
   MILESTONE: UI.goldText,
   STAGE: '#7dd3fc',
   BULLSEYE: UI.goldText,
-  MISSION: UI.greenText
+  MISSION: UI.greenText,
+  CHALLENGE: '#7dff66'
 };
 
 /** A checkpoint plus the scene-side bits needed to rewind. */
@@ -127,8 +130,13 @@ export class FlightScene extends Phaser.Scene {
   private goalChip!: GoalChip;
   private orbitGauge!: OrbitGauge;
   private problemCard!: ProblemCard;
+  private challengeCard!: ChallengeCard;
+  /** The five flight challenges (src/modules): max-Q, wind shear, staging fault, radiation, trans-lunar window. */
+  private challenges!: ChallengeRunner;
   private ladder!: HeightLadder;
   private instruments!: InstrumentChip;
+  /** 0 = ROCKET / HEIGHT panels parked off-screen (on the pad), 1 = in place. */
+  private sideSlide = 0;
   private coins!: MoneyChip;
   private launchButton!: LaunchButton;
   private missionText!: Phaser.GameObjects.Text;
@@ -153,6 +161,11 @@ export class FlightScene extends Phaser.Scene {
   private countdown: number | null = null;
   private launched = false;
   private exploded = false;
+  private engineSound: EngineLoop | null = null;
+  /** Loops while any warning lasts. */
+  private buzzer: LoopSfx | null = null;
+  /** When each fuel type went low (scene time, ms): its buzzer gives up after FUEL_BUZZ_MS. */
+  private lowFuelSince = new Map<string, number>();
   private finishedAt: number | null = null;
   private result: MissionResult | null = null;
   private earnings: FlightEarnings | null = null;
@@ -176,29 +189,24 @@ export class FlightScene extends Phaser.Scene {
   private phasePaid = 0;
   private mission: Mission | null = null;
   private stunts = new StuntTracker();
-  private rocks: Rock[] = [];
   private combo = new Combo();
-  /** The runner belt's drifters start moving when the rocket enters the belt. */
-  private beltAnchored = false;
   private passed: boolean[] = [];
   private dropMarker: { x: number; y: number } | null = null;
   private impactMarker: { x: number; y: number } | null = null;
   private markerAt = -Infinity;
-  public runnerState: EvasiveRunnerState = createEvasiveRunnerState();
-  private spacePressedThisFrame = false;
-  private laneSteerInput = 0;
-  private runnerEntryVy = 0;
 
   constructor() {
     super('FlightScene');
   }
 
   init(data: FlightSceneData): void {
+    this.sideSlide = 0;
     this.tree = data.tree;
     this.throttle = 1;
     this.countdown = null;
     this.launched = false;
     this.exploded = false;
+    this.lowFuelSince = new Map();
     this.finishedAt = null;
     this.result = null;
     this.earnings = null;
@@ -213,10 +221,6 @@ export class FlightScene extends Phaser.Scene {
     this.repairPressed = false;
     this.timeScale = 1;
     this.titleTimer = 0;
-    this.runnerState = createEvasiveRunnerState();
-    this.spacePressedThisFrame = false;
-    this.laneSteerInput = 0;
-    this.runnerEntryVy = 0;
     this.progress = loadProgress();
     this.progressBeforeFinish = null;
     this.separatePromptShown = false;
@@ -225,9 +229,7 @@ export class FlightScene extends Phaser.Scene {
     this.phasePaid = 0;
     this.mission = currentMission(this.progress.completedMissions, this.payload);
     this.stunts = new StuntTracker();
-    this.rocks = generateBelt(Math.floor(Math.random() * 1e9));
     this.combo = new Combo();
-    this.beltAnchored = false;
     this.passed = MILESTONES.map(() => false);
     this.dropMarker = null;
     this.impactMarker = null;
@@ -245,6 +247,7 @@ export class FlightScene extends Phaser.Scene {
     this.sim = new FlightSim(this.vehicle);
     this.runner = new PhaseRunner('ORBIT', 0, Math.random, this.payload);
     this.runner.drainEvents();
+    this.challenges = createChallenges();
     this.cost = rocketCost(flattenParts(this.tree));
     this.exposeForDebug();
     if (this.game.canvas) this.game.canvas.style.cursor = 'default';
@@ -254,7 +257,13 @@ export class FlightScene extends Phaser.Scene {
     this.fx = new Effects(this);
     this.createHud();
     this.setupInput();
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.input.keyboard?.removeAllKeys(true));
+    this.engineSound = new EngineLoop(this);
+    this.buzzer = new LoopSfx(this, 'BUZZER');
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.input.keyboard?.removeAllKeys(true);
+      this.engineSound?.stop();
+      this.buzzer?.stop();
+    });
   }
 
   private exposeForDebug(): void {
@@ -272,6 +281,7 @@ export class FlightScene extends Phaser.Scene {
     this.goalChip = new GoalChip(this);
     this.orbitGauge = new OrbitGauge(this);
     this.problemCard = new ProblemCard(this);
+    this.challengeCard = new ChallengeCard(this);
     this.ladder = new HeightLadder(
       this,
       SOI_ALTITUDE,
@@ -280,7 +290,7 @@ export class FlightScene extends Phaser.Scene {
         { label: 'Space', height: WORLD.atmosphereTop },
         { label: 'Moon', height: SOI_ALTITUDE }
       ],
-      { from: ROCK_BELT.bottom, to: ROCK_BELT.top, label: 'rocks' }
+      [...this.challenges.bands].sort((a, b) => a.from - b.from)
     );
     this.instruments = new InstrumentChip(this);
     this.coins = new MoneyChip(this);
@@ -302,6 +312,7 @@ export class FlightScene extends Phaser.Scene {
     this.warpText = this.add.text(1250, 80, '', TEXT_STYLE(14, '#93c5fd')).setOrigin(1, 0.5).setDepth(20);
     this.endButton = this.add.text(1250, 694, '■ End flight', TEXT_STYLE(13, UI.textMuted)).setOrigin(1, 0.5).setInteractive({ useHandCursor: true }).setVisible(false);
     this.endButton.on('pointerdown', () => {
+      playSfx(this, 'UI_CLICK');
       if (!this.result && this.launched) this.finishMission();
     });
   }
@@ -361,19 +372,16 @@ export class FlightScene extends Phaser.Scene {
     this.keys = this.input.keyboard!.addKeys('W,S,SHIFT,CTRL,Z,X,A,D,E,F,LEFT,RIGHT,UP,DOWN,SPACE,ENTER,ESC,R,B') as Keys;
     this.keys.SPACE.on('down', () => {
       if (this.sim.phase === 'PRELAUNCH') this.startCountdown();
-      else if (this.runnerState.promptActive) this.spacePressedThisFrame = true;
       else if (this.runner.deploySatellite(this.sim) || this.runner.dropRover(this.sim)) {
         const at = this.world.rocketScreen(this.sim);
         this.fx.ring(at.x, at.y, WORLD_COLORS.rover, 50, 0.5);
       }
     });
     const onLeftDown = () => {
-      if (this.runnerState.active) this.laneSteerInput = -1;
-      else if (this.sim.phase === 'PRELAUNCH') this.stepTimeOfDay(-1);
+      if (this.sim.phase === 'PRELAUNCH') this.stepTimeOfDay(-1);
     };
     const onRightDown = () => {
-      if (this.runnerState.active) this.laneSteerInput = 1;
-      else if (this.sim.phase === 'PRELAUNCH') this.stepTimeOfDay(1);
+      if (this.sim.phase === 'PRELAUNCH') this.stepTimeOfDay(1);
     };
     this.keys.A.on('down', onLeftDown);
     this.keys.LEFT.on('down', onLeftDown);
@@ -390,7 +398,13 @@ export class FlightScene extends Phaser.Scene {
     this.input.keyboard!.on('keydown', (e: KeyboardEvent) => {
       if (this.result || !this.launched || e.repeat) return;
       const key = normalizeKey(e.key.length === 1 ? e.key : '');
-      if (!key || !this.sim.separate(key)) return;
+      if (!key) return;
+      // A jammed shell swallows its key until it is freed.
+      if (this.challenges.onSeparationKey(key, this.challengeContext(0, 0))) {
+        this.cameras.main.shake(120, 0.005);
+        return;
+      }
+      if (!this.sim.separate(key)) return;
       const at = this.world.rocketScreen(this.sim);
       this.fx.ring(at.x, at.y, WORLD_COLORS.rover, 70, 0.5);
     });
@@ -423,8 +437,7 @@ export class FlightScene extends Phaser.Scene {
   }
 
   private currentInput(_t: FlightTelemetry): ControlInput {
-    const steer = this.runnerState.active ? 0 : this.steerKey();
-    return { throttle: this.throttle, steer };
+    return { throttle: this.throttle, steer: this.steerKey() };
   }
 
   // ---------------------------------------------------------------------------
@@ -436,73 +449,24 @@ export class FlightScene extends Phaser.Scene {
     let t = this.sim.getTelemetry();
 
     if (!this.result) {
-      const ev = updateEvasiveRunner(
-        this.runnerState,
-        t.earthAltitude,
-        dt,
-        this.spacePressedThisFrame,
-        this.laneSteerInput,
-        this.sim.state.x
-      );
-      this.spacePressedThisFrame = false;
-      this.laneSteerInput = 0;
-
-      if (ev.promptTriggered) {
-        this.showBanner(`DEBRIS FIELD AHEAD: PRESS [SPACE] TO ENGAGE EVASIVE RUNNER (${Math.ceil(this.runnerState.promptTimer)}s)`, '#38bdf8');
-      }
-      if (ev.engaged) {
-        this.runnerEntryVy = Math.max(this.sim.state.vy, RUNNER_CONFIG.cruiseSpeed ?? 45);
-        this.rocks = generateLaneWaves(Math.floor(Math.random() * 1e9), this.timeOfDay);
-        // Predict the belt clock from here (as if climbing at the cruise speed); it is re-anchored at the real entry.
-        anchorBelt(this.rocks, this.sim.state.time, this.sim.state.y);
-        this.beltAnchored = false;
-        const p = this.world.rocketScreen(this.sim);
-        this.fx.ring(p.x, p.y, WORLD_COLORS.site, 180, 0.6);
-        this.showBanner('EVASIVE RUNNER ENGAGED // TIME DILATION 35%', '#22d3ee');
-      }
-      if (ev.cleared) {
-        this.showBanner('DEBRIS CLEARED // FULL THRUST RESTORED', '#34d399');
-        if (this.runnerEntryVy > this.sim.state.vy) {
-          this.sim.state.vy = this.runnerEntryVy;
-        }
-      }
-
       this.readThrottle(dt);
       this.tickCountdown(dt);
-      this.timeScale = this.runnerState.active ? RUNNER_CONFIG.timeScale : this.runner.timeScale(this.sim);
+      // The rock belt eases time down a little; the phases fast-forward quiet orbits.
+      this.timeScale = this.runner.timeScale(this.sim) * this.challenges.timeScale;
       const gameDt = dt * GAME_SPEED * this.timeScale;
       this.sim.advance(gameDt, this.currentInput(t));
-
-      if (this.runnerState.active) {
-        const inBelt = this.sim.state.y >= ROCK_BELT.bottom;
-        if (!this.beltAnchored && inBelt) {
-          this.beltAnchored = true;
-          anchorBelt(this.rocks, this.sim.state.time, this.sim.state.y);
-        }
-        this.sim.state.x = this.runnerState.currentX;
-        this.sim.state.vx = 0;
-        this.sim.state.omega = 0;
-        this.sim.state.theta = Math.PI / 2 + this.runnerState.tilt;
-        // Govern the climb to the cruise speed so the rocks come down at a readable pace: eased on
-        // the approach, then held exactly inside the belt, where the reserved safe route assumes it.
-        // Inside the belt the climb follows the speed ramp exactly (faster the higher you get).
-        const cruise = runnerSpeedAt(this.sim.state.y);
-        if (inBelt) this.sim.state.vy = cruise;
-        else this.sim.state.vy += (cruise - this.sim.state.vy) * (1 - Math.exp(-dt * 6));
-      }
 
       if (this.runner.satellite) stepRover(this.runner.satellite, gameDt);
       if (this.launched) this.runner.update(this.sim, gameDt, { repairPressed: this.repairPressed, relightHeld: this.keys.E.isDown });
       this.repairPressed = false;
       const events = this.sim.drainEvents();
       t = this.sim.getTelemetry();
+      if (this.launched) this.challenges.update(this.challengeContext(gameDt, dt, t));
+      this.handleChallengeEvents(this.challenges.drainEvents());
       this.handleEvents(events);
       this.handlePhaseEvents(this.runner.drainEvents());
       for (const a of this.stunts.update(this.sim, t, events)) this.celebrate(a);
-      if (this.world.camera.mode === 'ASCENT') {
-        this.checkRocks();
-        this.checkMilestones(t);
-      }
+      if (this.world.camera.mode === 'ASCENT') this.checkMilestones(t);
       this.checkWobble(t);
       this.refreshApex();
       this.refreshMarkers();
@@ -516,9 +480,11 @@ export class FlightScene extends Phaser.Scene {
             // Into the sea: a splash instead of a fireball.
             this.fx.splash(p.x, this.world.toScreen(this.sim.state.x, 0).y);
             this.fx.popup(p.x, p.y - 140, 'SPLASH!', '#bfe6ff', 30);
+            playSfx(this, 'SPLASH');
             this.cameras.main.shake(300, 0.006);
           } else {
             this.fx.explode(p.x, p.y);
+            playSfx(this, 'EXPLOSION');
             this.cameras.main.shake(500, 0.012);
           }
         }
@@ -531,12 +497,13 @@ export class FlightScene extends Phaser.Scene {
       this.cameras.main.shake(180, 0.006);
     }
 
-    this.world.updateCamera(this.sim, t, dt, this.chooseCameraMode(t), this.runnerState.active);
-    this.world.updateSmoke(dt * GAME_SPEED * this.timeScale, this.sim, t, !this.exploded, this.runnerState);
-    this.world.render(this.sim, t, this.rocks, !this.exploded, this.overlay(), this.runnerState);
+    this.world.updateCamera(this.sim, t, dt, this.chooseCameraMode(t));
+    this.world.updateSmoke(dt * GAME_SPEED * this.timeScale, this.sim, t, !this.exploded);
+    this.world.render(this.sim, t, this.challenges.rocks, !this.exploded, this.overlay());
     this.fx.update(dt, t, false);
     this.fx.draw(t, this.world.rocketScreen(this.sim), !this.exploded, false);
     this.updateHud(t, dt);
+    this.engineSound?.update(!this.result && !this.exploded && t.thrust > 0 ? 0.35 + 0.65 * t.throttle : 0, dt);
 
     if (t.thrust > 0 && t.earthAltitude < 60 && !this.cameras.main.shakeEffect.isRunning) {
       this.cameras.main.shake(120, 0.003 * t.throttle);
@@ -620,13 +587,18 @@ export class FlightScene extends Phaser.Scene {
   private handleEvents(events: FlightEvent[]): void {
     for (const e of events) {
       if (e.kind === 'LIFTOFF') this.cameras.main.shake(600, 0.008);
-      if (e.kind === 'BOUNCE' || e.kind === 'PART_LOST') this.cameras.main.shake(300, 0.012);
+      if (e.kind === 'BOUNCE' || e.kind === 'PART_LOST') {
+        this.cameras.main.shake(300, 0.012);
+        playSfx(this, 'ROCKET_DAMAGE');
+      }
+      if (e.kind === 'STAGE') playSfx(this, 'ROCKET_SEPARATION');
       if (e.kind === 'MOON_SOI') {
         this.showBanner('In the Moon’s pull! Burn sideways to swing into orbit', UI.greenText);
         continue;
       }
       if (e.kind === 'LANDED' || e.kind === 'CRASH') continue; // the phase runner reports these
       if (e.kind === 'SEPARATION') {
+        playSfx(this, 'ROCKET_SEPARATION');
         const at = this.world.rocketScreen(this.sim);
         this.fx.ring(at.x, at.y, 0x36ff12, 70, 0.6);
         this.cameras.main.shake(250, 0.01);
@@ -634,6 +606,42 @@ export class FlightScene extends Phaser.Scene {
         continue;
       }
       this.showBanner(e.message);
+    }
+  }
+
+  private challengeContext(dt: number, realDt: number, t: FlightTelemetry = this.sim.getTelemetry()): ChallengeContext {
+    return { sim: this.sim, t, dt, realDt, payload: this.payload, timeOfDay: this.timeOfDay };
+  }
+
+  /** Banners, alarms and awards for the flight challenges. */
+  private handleChallengeEvents(events: ChallengeEvent[]): void {
+    for (const e of events) {
+      if (e.kind === 'ROCK_HIT') {
+        // A boulder's lost part already shakes and sounds through the sim's PART_LOST event.
+        this.combo.reset();
+        const at = this.world.toScreen(e.x, e.y);
+        this.fx.burst(at.x, at.y, WORLD_COLORS.rock);
+        if (!e.boulder) {
+          playSfx(this, 'ROCKET_DAMAGE');
+          this.cameras.main.shake(200, 0.008);
+        }
+        continue;
+      }
+      if (e.kind === 'NEAR_MISS') {
+        const n = this.combo.nearMiss(this.sim.state.time);
+        this.celebrate({ id: 'NEAR_MISS', label: n > 1 ? `NEAR MISS ×${n}` : 'NEAR MISS', points: 100 * n });
+        continue;
+      }
+      if (e.kind === 'START') {
+        playSfx(this, 'BUZZER');
+        this.cameras.main.flash(160, 120, 60, 20);
+        this.showBanner(e.message, '#fbbf24');
+        // Challenges without a stretch of their own get pinned where they struck.
+        if (!this.challenges.modules.find(m => m.id === e.id)?.band) this.ladder.addFlag(e.height, 0xf87171);
+        continue;
+      }
+      this.showBanner(e.message, e.good ? UI.greenText : '#fca5a5');
+      if (e.award) this.celebrate({ id: 'CHALLENGE', label: e.award.label, points: e.award.points });
     }
   }
 
@@ -655,6 +663,7 @@ export class FlightScene extends Phaser.Scene {
           break;
         }
         case 'PROBLEM_START':
+          playSfx(this, 'BUZZER');
           this.cameras.main.shake(350, 0.01);
           this.cameras.main.flash(180, 120, 20, 20);
           break;
@@ -676,6 +685,7 @@ export class FlightScene extends Phaser.Scene {
           );
           break;
         case 'SITE_MOVED':
+          playSfx(this, 'BUZZER');
           this.cameras.main.shake(300, 0.008);
           this.showBanner(`⚠ ${PROBLEM_INFO.BOULDERS.title}: ${PROBLEM_INFO.BOULDERS.howTo}`, '#fca5a5');
           break;
@@ -725,6 +735,8 @@ export class FlightScene extends Phaser.Scene {
     // Problems that went wrong before the checkpoint still count.
     this.runner.solved = cp.solved;
     this.runner.failedProblems = cp.failedProblems;
+    // The challenges start over too: a used belt, dose or jam must not carry into the second try.
+    this.challenges = createChallenges();
     this.exposeForDebug();
     this.stunts.awards.length = cp.awardCount;
     this.stunts.total = this.stunts.awards.reduce((s, a) => s + a.points, 0);
@@ -737,15 +749,12 @@ export class FlightScene extends Phaser.Scene {
     this.resultPanel = null;
     this.finishedAt = null;
     this.exploded = false;
+    this.lowFuelSince = new Map();
     this.throttle = 0;
     this.lastVersion = this.sim.version;
     this.bannerQueue = [];
     this.dropMarker = null;
     this.impactMarker = null;
-    this.runnerState = createEvasiveRunnerState();
-    this.spacePressedThisFrame = false;
-    this.laneSteerInput = 0;
-    this.runnerEntryVy = 0;
   }
 
   private showBanner(message: string, color = '#ffffff'): void {
@@ -766,27 +775,6 @@ export class FlightScene extends Phaser.Scene {
         this.celebrate({ id: 'MILESTONE', label: m.label.toUpperCase(), points: 150 });
       }
     });
-  }
-
-  /** Rocks knock parts off; close shaves build a combo; fuel cans help. */
-  private checkRocks(): void {
-    if (this.sim.phase !== 'FLYING' || this.sim.state.y < ROCK_BELT.bottom - 50) return;
-    const parts = this.world.partPointsAsDrawn(this.sim);
-    const r = checkBelt(this.rocks, parts, this.sim.state.time, this.world.partRadiusMetres(), 1);
-    const at = this.world.rocketScreen(this.sim);
-    for (const hit of r.hits) {
-      this.combo.reset();
-      this.fx.burst(at.x, at.y, WORLD_COLORS.rock);
-      this.sim.hitPart(hit.partId);
-    }
-    for (const _ of r.nearMisses) {
-      const n = this.combo.nearMiss(this.sim.state.time);
-      this.celebrate({ id: 'NEAR_MISS', label: n > 1 ? `NEAR MISS ×${n}` : 'NEAR MISS', points: 100 * n });
-    }
-    for (const _ of r.pickups) {
-      const added = this.sim.refuel(this.vehicle.fuelCapacity * CONFIG.rockBelt.fuelCanRefill);
-      this.celebrate({ id: 'PICKUP_FUEL', label: added > 0 ? `+${Math.round(added)} kg FUEL` : 'FUEL (full)', points: 50 });
-    }
   }
 
   private checkWobble(t: FlightTelemetry): void {
@@ -819,19 +807,29 @@ export class FlightScene extends Phaser.Scene {
     this.goalChip.update(r.chain, r.phase, stepsDone(r.chain, r.phase, r.complete), this.objective(t));
 
     const ascent = mode === 'ASCENT';
-    this.ladder.setVisible(ascent && !this.result);
-    this.ladder.update(Math.max(0, t.earthAltitude), best);
+    // The ROCKET column and HEIGHT tube fly in from their edges once LAUNCH is pressed.
+    this.sideSlide += ((onPad ? 0 : 1) - this.sideSlide) * Math.min(1, dt * 5);
+    const slideOut = (1 - this.sideSlide) * 320;
+    this.instruments.setOffsetX(-slideOut);
+    this.ladder.setOffsetX(slideOut);
+    const slidIn = this.sideSlide > 0.01;
+    this.ladder.setVisible(ascent && !this.result && slidIn);
+    const glitch = this.challenges.glitch;
+    this.ladder.update(Math.max(0, t.earthAltitude), best, glitch);
     this.orbitGauge.setVisible(mode === 'ORBIT' && !this.result);
     this.orbitGauge.update(t.moonOrbit, r.phase === 'ORBIT' ? r.stableFor / CONFIG.phases.orbit.holdSeconds : null, now);
     this.problemCard.update(flying ? (r.problem as ActiveProblem | null) : null, { periapsis: t.moonOrbit?.periapsisAltitude ?? null }, now);
-    this.instruments.setVisible(!this.result);
+    const challenge = flying && !r.problem ? this.challenges.status : null;
+    this.challengeCard.update(challenge, now);
+    this.instruments.setVisible(!this.result && slidIn);
+    // One reading per tank still on the rocket, left to right.
+    const tanks = this.sim.vehicle.parts
+      .filter(p => p.fuelCapacity > 0)
+      .sort((a, b) => a.u - b.u)
+      .map(p => ({ id: p.id, kind: p.fuelKind ?? 'KEROSENE', capacity: p.fuelCapacity, fraction: (this.sim.tanks.get(p.id) ?? 0) / p.fuelCapacity }));
     this.instruments.update(
       {
-        // One reading per tank still on the rocket, left to right.
-        tanks: this.sim.vehicle.parts
-          .filter(p => p.fuelCapacity > 0)
-          .sort((a, b) => a.u - b.u)
-          .map(p => ({ id: p.id, kind: p.fuelKind ?? 'KEROSENE', capacity: p.fuelCapacity, fraction: (this.sim.tanks.get(p.id) ?? 0) / p.fuelCapacity })),
+        tanks,
         fuel: t.fuelFraction,
         twr: t.twr,
         burning: t.thrust > 0,
@@ -839,7 +837,8 @@ export class FlightScene extends Phaser.Scene {
         mass: t.mass,
         wetMass: this.vehicle.wetMass,
         health: this.sim.hull,
-        sky: TIME_LOOKS[this.timeOfDay].sky[3]
+        sky: TIME_LOOKS[this.timeOfDay].sky[3],
+        glitch
       },
       now
     );
@@ -876,6 +875,23 @@ export class FlightScene extends Phaser.Scene {
         this.readoutText.setPosition(p.x + 60, p.y).setColor(color).setText(`${Math.round(shownSpeed)} m/s  ${verdict}${tilt}\n${formatDistance(shownAlt)} to go`);
       }
     }
+
+    // Buzzer: loops until every warning is gone — the angle corrected (in the air), the landing slowed, or a low fuel type run dry.
+    // Each low fuel type buzzes for at most 20 s (or until it runs dry), then the tag alone keeps blinking.
+    const lowNow = new Set<string>(lowFuelKinds(tanks, false));
+    for (const kind of [...this.lowFuelSince.keys()]) if (!lowNow.has(kind)) this.lowFuelSince.delete(kind);
+    for (const kind of lowNow) if (!this.lowFuelSince.has(kind)) this.lowFuelSince.set(kind, now);
+    const fuelBuzz = [...this.lowFuelSince.values()].some(since => now - since < FUEL_BUZZ_MS);
+    const warning =
+      flying &&
+      this.launched &&
+      ((challenge?.danger && !challenge.needle) ||
+        fuelBuzz ||
+        // Leaning only matters in the air: past the edge of space it is how you steer to the Moon.
+        (t.earthAltitude < WORLD.atmosphereTop && Math.abs(t.pitchFromVertical * 180) / Math.PI > TILT_RED) ||
+        (landing && t.speed > LIMITS.bounceSpeed) ||
+        (landing && Math.abs(t.pitchFromVertical) > LIMITS.maxLandingTilt && t.altitude < 40));
+    this.buzzer?.set(warning);
 
     if (this.titleTimer > 0) {
       this.titleTimer -= dt;
@@ -941,7 +957,8 @@ export class FlightScene extends Phaser.Scene {
     if (r.problem?.id === 'FLAMEOUT') return 'ENGINE OUT: HOLD E to relight!';
     if (r.problem) return PROBLEM_INFO[r.problem.id].howTo;
     if (mode === 'ASCENT') {
-      if (t.earthAltitude > ROCK_BELT.bottom - 300 && t.earthAltitude < ROCK_BELT.top) return 'ROCK BELT: red arrows show rocks coming  ·  A / D dodge  ·  near misses build a combo';
+      if (t.earthAltitude > ROCK_BELT.bottom - 300 && t.earthAltitude < ROCK_BELT.top)
+        return `ROCK BELT: A / D slide sideways${this.sim.rcsReady ? ' (RCS boost)' : ''}  ·  W speed through the gaps  ·  near misses build a combo`;
       if (this.coastApex !== null && this.coastApex >= SOI_ALTITUDE && t.thrust > 0) return 'You’ll coast to the Moon now: X cuts the engines to save fuel';
       if (this.coastApex !== null && this.coastApex >= SOI_ALTITUDE) return 'Coasting to the Moon: save fuel for the orbit burn';
       if (t.fuelFraction <= 0) return 'Out of fuel: coasting';
@@ -1001,6 +1018,7 @@ export class FlightScene extends Phaser.Scene {
       completedMissions: [...this.progress.completedMissions, ...this.completedNow.map(m => m.id)]
     };
     saveProgress(this.progress);
+    if (!r.complete) playSfx(this, 'GAME_OVER');
     this.showResultPanel(this.result);
   }
 
@@ -1177,9 +1195,15 @@ export class FlightScene extends Phaser.Scene {
     };
     draw(false);
     const zone = this.add.zone(cx, cy, w, h).setInteractive({ useHandCursor: true });
-    zone.on('pointerover', () => draw(true));
+    zone.on('pointerover', () => {
+      draw(true);
+      playSfx(this, 'UI_HOVER');
+    });
     zone.on('pointerout', () => draw(false));
-    zone.on('pointerdown', onClick);
+    zone.on('pointerdown', () => {
+      playSfx(this, 'UI_CLICK');
+      onClick();
+    });
     return [bg, cap, text, zone];
   }
 }

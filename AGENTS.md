@@ -22,6 +22,23 @@
 
 ### 📝 Message Stream
 
+#### 🟣 [Claude] - 2026-11-05 (Rock belt rework — branch `fixing_gameplay`)
+The SPACE-to-engage **evasive runner is gone** (`game/evasiveRunner.ts`, `game/rocks.ts`, lanes, speed lock, its tests). The belt is now a module, `src/modules/rockBelt/`, and part of the normal flight:
+- Rocks spawn ahead of the rocket across its whole view plus a margin (`rockBelt.fieldHalfWidth`), so every flight crosses it; no wrapping or jumping rocks.
+- Dodge with throttle timing (W) and RCS nudges (A / D). Edge chevrons warn as before (`warningDistance` unchanged). Time eases to `slowMotion` (60%) inside.
+- A small rock costs `smallRockDamage` health; a boulder knocks off the part it hits (the command module takes a part's worth of damage instead of exploding).
+- Difficulty 1–5 per launch time (`timeOfDay.*.rockDifficulty`: DAWN 1 … NIGHT 4), numbers in `rockBelt.difficulty`. Hands-off: ~1 hit at dawn, ~3 at night (tested).
+- Near misses fixed: the rock no longer vanishes, and a near miss counts only once the rock is behind you, never on a hit.
+
+#### 🟣 [Claude] - 2026-11-04 (Flight challenges — branch `fixing_gameplay`)
+Five real-world hurdles on the way to the Moon, each in its own folder under **`src/modules/`** so they stay out of the core mechanics. Numbers and on/off switches: `game.json` → `challenges`. `typecheck` + all tests green.
+- **Max-Q** (900–1,500 m): air pressure over `limit` costs health; ease the throttle.
+- **Wind shear** (1,800–2,400 m): a gust that flips direction (stronger at windier launch times); leaning past 25° costs health.
+- **Staging fault** (first shell separation): may jam; tap its key 3× or the bolts blow (−15 health).
+- **Radiation belt** (3,950–4,300 m): readouts scramble, health drains per second (crew ×1.5).
+- **Trans-lunar window** (4,350 m to the Moon's pull): a needle shows the predicted Moon pass; off course at the Moon, an automatic correction burn costs fuel.
+- Hooks added to `FlightSim` (public, small): `damage()` (health without losing a part, `stats.damageTaken`), `gust`, `spendFuel()`. `ChallengeRunner` is the only thing `FlightScene` talks to. HEIGHT panel shows every band in its colour (lit while inside) and a red "!" where a shell jammed.
+
 #### 🟣 [Claude] - 2026-11-03 (Playtest fixes — branch `fixing_gameplay`)
 Played the build in a headless browser against the original brief; fixed what the user flagged. Touched your files again (`RocketTree`, `BuilderScene`). `typecheck` + 135 tests green.
 - **RCS mounting**: side-only (LEFT / RIGHT of a part); never on top of or below a part.
@@ -74,8 +91,9 @@ Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLA
 ### 🌌 Flight & Mission (Claude)
 - [x] Seaside spaceport, endless scenery, launch time of day, pixel skies.
 - [x] Corner flight HUD with ROCKET and HEIGHT columns.
-- [x] Fast staggered rock belt with boulders and drifters.
+- [x] Rock belt as part of the flight (`src/modules/rockBelt`), difficulty per launch time.
 - [x] Payload objectives, rewards, shell separation keys, hull integrity (`fixing_gameplay`).
+- [x] Flight challenges in `src/modules/` (max-Q, wind shear, staging fault, radiation belt, trans-lunar window).
 - [ ] Restyle the orbit gauge and problem cards to match the new HUD.
 - [x] Satellite / rover sprites, hazard scheduling, two-step mission HUD.
 

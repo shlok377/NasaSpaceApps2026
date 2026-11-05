@@ -69,6 +69,8 @@ export interface FlightStats {
   touchdownAt: number | null;
   stagesDropped: number;
   partsLost: number;
+  /** Health lost to stress, radiation and the like (parts lost count separately). */
+  damageTaken: number;
   bounces: number;
   fuelCollected: number;
   deltaVSpent: number;
@@ -169,6 +171,15 @@ export class FlightSim {
   public phase: FlightPhase = 'PRELAUNCH';
   /** Wind strength multiplier (later launch times blow harder). */
   public windScale = 1;
+  /** Extra wind on top of the normal profile (m/s, + = east), e.g. a wind-shear gust; air only. */
+  public gust = 0;
+  /**
+   * A straight sideways push set each frame by a challenge (the rock belt), or null: A / D slide the
+   * rocket left / right at up to `maxSpeed` without leaning, and it stops sliding as soon as you let go.
+   */
+  public dodge: { accel: number; maxSpeed: number } | null = null;
+  /** The sideways speed the dodge push has added on top of the flight (m/s, + = east). */
+  private dodgeVx = 0;
   public onGround = true;
   public tanks: Map<string, number>;
   public debris: Debris[] = [];
@@ -187,6 +198,7 @@ export class FlightSim {
     touchdownAt: null,
     stagesDropped: 0,
     partsLost: 0,
+    damageTaken: 0,
     bounces: 0,
     fuelCollected: 0,
     deltaVSpent: 0
@@ -249,15 +261,25 @@ export class FlightSim {
 
   /** Hull integrity, FULL_HULL at launch: every part lost costs a share, and at 0 the flight is lost. */
   public get hull(): number {
-    return Math.max(0, FULL_HULL - this.stats.partsLost * CONFIG.hull.perPart);
+    return Math.max(0, FULL_HULL - this.stats.partsLost * CONFIG.hull.perPart - this.stats.damageTaken);
+  }
+
+  /** Knock health off without losing a part (stress, radiation, a blown bolt). */
+  public damage(points: number): void {
+    if (this.phase === 'FLYING' && points > 0) this.stats.damageTaken += points;
+  }
+
+  /** Burn booster fuel outside the engines (a correction burn); returns the kg actually taken. */
+  public spendFuel(kg: number): number {
+    return kg > 0 ? this.drawFuel(kg) : 0;
   }
 
   /** RCS shells already cracked open (by their key, in any phase of flight). */
   public openShells = new Set<string>();
 
-  /** A shell is open once separated, or from the start if nothing hangs on it. */
+  /** A shell is open once its key separated it; every shell starts shut, even one with nothing on it. */
   public isShellOpen(rcsId: string): boolean {
-    return this.openShells.has(rcsId) || !this.vehicle.parts.some(p => p.parentId === rcsId);
+    return this.openShells.has(rcsId);
   }
 
   /** RCS thrusters that can fire: shell open and still aboard. */
@@ -270,13 +292,13 @@ export class FlightSim {
     return this.activeRcsCount > 0;
   }
 
-  /** Keys of the RCS shells still closed (parts hang on them), without repeats. */
+  /** Keys of the RCS shells still closed, without repeats. */
   public get closedShellKeys(): string[] {
     const keys = this.vehicle.parts.filter(p => p.type === 'RCS' && !this.isShellOpen(p.id)).map(p => p.separationKey ?? DEFAULT_SEPARATION_KEY);
     return [...new Set(keys)];
   }
 
-  /** Some RCS shell with parts hanging on it is still closed. */
+  /** Some RCS shell is still closed. */
   public get canSeparate(): boolean {
     return this.phase === 'FLYING' && this.vehicle.parts.some(p => p.type === 'RCS' && !this.isShellOpen(p.id));
   }
@@ -421,7 +443,7 @@ export class FlightSim {
 
     // --- Aerodynamics ---------------------------------------------------------
     const rho = airDensity(s.y);
-    const wind = rho > 0 ? windAt(s.y, s.time) * this.windScale : 0;
+    const wind = rho > 0 ? windAt(s.y, s.time) * this.windScale + this.gust : 0;
     const airVx = s.vx - wind;
     const airVy = s.vy;
     const speed = Math.hypot(airVx, airVy);
@@ -472,14 +494,15 @@ export class FlightSim {
         rcsTorque +
         thrust * Math.sin(ENGINE.gimbalRange) * gimbalArm +
         FINS.controlAuthority * v.finCount * qA * v.length * 0.5;
-    const controlTorque = steer * steerAuthority;
+    // In the rock belt A / D slide the rocket sideways instead of leaning it (applyDodge).
+    const controlTorque = this.dodge ? 0 : steer * steerAuthority;
     // Small side thrusters push the way you steer (diminished by aerodynamic dynamic pressure in thick air).
     const rcsAeroAtten = Math.max(0.25, 1 - q / 2000);
     const rcs = inSpace
       ? rcsOn
         ? steer * CONFIG.rcs.accel * this.activeRcsCount * mass
         : 0
-      : v.hasCommandModule
+      : v.hasCommandModule && !this.dodge
         ? steer * STEERING.rcsAcceleration * mass * rcsAeroAtten
         : 0;
 
@@ -512,6 +535,7 @@ export class FlightSim {
     s.theta = wrapAngle(s.theta + s.omega * dt);
     s.vx += ax * dt;
     s.vy += ay * dt;
+    this.applyDodge(steer, dt);
     s.x += s.vx * dt;
     s.y += s.vy * dt;
     s.time += dt;
@@ -523,6 +547,15 @@ export class FlightSim {
     this.checkStaging();
     this.checkContact();
     if (!this.isFinished) this.updateStats(q);
+  }
+
+  /** Slide sideways towards the dodge speed A / D ask for (steer + = left), or back to none once released. */
+  private applyDodge(steer: number, dt: number): void {
+    const target = this.dodge ? -steer * this.dodge.maxSpeed : 0;
+    const accel = this.dodge?.accel ?? Math.max(1, Math.abs(this.dodgeVx)) * 2;
+    const step = Math.max(-accel * dt, Math.min(accel * dt, target - this.dodgeVx));
+    this.dodgeVx += step;
+    this.state.vx += step;
   }
 
   /** Push and efficiency multipliers of the booster tanks being drained now (the outermost ones with fuel). */
@@ -942,7 +975,7 @@ export class FlightSim {
       mach: rho > 0 ? speed / WORLD.speedOfSound : 0,
       dynamicPressure: this.lastQ,
       airDensity: rho,
-      wind: rho > 0 ? windAt(s.y, s.time) * this.windScale : 0,
+      wind: rho > 0 ? windAt(s.y, s.time) * this.windScale + this.gust : 0,
       pitchFromVertical: wrapAngle(s.theta - upAngle),
       progradeFromVertical: speed > 0.5 ? wrapAngle(Math.atan2(s.vy, s.vx) - upAngle) : 0,
       angleOfAttack: speed > 0.5 ? wrapAngle(s.theta - Math.atan2(s.vy, s.vx)) : 0,

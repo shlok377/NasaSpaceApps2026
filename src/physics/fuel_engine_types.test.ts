@@ -137,7 +137,7 @@ describe('shell separation by key', () => {
     expect(blocks()).toBe(0);
   });
 
-  it('survives a snapshot, and a shell with nothing on it needs no key', () => {
+  it('survives a snapshot, and a shell with nothing on it stays shut until its key', () => {
     const { tree } = twoShells();
     const sim = new FlightSim(buildFlightVehicle(tree.getTelemetry().tree));
     sim.phase = 'FLYING';
@@ -151,8 +151,9 @@ describe('shell separation by key', () => {
     bare.attachPart(6, 8, 'RCS');
     const free = new FlightSim(buildFlightVehicle(bare.getTelemetry().tree));
     free.phase = 'FLYING';
+    expect(free.activeRcsCount).toBe(0);
+    expect(free.separate('B')).toBe(true);
     expect(free.activeRcsCount).toBe(1);
-    expect(free.separate('B')).toBe(false);
   });
 });
 
