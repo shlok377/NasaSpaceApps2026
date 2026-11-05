@@ -368,3 +368,21 @@ describe('hazards on the way to the Moon', () => {
     expect(fly().problem).toBeNull();
   });
 });
+
+describe('picked landing spots', () => {
+  it('the rover has to land in the zone that was picked, not the default one', () => {
+    const sim = inOrbit(400);
+    const run = new PhaseRunner('ROVER', 1, Math.random, 'ROVER');
+    run.roverZone = { angle: ROVER_ZONE.angle + 1, halfWidth: 100 };
+    const rover = { x: sim.state.x, y: sim.state.y, vx: 0, vy: 0, landed: false, angle: null, inZone: false };
+    for (let i = 0; i < 4000 && !rover.landed; i++) stepRover(rover, 0.1, run.roverZone);
+    expect(rover.landed).toBe(true);
+    expect(rover.inZone).toBe(Math.abs(rover.angle! - run.roverZone.angle) * MOON.radius <= 100);
+  });
+
+  it('the boulder field sits on the picked landing spot', () => {
+    const run = new PhaseRunner('LANDING', 2, Math.random, 'CREW');
+    run.landingSite = { angle: 2, halfWidth: 80 };
+    expect(run.boulderField.angle).toBe(2);
+  });
+});

@@ -34,7 +34,7 @@ import {
 } from './LaunchSite';
 import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay, timeOfDayWind } from '../../game/timeOfDay';
 import { hash } from '../../ui/backdrop';
-import { PayloadSprites } from './PayloadSprites';
+import { NetworkSpot, PayloadSprites } from './PayloadSprites';
 
 export const SCREEN_CX = 640;
 export const SCREEN_CY = 400;
@@ -107,6 +107,12 @@ export interface MissionOverlay {
   landedRoverOk?: boolean[];
   /** The crew has touched down: where the astronaut gets out and whether the flag goes up (landed on the site). */
   crew?: { onSite: boolean } | null;
+  /** The zone the rover has to land in (the picked spot); the default zone when missing. */
+  roverSpot?: SurfaceZone | null;
+  /** Spots to pick from while choosing (shown numbered on the orbit map). */
+  options?: { sites: SurfaceZone[]; chosen: number; kind: 'ROVER' | 'LANDING' } | null;
+  /** Satellites and rovers from earlier flights, drawn at half size. */
+  network?: { satellites: Array<{ id: string; body: RoverCapsule }>; rovers: Array<{ id: string; angle: number }> };
   /** Predicted landing point of the rover if dropped now. */
   dropMarker: { x: number; y: number } | null;
   /** Debris swarm ring (radius from the Moon's centre). */
@@ -972,6 +978,24 @@ export class WorldRenderer {
     this.pathColor = hit ? WORLD_COLORS.danger : left ? 0xfbbf24 : WORLD_COLORS.zone;
   }
 
+  /** Satellites and rovers left by earlier flights, at half size so they stay in the background. */
+  private drawNetwork(overlay: MissionOverlay): void {
+    const net = overlay.network;
+    if (!net) return;
+    const k = CONFIG.network.satelliteScale;
+    const spots: NetworkSpot[] = [];
+    for (const s of net.satellites) {
+      const p = this.toScreen(s.body.x, s.body.y);
+      spots.push({ id: s.id, kind: 'SATELLITE', x: p.x, y: p.y, size: SATELLITE_PX * k, rotation: 0 });
+    }
+    for (const r of net.rovers) {
+      const surface = moonSurfacePoint(r.angle, 0);
+      const p = this.toScreen(surface.x, surface.y);
+      spots.push({ id: r.id, kind: 'ROVER', x: p.x, y: p.y, size: ROVER_PX * k, rotation: this.screenRotation(r.angle) });
+    }
+    this.payloads.updateNetwork(spots);
+  }
+
   /** The satellite's own orbit as a thin dotted line (it keeps to it for good). */
   private drawSatelliteOrbit(g: Phaser.GameObjects.Graphics, body: RoverCapsule): void {
     const o = orbitFromState({ x: body.x - MOON_CENTER.x, y: body.y - MOON_CENTER.y }, { x: body.vx, y: body.vy }, MOON.mu, MOON.radius);
@@ -1140,6 +1164,7 @@ export class WorldRenderer {
       }
       this.drawSatelliteOrbit(g, body);
     }
+    this.drawNetwork(overlay);
     const ball = overlay.rover && !overlay.rover.landed ? this.toScreen(overlay.rover.x, overlay.rover.y) : null;
     const animated = this.payloads.updateSatellite(sat && { ...sat, size: SATELLITE_PX });
     const falling = this.payloads.updateRoverFall(ball && { ...ball, size: ROVER_PX });
@@ -1205,13 +1230,40 @@ export class WorldRenderer {
     this.payloads.updateCrew({ x: rocket.x + half * cell, y: ground.y, size: Math.max(110, cell * CREW_CELLS), onSite: overlay.crew.onSite });
   }
 
+  /** The scouted spots not picked yet: dim arcs with their number, so the pilot can choose one. */
+  private drawOptions(g: Phaser.GameObjects.Graphics, options: NonNullable<MissionOverlay['options']>): void {
+    if (options.sites.length < 2) return;
+    const color = options.kind === 'ROVER' ? WORLD_COLORS.zone : WORLD_COLORS.site;
+    const text = options.kind === 'ROVER' ? '#86efac' : '#7dd3fc';
+    options.sites.forEach((site, i) => {
+      if (i === options.chosen) return;
+      this.surfaceArc(g, site, color, 5, 0.45);
+      const at = moonSurfacePoint(site.angle, 150);
+      const p = this.toScreen(at.x, at.y);
+      this.label(p.x, p.y, `${i + 1}`, text, 13);
+    });
+  }
+
+  /** Where a screen point is in the world (the inverse of `toScreen`). */
+  public toWorld(sx: number, sy: number): { x: number; y: number } {
+    const c = this.camera;
+    const ux = Math.cos(c.upAngle);
+    const uy = Math.sin(c.upAngle);
+    const east = (sx - SCREEN_CX) / c.scale;
+    const up = (SCREEN_CY - sy) / c.scale;
+    return { x: c.x + east * uy + up * ux, y: c.y - east * ux + up * uy };
+  }
+
   /** Zones, sites, rovers and markers on the Moon's surface (map or close-up). */
   private drawMissionMarks(g: Phaser.GameObjects.Graphics, overlay: MissionOverlay, map: boolean): void {
     const pulse = 0.65 + 0.35 * Math.sin(this.scene.time.now / 220);
+    const picking = map ? overlay.options : null;
     if (overlay.roverZone) {
-      this.surfaceArc(g, ROVER_ZONE, WORLD_COLORS.zone, map ? 7 : 10, pulse);
-      const top = this.renderFlag(g, this.roverFlagSprite, GAME_ASSETS.FLAG_GREEN.key, ROVER_ZONE.angle, WORLD_COLORS.zone, map);
-      this.label(top.x, top.y - 12, 'ROVER ZONE', '#4ade80', 12);
+      const zone = overlay.roverSpot ?? ROVER_ZONE;
+      this.surfaceArc(g, zone, WORLD_COLORS.zone, map ? 7 : 10, pulse);
+      const top = this.renderFlag(g, this.roverFlagSprite, GAME_ASSETS.FLAG_GREEN.key, zone.angle, WORLD_COLORS.zone, map);
+      const many = picking?.kind === 'ROVER' && picking.sites.length > 1;
+      this.label(top.x, top.y - 12, many ? `ROVER SPOT ${picking!.chosen + 1}` : 'ROVER ZONE', '#4ade80', 12);
     } else {
       this.roverFlagSprite?.setVisible?.(false);
       this.payloadSprite?.setVisible?.(false);
@@ -1240,10 +1292,12 @@ export class WorldRenderer {
         g.fillCircle(sp.x, sp.y, Math.max(2, size * this.camera.scale * (map ? 3 : 1)));
       }
     }
+    if (picking) this.drawOptions(g, picking);
     if (overlay.site) {
       this.surfaceArc(g, overlay.site, WORLD_COLORS.site, map ? 7 : 10, pulse);
       const top = this.renderFlag(g, this.landingFlagSprite, GAME_ASSETS.FLAG_BLUE.key, overlay.site.angle, WORLD_COLORS.site, map);
-      this.label(top.x, top.y - 12, 'LANDING SITE', '#7dd3fc', 12);
+      const many = picking?.kind === 'LANDING' && picking.sites.length > 1;
+      this.label(top.x, top.y - 12, many ? `LANDING SPOT ${picking!.chosen + 1}` : 'LANDING SITE', '#7dd3fc', 12);
     } else {
       this.landingFlagSprite?.setVisible?.(false);
     }

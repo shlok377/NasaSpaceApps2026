@@ -17,6 +17,13 @@ export interface LandedRoverSpot extends SpriteSpot {
   ok: boolean;
 }
 
+/** A satellite or rover from an earlier flight, drawn small so it doesn't take over. */
+export interface NetworkSpot extends SpriteSpot {
+  id: string;
+  kind: 'SATELLITE' | 'ROVER';
+  rotation: number;
+}
+
 export interface CrewSpot extends SpriteSpot {
   /** Landed right on the site: plants the flag. Otherwise it just waves. */
   onSite: boolean;
@@ -41,6 +48,7 @@ export class PayloadSprites {
   private roverFall: Sprite | null = null;
   private landed: Array<{ sprite: Sprite; ok: boolean }> = [];
   private crew: { sprite: Sprite; onSite: boolean } | null = null;
+  private network = new Map<string, Sprite>();
   private shown = new Set<Sprite>();
   private animsReady = false;
 
@@ -118,9 +126,26 @@ export class PayloadSprites {
     return true;
   }
 
+  /** Assets left by earlier flights: the satellite keeps working, the rover keeps its wheels turning. */
+  public updateNetwork(spots: readonly NetworkSpot[]): void {
+    for (const spot of spots) {
+      const sheet: SheetName = spot.kind === 'SATELLITE' ? 'satellite' : 'rover';
+      if (!this.ready(sheet)) continue;
+      let sprite = this.network.get(spot.id);
+      if (!sprite) {
+        sprite = this.make(sheet);
+        sprite.setDepth?.(DEPTH - 1);
+        this.network.set(spot.id, sprite);
+        this.playClips(sprite, sheet, [spot.kind === 'SATELLITE' ? 'working' : 'drive']);
+      }
+      this.place(sprite, spot, 0.5, spot.kind === 'SATELLITE' ? 0.5 : ROVER_GROUND_Y);
+      sprite.setRotation?.(spot.rotation);
+    }
+  }
+
   /** Hide whatever was not placed this frame. Call once at the end of rendering. */
   public endFrame(): void {
-    const all = [this.satellite, this.roverFall, this.crew?.sprite, ...this.landed.map((l) => l.sprite)];
+    const all = [this.satellite, this.roverFall, this.crew?.sprite, ...this.landed.map((l) => l.sprite), ...this.network.values()];
     for (const sprite of all) if (sprite && !this.shown.has(sprite)) sprite.setVisible?.(false);
     this.shown.clear();
   }
