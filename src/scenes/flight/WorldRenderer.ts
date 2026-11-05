@@ -97,6 +97,8 @@ export interface MissionOverlay {
   roverZone: boolean;
   site: SurfaceZone | null;
   boulders: boolean;
+  /** Where the boulders lie (the picked landing spot); the default site when missing. */
+  boulderField?: SurfaceZone;
   rover: RoverCapsule | null;
   /** The ejected satellite, if any. */
   satellite?: RoverCapsule | null;
@@ -1227,9 +1229,10 @@ export class WorldRenderer {
       }
     }
     if (overlay.boulders) {
-      this.surfaceArc(g, BOULDER_FIELD, WORLD_COLORS.danger, map ? 5 : 8, 0.8);
+      const field = overlay.boulderField ?? BOULDER_FIELD;
+      this.surfaceArc(g, field, WORLD_COLORS.danger, map ? 5 : 8, 0.8);
       for (let i = -3; i <= 3; i++) {
-        const angle = BOULDER_FIELD.angle + (i * BOULDER_FIELD.halfWidth) / 3.4 / MOON.radius;
+        const angle = field.angle + (i * field.halfWidth) / 3.4 / MOON.radius;
         const size = (3 + ((i * 7 + 11) % 5)) * (map ? 0.15 : 1);
         const p = moonSurfacePoint(angle, size * 0.5);
         const sp = this.toScreen(p.x, p.y);

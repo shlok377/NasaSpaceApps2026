@@ -353,7 +353,7 @@ export function releaseRover(sim: FlightSim): RoverCapsule {
 }
 
 /** Falls under the Moon's gravity onto its airbags. */
-export function stepRover(rover: RoverCapsule, dt: number): void {
+export function stepRover(rover: RoverCapsule, dt: number, zone: SurfaceZone = ROVER_ZONE): void {
   if (rover.landed) return;
   const n = Math.max(1, Math.ceil(dt / 0.05));
   const h = dt / n;
@@ -366,7 +366,7 @@ export function stepRover(rover: RoverCapsule, dt: number): void {
     if (moonAltitude(rover.x, rover.y) <= 0) {
       rover.landed = true;
       rover.angle = moonAngleOf(rover.x, rover.y);
-      rover.inZone = inZone(rover.angle, ROVER_ZONE);
+      rover.inZone = inZone(rover.angle, zone);
     } else if (!insideMoonSoi(rover.x, rover.y)) {
       rover.landed = true;
       rover.angle = null;
@@ -424,9 +424,19 @@ export class PhaseRunner {
   public dropReady = false;
   public rover: RoverCapsule | null = null;
   public sparesLeft: number = ROVER_CFG.spareRovers;
+  /** The zone the rover has to land in (the spot picked from the scouted ones; the default with nothing deployed). */
+  public roverZone: SurfaceZone = { ...ROVER_ZONE };
+  /** The spot the crew aims for at the start of the landing. */
+  public landingSite: SurfaceZone = { ...LANDING_SITE };
+  /** Rovers on the Moon have already surveyed the site: no boulders surprise the crew. */
+  public scouted = false;
   /** The landing site the crew should aim for (moves if boulders block it). */
   public site: SurfaceZone = { ...LANDING_SITE };
   public bouldersSeen = false;
+  /** The rocks sit on the spot picked for the landing. */
+  public get boulderField(): SurfaceZone {
+    return { angle: this.landingSite.angle, halfWidth: LANDING_CFG.boulderFieldHalfWidth };
+  }
   public failure: string | null = null;
   public complete = false;
   /** The phases this flight has to get through, in order. */
@@ -478,7 +488,7 @@ export class PhaseRunner {
     }
     if (phase === 'DEPLOY') this.deployReady = true;
     if (phase === 'LANDING') {
-      this.site = { ...LANDING_SITE };
+      this.site = { ...this.landingSite };
       this.triggered.clear();
       this.bouldersSeen = false;
     }
@@ -531,7 +541,7 @@ export class PhaseRunner {
     if (this.dropReady && !this.rover) {
       if (sim.getTelemetry().thrust > 0) return 1;
       const hit = predictRoverLanding(sim);
-      if (hit && surfaceDistance(hit.angle, ROVER_ZONE.angle) < ROVER_ZONE.halfWidth * 5) return 1;
+      if (hit && surfaceDistance(hit.angle, this.roverZone.angle) < this.roverZone.halfWidth * 5) return 1;
       return ROVER_CFG.orbitFastForward;
     }
     return 1;
@@ -641,7 +651,7 @@ export class PhaseRunner {
       return;
     }
     if (!this.rover) return;
-    stepRover(this.rover, dt);
+    stepRover(this.rover, dt, this.roverZone);
     if (!this.rover.landed) return;
     const ok = this.rover.inZone;
     if (ok) {
@@ -665,10 +675,11 @@ export class PhaseRunner {
       if (this.triggered.has(id) || this.problem) continue;
       if (t.moonAltitude > LANDING_CFG.problems[id].atAltitude) continue;
       this.triggered.add(id);
+      if (id === 'BOULDERS' && this.scouted) continue; // surveyed by a rover: no surprise
       if (id === 'BOULDERS') {
         // Divert further along the direction of travel.
         const dir = t.moonOrbit?.direction ?? 1;
-        this.site = { angle: LANDING_SITE.angle + (dir * LANDING_CFG.problems.BOULDERS.divert) / MOON.radius, halfWidth: LANDING_CFG.siteHalfWidth };
+        this.site = { angle: this.landingSite.angle + (dir * LANDING_CFG.problems.BOULDERS.divert) / MOON.radius, halfWidth: this.landingSite.halfWidth };
         this.bouldersSeen = true;
         this.events.push({ kind: 'SITE_MOVED', site: this.site });
         continue;
@@ -681,7 +692,7 @@ export class PhaseRunner {
   /** Did the crew land somewhere safe? */
   private judgeTouchdown(sim: FlightSim): void {
     const at = sim.stats.touchdownAt;
-    if (this.bouldersSeen && inZone(at, BOULDER_FIELD)) {
+    if (this.bouldersSeen && inZone(at, this.boulderField)) {
       this.fail(sim, 'Landed in the boulder field');
       return;
     }
