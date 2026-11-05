@@ -25,7 +25,7 @@ import { coverage, counts, DeployedAsset, liveSatellite, newRover, newSatellite,
 import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, objectiveBonus, payoutBreakdown, PlayerProgress, saveProgress } from '../game/progress';
 import { Award, StuntTracker } from '../game/stunts';
 import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay, timeOfDayReward, timeOfDayWind } from '../game/timeOfDay';
-import { moonAngleOf, moonSoiAltitude, surfaceDistance } from '../physics/bodies';
+import { moonAngleOf, moonSoiAltitude, moonSurfacePoint, surfaceDistance } from '../physics/bodies';
 import { ENGINE, FINS, G0, LIMITS, MOON, MOON_CENTER, ROCK_BELT, WORLD } from '../physics/constants';
 import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physics/FlightSim';
 import { evaluateMission, MAX_STARS, MissionResult, OUTCOME_PAYOUT } from '../physics/mission';
@@ -200,7 +200,10 @@ export class FlightScene extends Phaser.Scene {
   private crewLanding: { onSite: boolean } | null = null;
   private phasePaid = 0;
   /** Satellites and rovers from earlier flights that are still serving this one. */
-  private network: Array<{ asset: DeployedAsset; body: RoverCapsule | null }> = [];
+  private network: Array<{ asset: DeployedAsset; body: RoverCapsule | null; /** Hit something: falling to the Moon, battery or not. */ doomed?: boolean }> = [];
+  /** The satellite ejected this flight hit another asset and was lost. */
+  private newSatelliteLost = false;
+  private freshBlown = false;
   /** The spots the network scouted for this flight, and which one is picked (rover drop / crew landing). */
   private sites: { rover: ScoutSite[]; landing: ScoutSite[] } = { rover: [], landing: [] };
   private chosen = { rover: 0, landing: 0 };
@@ -254,6 +257,8 @@ export class FlightScene extends Phaser.Scene {
     this.sites = { rover: scoutSites(assets, 'ROVER', ROVER_ZONE, Math.random), landing: scoutSites(assets, 'LANDING', LANDING_SITE, Math.random) };
     this.chosen = { rover: 0, landing: 0 };
     this.touching = new Set();
+    this.newSatelliteLost = false;
+    this.freshBlown = false;
     this.networkPanel = null;
     this.mission = currentMission(this.progress.completedMissions, this.payload);
     this.stunts = new StuntTracker();
@@ -483,6 +488,10 @@ export class FlightScene extends Phaser.Scene {
     const r = this.runner;
     r.roverZone = { angle: this.sites.rover[this.chosen.rover].angle, halfWidth: this.sites.rover[this.chosen.rover].halfWidth };
     r.landingSite = { angle: this.sites.landing[this.chosen.landing].angle, halfWidth: this.sites.landing[this.chosen.landing].halfWidth };
+    // The picked spot is the one to aim for, but landing in any scouted spot counts.
+    const others = (list: ScoutSite[], picked: number) => list.filter((_, i) => i !== picked).map(z => ({ angle: z.angle, halfWidth: z.halfWidth }));
+    r.extraRoverZones = others(this.sites.rover, this.chosen.rover);
+    r.extraLandingSites = others(this.sites.landing, this.chosen.landing);
     if (r.phase === 'LANDING' && !r.bouldersSeen) r.site = { ...r.landingSite };
     r.scouted = counts(this.network.map(n => n.asset)).rovers > 0;
   }
@@ -507,21 +516,90 @@ export class FlightScene extends Phaser.Scene {
     this.showBanner(`${open.kind === 'ROVER' ? 'Rover' : 'Landing'} spot ${index + 1} picked`, UI.greenText);
   }
 
-  /** Satellites keep flying their orbits while this flight runs. */
+  /** Satellites keep flying their orbits while this flight runs; one that was hit falls and blows up on the Moon. */
   private stepNetwork(gameDt: number): void {
     for (const n of this.network) {
       if (!n.body) continue;
-      stepRover(n.body, gameDt);
-      if (n.body.landed) n.body = null;
+      // A doomed satellite drops fast, so the crash is not a long wait.
+      stepRover(n.body, n.doomed ? gameDt * CONFIG.network.collision.fallTimeScale : gameDt);
+      if (!n.body.landed) continue;
+      if (n.doomed) this.blowUp(n);
+      else n.body = null;
+    }
+    // The satellite ejected this flight, if it was hit, comes down the same way.
+    const fresh = this.runner.satellite;
+    if (this.newSatelliteLost && fresh?.landed && fresh.angle !== null && !this.freshBlown) {
+      this.freshBlown = true;
+      this.explodeAt(fresh.x, fresh.y);
+    }
+    if (this.launched) this.checkAssetCrashes();
+  }
+
+  /** Hit: it loses its way and drops into the Moon. A rover on the ground blows up where it stands. */
+  private doom(n: { asset: DeployedAsset; body: RoverCapsule | null; doomed?: boolean }): void {
+    if (n.doomed) return;
+    n.doomed = true;
+    if (n.body) {
+      n.body.vx *= CONFIG.network.collision.fallSpeed;
+      n.body.vy *= CONFIG.network.collision.fallSpeed;
+    } else this.blowUp(n);
+  }
+
+  /** The asset is gone for good, whatever charge it had left. */
+  private blowUp(n: { asset: DeployedAsset; body: RoverCapsule | null }): void {
+    const at = n.body ?? (n.asset.angle !== undefined ? moonSurfacePoint(n.asset.angle, 0) : null);
+    if (at) this.explodeAt(at.x, at.y);
+    this.network = this.network.filter(m => m !== n);
+    this.progress = { ...this.progress, assets: this.progress.assets.filter(a => a.id !== n.asset.id) };
+    saveProgress(this.progress);
+    this.showBanner(`${n.asset.id} destroyed`, '#fca5a5');
+  }
+
+  private explodeAt(wx: number, wy: number): void {
+    const p = this.world.toScreen(wx, wy);
+    this.fx.explode(p.x, p.y);
+    playSfx(this, 'EXPLOSION');
+    this.cameras.main.shake(200, 0.005);
+  }
+
+  /** Assets that run into each other (satellite on satellite, satellite on a rover's spot) are both lost. */
+  private checkAssetCrashes(): void {
+    const col = CONFIG.network.collision;
+    const spots = (n: { asset: DeployedAsset; body: RoverCapsule | null }) =>
+      n.body ?? (n.asset.angle !== undefined ? moonSurfacePoint(n.asset.angle, 0) : null);
+    const live = this.network.filter(n => !n.doomed);
+    for (let i = 0; i < live.length; i++) {
+      for (let j = i + 1; j < live.length; j++) {
+        if (!live[i].body && !live[j].body) continue; // two rovers just sit there
+        const a = spots(live[i]);
+        const b = spots(live[j]);
+        if (a && b && Math.hypot(a.x - b.x, a.y - b.y) < col.assetRadius) {
+          this.doom(live[i]);
+          this.doom(live[j]);
+        }
+      }
+    }
+    // The satellite ejected this flight against one of them.
+    const fresh = this.runner.satellite;
+    if (!fresh || fresh.landed || this.newSatelliteLost) return;
+    for (const n of live) {
+      const at = spots(n);
+      if (!at || n.doomed || Math.hypot(at.x - fresh.x, at.y - fresh.y) >= col.assetRadius) continue;
+      this.doom(n);
+      this.newSatelliteLost = true;
+      fresh.vx *= col.fallSpeed;
+      fresh.vy *= col.fallSpeed;
+      break;
     }
   }
 
-  /** Running into a deployed asset hurts: 5 to 10 health, once per pass. */
+  /** Running into a deployed asset hurts: 5 to 10 health, once per pass, and the asset is destroyed. */
   private checkNetworkCollisions(t: FlightTelemetry): void {
     if (!this.launched || this.sim.phase !== 'FLYING' || this.result) return;
     const col = CONFIG.network.collision;
     const s = this.sim.state;
-    for (const n of this.network) {
+    for (const n of [...this.network]) {
+      if (n.doomed) continue;
       const id = n.asset.id;
       let distance = Infinity;
       let radius = col.satelliteRadius;
@@ -539,6 +617,7 @@ export class FlightScene extends Phaser.Scene {
       this.fx.ring(at.x, at.y, 0xf87171, 60, 0.4);
       playSfx(this, 'ROCKET_DAMAGE');
       this.cameras.main.shake(220, 0.008);
+      this.doom(n);
       this.showBanner(`Hit ${id}! -${hurt} health`, '#fca5a5');
     }
   }
@@ -583,7 +662,7 @@ export class FlightScene extends Phaser.Scene {
       const gameDt = dt * GAME_SPEED * this.timeScale;
       this.sim.advance(gameDt, this.currentInput(t));
 
-      if (this.runner.satellite) stepRover(this.runner.satellite, gameDt);
+      if (this.runner.satellite) stepRover(this.runner.satellite, this.newSatelliteLost ? gameDt * CONFIG.network.collision.fallTimeScale : gameDt);
       this.stepNetwork(gameDt);
       if (this.launched) this.runner.update(this.sim, gameDt, { repairPressed: this.repairPressed, relightHeld: this.keys.E.isDown });
       this.repairPressed = false;
@@ -683,9 +762,13 @@ export class FlightScene extends Phaser.Scene {
     };
   }
 
+  /** The scouted spots on show: the rover's while it is the mission (and after), the crew's during the landing. They stay up after the pick. */
   private pickableOptions(): MissionOverlay['options'] {
-    const open = this.pickable();
-    return open ? { sites: open.sites, kind: open.kind, chosen: this.chosen[open.kind === 'ROVER' ? 'rover' : 'landing'] } : null;
+    const r = this.runner;
+    const kind = r.phase === 'ROVER' || this.landedRovers.length > 0 ? 'ROVER' : r.phase === 'LANDING' || (r.complete && r.phasesDone >= 3) ? 'LANDING' : null;
+    if (!kind) return null;
+    const key = kind === 'ROVER' ? 'rover' : 'landing';
+    return this.sites[key].length > 1 ? { sites: this.sites[key], kind, chosen: this.chosen[key] } : null;
   }
 
   /** Where the rover / the rocket would come down (refreshed a few times a second). */
@@ -1197,7 +1280,7 @@ export class FlightScene extends Phaser.Scene {
     const r = this.runner;
     if (!r.complete) return [];
     const id = (prefix: string) => `${prefix}-${this.progress.flights}`;
-    if (this.payload === 'SATELLITE' && r.satellite && !r.satellite.landed) return [newSatellite(id('SAT'), r.satellite)];
+    if (this.payload === 'SATELLITE' && r.satellite && !r.satellite.landed && !this.newSatelliteLost) return [newSatellite(id('SAT'), r.satellite)];
     if (this.payload === 'ROVER') {
       const i = this.landedRoverOk.lastIndexOf(true);
       if (i >= 0) return [newRover(id('ROV'), this.landedRovers[i])];

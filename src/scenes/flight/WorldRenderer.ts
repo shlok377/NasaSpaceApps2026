@@ -983,15 +983,21 @@ export class WorldRenderer {
     const net = overlay.network;
     if (!net) return;
     const k = CONFIG.network.satelliteScale;
+    const size = SATELLITE_PX * k;
     const spots: NetworkSpot[] = [];
+    // Both kinds are drawn the same size; a name tag above each says which one it is.
     for (const s of net.satellites) {
       const p = this.toScreen(s.body.x, s.body.y);
-      spots.push({ id: s.id, kind: 'SATELLITE', x: p.x, y: p.y, size: SATELLITE_PX * k, rotation: 0 });
+      spots.push({ id: s.id, kind: 'SATELLITE', x: p.x, y: p.y, size, rotation: 0 });
+      this.label(p.x, p.y - size / 2 - 9, s.id, '#7dd3fc', 11);
     }
     for (const r of net.rovers) {
       const surface = moonSurfacePoint(r.angle, 0);
       const p = this.toScreen(surface.x, surface.y);
-      spots.push({ id: r.id, kind: 'ROVER', x: p.x, y: p.y, size: ROVER_PX * k, rotation: this.screenRotation(r.angle) });
+      const up = this.screenRotation(r.angle);
+      spots.push({ id: r.id, kind: 'ROVER', x: p.x, y: p.y, size, rotation: up });
+      // The rover stands on the surface, so its tag sits above its head, away from the Moon.
+      this.label(p.x + Math.sin(up) * size, p.y - Math.cos(up) * size, r.id, '#86efac', 11);
     }
     this.payloads.updateNetwork(spots);
   }
@@ -1230,14 +1236,14 @@ export class WorldRenderer {
     this.payloads.updateCrew({ x: rocket.x + half * cell, y: ground.y, size: Math.max(110, cell * CREW_CELLS), onSite: overlay.crew.onSite });
   }
 
-  /** The scouted spots not picked yet: dim arcs with their number, so the pilot can choose one. */
-  private drawOptions(g: Phaser.GameObjects.Graphics, options: NonNullable<MissionOverlay['options']>): void {
+  /** The scouted spots besides the picked one: arcs with their number. Landing in any of them counts. */
+  private drawOptions(g: Phaser.GameObjects.Graphics, options: NonNullable<MissionOverlay['options']>, map: boolean): void {
     if (options.sites.length < 2) return;
     const color = options.kind === 'ROVER' ? WORLD_COLORS.zone : WORLD_COLORS.site;
     const text = options.kind === 'ROVER' ? '#86efac' : '#7dd3fc';
     options.sites.forEach((site, i) => {
       if (i === options.chosen) return;
-      this.surfaceArc(g, site, color, 5, 0.45);
+      this.surfaceArc(g, site, color, map ? 6 : 8, 0.8);
       const at = moonSurfacePoint(site.angle, 150);
       const p = this.toScreen(at.x, at.y);
       this.label(p.x, p.y, `${i + 1}`, text, 13);
@@ -1257,7 +1263,7 @@ export class WorldRenderer {
   /** Zones, sites, rovers and markers on the Moon's surface (map or close-up). */
   private drawMissionMarks(g: Phaser.GameObjects.Graphics, overlay: MissionOverlay, map: boolean): void {
     const pulse = 0.65 + 0.35 * Math.sin(this.scene.time.now / 220);
-    const picking = map ? overlay.options : null;
+    const picking = overlay.options ?? null;
     if (overlay.roverZone) {
       const zone = overlay.roverSpot ?? ROVER_ZONE;
       this.surfaceArc(g, zone, WORLD_COLORS.zone, map ? 7 : 10, pulse);
@@ -1292,7 +1298,7 @@ export class WorldRenderer {
         g.fillCircle(sp.x, sp.y, Math.max(2, size * this.camera.scale * (map ? 3 : 1)));
       }
     }
-    if (picking) this.drawOptions(g, picking);
+    if (picking) this.drawOptions(g, picking, map);
     if (overlay.site) {
       this.surfaceArc(g, overlay.site, WORLD_COLORS.site, map ? 7 : 10, pulse);
       const top = this.renderFlag(g, this.landingFlagSprite, GAME_ASSETS.FLAG_BLUE.key, overlay.site.angle, WORLD_COLORS.site, map);
