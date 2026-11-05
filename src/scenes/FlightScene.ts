@@ -387,6 +387,7 @@ export class FlightScene extends Phaser.Scene {
       else if (this.runner.deploySatellite(this.sim) || this.runner.dropRover(this.sim)) {
         const at = this.world.rocketScreen(this.sim);
         this.fx.ring(at.x, at.y, WORLD_COLORS.rover, 50, 0.5);
+        playSfx(this, 'ROCKET_SEPARATION');
       }
     });
     const onLeftDown = () => {
