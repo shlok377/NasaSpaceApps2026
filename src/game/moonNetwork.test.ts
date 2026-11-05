@@ -16,10 +16,10 @@ describe('the Moon network', () => {
     expect(sites[0]).toMatchObject({ source: 'DEFAULT', halfWidth: ROVER_ZONE.halfWidth, angle: ROVER_ZONE.angle });
   });
 
-  it('a satellite scouts one narrow spot, a rover five narrower ones', () => {
+  it('a satellite scouts one narrow spot, a rover three narrower ones', () => {
     expect(scoutSites([sat()], 'ROVER', ROVER_ZONE, fixed)).toHaveLength(1);
     const rovers = scoutSites([newRover('ROV-1', 1)], 'ROVER', ROVER_ZONE, fixed);
-    expect(rovers).toHaveLength(5);
+    expect(rovers).toHaveLength(3);
     const satSite = scoutSites([sat()], 'ROVER', ROVER_ZONE, fixed)[0];
     expect(satSite.halfWidth).toBeLessThan(ROVER_ZONE.halfWidth);
     expect(rovers[0].halfWidth).toBeLessThan(satSite.halfWidth);
@@ -40,7 +40,7 @@ describe('the Moon network', () => {
   });
 
   it('counts the places it can scout and caps them', () => {
-    expect(siteTotal([sat(), newRover('R', 0)])).toBe(6);
+    expect(siteTotal([sat(), newRover('R', 0)])).toBe(4);
     expect(siteTotal([newRover('A', 0), newRover('B', 0), newRover('C', 0)])).toBe(CONFIG.network.maxSites);
     expect(coverage([], 150)).toBe(0);
     expect(coverage([sat(), newRover('R', 0)], 150)).toBeGreaterThan(0);

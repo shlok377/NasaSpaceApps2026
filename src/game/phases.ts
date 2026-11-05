@@ -81,6 +81,11 @@ export function inZone(angle: number | null, zone: SurfaceZone): boolean {
   return angle !== null && surfaceDistance(angle, zone.angle) <= zone.halfWidth;
 }
 
+/** Is the angle inside this zone (or any of these zones)? */
+export function inAny(angle: number | null, zones: SurfaceZone | readonly SurfaceZone[]): boolean {
+  return (Array.isArray(zones) ? zones : [zones as SurfaceZone]).some(z => inZone(angle, z));
+}
+
 function moonRadius(sim: FlightSim): number {
   return Math.hypot(sim.state.x - MOON_CENTER.x, sim.state.y - MOON_CENTER.y);
 }
@@ -353,7 +358,7 @@ export function releaseRover(sim: FlightSim): RoverCapsule {
 }
 
 /** Falls under the Moon's gravity onto its airbags. */
-export function stepRover(rover: RoverCapsule, dt: number, zone: SurfaceZone = ROVER_ZONE): void {
+export function stepRover(rover: RoverCapsule, dt: number, zone: SurfaceZone | readonly SurfaceZone[] = ROVER_ZONE): void {
   if (rover.landed) return;
   const n = Math.max(1, Math.ceil(dt / 0.05));
   const h = dt / n;
@@ -366,7 +371,7 @@ export function stepRover(rover: RoverCapsule, dt: number, zone: SurfaceZone = R
     if (moonAltitude(rover.x, rover.y) <= 0) {
       rover.landed = true;
       rover.angle = moonAngleOf(rover.x, rover.y);
-      rover.inZone = inZone(rover.angle, zone);
+      rover.inZone = inAny(rover.angle, zone);
     } else if (!insideMoonSoi(rover.x, rover.y)) {
       rover.landed = true;
       rover.angle = null;
@@ -426,8 +431,12 @@ export class PhaseRunner {
   public sparesLeft: number = ROVER_CFG.spareRovers;
   /** The zone the rover has to land in (the spot picked from the scouted ones; the default with nothing deployed). */
   public roverZone: SurfaceZone = { ...ROVER_ZONE };
+  /** The other scouted rover spots: landing in any of them counts too. */
+  public extraRoverZones: SurfaceZone[] = [];
   /** The spot the crew aims for at the start of the landing. */
   public landingSite: SurfaceZone = { ...LANDING_SITE };
+  /** The other scouted landing spots: touching down in any of them is on the site too. */
+  public extraLandingSites: SurfaceZone[] = [];
   /** Rovers on the Moon have already surveyed the site: no boulders surprise the crew. */
   public scouted = false;
   /** The landing site the crew should aim for (moves if boulders block it). */
@@ -541,7 +550,7 @@ export class PhaseRunner {
     if (this.dropReady && !this.rover) {
       if (sim.getTelemetry().thrust > 0) return 1;
       const hit = predictRoverLanding(sim);
-      if (hit && surfaceDistance(hit.angle, this.roverZone.angle) < this.roverZone.halfWidth * 5) return 1;
+      if (hit && [this.roverZone, ...this.extraRoverZones].some(z => surfaceDistance(hit.angle, z.angle) < z.halfWidth * 5)) return 1;
       return ROVER_CFG.orbitFastForward;
     }
     return 1;
@@ -651,7 +660,7 @@ export class PhaseRunner {
       return;
     }
     if (!this.rover) return;
-    stepRover(this.rover, dt, this.roverZone);
+    stepRover(this.rover, dt, [this.roverZone, ...this.extraRoverZones]);
     if (!this.rover.landed) return;
     const ok = this.rover.inZone;
     if (ok) {
@@ -700,6 +709,6 @@ export class PhaseRunner {
     this.events.push({ kind: 'PHASE_DONE', phase: 'LANDING' });
     this.phasesDone = 3;
     this.complete = true;
-    this.events.push({ kind: 'COMPLETE', onSite: inZone(at, this.site) });
+    this.events.push({ kind: 'COMPLETE', onSite: inAny(at, [this.site, ...this.extraLandingSites]) });
   }
 }

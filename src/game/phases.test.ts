@@ -6,7 +6,7 @@ import { moonAngleOf, surfaceDistance } from '../physics/bodies';
 import { MOON, MOON_CENTER } from '../physics/constants';
 import { ControlInput, FlightSim } from '../physics/FlightSim';
 import { buildFlightVehicle } from '../physics/vehicle';
-import { chainFor, isStableOrbit, phaseNumber, planHazards, stepsDone, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, stepRover, updateProblem } from './phases';
+import { chainFor, inAny, isStableOrbit, phaseNumber, planHazards, stepsDone, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, stepRover, updateProblem } from './phases';
 
 type Layout = Array<[number, number, PartType, FuelKind?]>;
 const STAGED: Layout = [
@@ -384,5 +384,16 @@ describe('picked landing spots', () => {
     const run = new PhaseRunner('LANDING', 2, Math.random, 'CREW');
     run.landingSite = { angle: 2, halfWidth: 80 };
     expect(run.boulderField.angle).toBe(2);
+  });
+
+  it('landing in any of the scouted spots counts, not just the picked one', () => {
+    const picked = { angle: 1, halfWidth: 100 };
+    const other = { angle: 2, halfWidth: 100 };
+    expect(inAny(2, [picked, other])).toBe(true);
+    expect(inAny(3, [picked, other])).toBe(false);
+    // A rover that comes down in the other spot is in the zone.
+    const rover = { x: MOON_CENTER.x + MOON.radius * Math.cos(2) * 1.001, y: MOON_CENTER.y + MOON.radius * Math.sin(2) * 1.001, vx: 0, vy: 0, landed: false, angle: null, inZone: false };
+    for (let i = 0; i < 4000 && !rover.landed; i++) stepRover(rover, 0.1, [picked, other]);
+    expect(rover.landed && rover.inZone).toBe(true);
   });
 });

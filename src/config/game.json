@@ -257,16 +257,16 @@
     "perPart": 25
   },
   "network": {
-    "_note": "Deployed satellites and rovers stay for later flights. A 'day' is one launch: each launch spends one. They scout landing spots (satellite: siteCount each, rover: siteCount each, picked on the orbit map); a spot's half-width is the mission's own zone times `width` (narrow), grown by `widenPerAsset` for every other asset alive (up to `widenCap`). The crew is assisted on top: extra width per rover and per satellite.",
+    "_note": "Deployed satellites and rovers stay for later flights. A 'day' is one launch: each launch spends one. They scout landing spots (satellite: siteCount each, rover: siteCount each, picked on the orbit map; landing in ANY scouted spot counts); a spot's half-width is the mission's own zone times `width` (narrow), grown by `widenPerAsset` for every other asset alive (up to `widenCap`). The crew is assisted on top: extra width per rover and per satellite.",
     "satellite": { "days": 15, "siteCount": 1, "width": 0.7 },
-    "rover": { "days": 5, "siteCount": 5, "width": 0.5 },
+    "rover": { "days": 5, "siteCount": 3, "width": 0.5 },
     "widenPerAsset": 0.25,
     "widenCap": 2.5,
     "crewAssist": { "perRover": 0.4, "perSatellite": 0.2, "cap": 3 },
     "maxSites": 9,
     "minSiteGapMetres": 220,
     "satelliteScale": 0.5,
-    "collision": { "satelliteRadius": 120, "roverRadius": 28, "damageMin": 5, "damageMax": 10 }
+    "collision": { "satelliteRadius": 120, "roverRadius": 28, "assetRadius": 60, "damageMin": 5, "damageMax": 10, "fallSpeed": 0.05, "fallTimeScale": 4 }
   },
   "gameSpeed": 1.5,
   "phases": {
