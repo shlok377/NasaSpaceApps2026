@@ -320,6 +320,15 @@ export function predictRoverLanding(sim: FlightSim): { angle: number; x: number;
   return sim.predictMoonImpact(k.x, k.y);
 }
 
+/** Where a free-flying body (the satellite) is `seconds` from now on its own orbit; negative looks back along it. */
+export function positionAfter(body: RoverCapsule, seconds: number): { x: number; y: number } {
+  const sign = seconds < 0 ? -1 : 1;
+  // Walking backwards is walking forwards with the velocity reversed.
+  const ghost: RoverCapsule = { ...body, vx: body.vx * sign, vy: body.vy * sign, landed: false };
+  stepRover(ghost, Math.abs(seconds));
+  return { x: ghost.x, y: ghost.y };
+}
+
 /** Would the orbit survive this push? (Above the surface, and still inside the Moon's pull.) */
 function orbitHolds(sim: FlightSim, vx: number, vy: number): boolean {
   const o = orbitFromState({ x: sim.state.x - MOON_CENTER.x, y: sim.state.y - MOON_CENTER.y }, { x: vx, y: vy }, MOON.mu, MOON.radius);

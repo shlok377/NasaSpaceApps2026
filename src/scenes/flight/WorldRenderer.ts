@@ -1,10 +1,11 @@
 import Phaser from 'phaser';
 import { CONFIG } from '../../config';
 import { PART_DEFINITIONS } from '../../core/partDefinitions';
-import { BOULDER_FIELD, ROVER_ZONE, RoverCapsule, SurfaceZone } from '../../game/phases';
+import { BOULDER_FIELD, positionAfter, ROVER_ZONE, RoverCapsule, SurfaceZone } from '../../game/phases';
 import { Rock, rockX } from '../../modules/rockBelt/RockField';
 import { gravityAt, insideMoonSoi, localUp, moonAltitude, moonAngleOf, moonSurfacePoint } from '../../physics/bodies';
 import { MOON, MOON_CENTER, ROCK_BELT, WORLD } from '../../physics/constants';
+import { orbitFromState } from '../../physics/orbit';
 import { FlightSim, FlightTelemetry } from '../../physics/FlightSim';
 import { FlightPart } from '../../physics/vehicle';
 import { computeScreenRetrograde, ScreenRetrogradeVector } from '../../physics/guidance';
@@ -969,6 +970,27 @@ export class WorldRenderer {
     this.pathColor = hit ? WORLD_COLORS.danger : left ? 0xfbbf24 : WORLD_COLORS.zone;
   }
 
+  /** The satellite's own orbit as a thin dotted line (it keeps to it for good). */
+  private drawSatelliteOrbit(g: Phaser.GameObjects.Graphics, body: RoverCapsule): void {
+    const o = orbitFromState({ x: body.x - MOON_CENTER.x, y: body.y - MOON_CENTER.y }, { x: body.vx, y: body.vy }, MOON.mu, MOON.radius);
+    if (o.escaping || !Number.isFinite(o.period)) return;
+    const steps = 120;
+    const dt = o.period / steps;
+    let { x, y, vx, vy } = body;
+    g.lineStyle(1, 0x7dd3fc, 0.55);
+    let prev = this.toScreen(x, y);
+    for (let i = 0; i < steps; i++) {
+      const gr = gravityAt(x, y);
+      vx += gr.x * dt;
+      vy += gr.y * dt;
+      x += vx * dt;
+      y += vy * dt;
+      const p = this.toScreen(x, y);
+      if (i % 2 === 0) g.lineBetween(prev.x, prev.y, p.x, p.y);
+      prev = p;
+    }
+  }
+
   /** A filled ring between two radii. */
   private annulus(g: Phaser.GameObjects.Graphics, cx: number, cy: number, r0: number, r1: number): void {
     const n = 72;
@@ -1101,14 +1123,20 @@ export class WorldRenderer {
     // The ejected satellite (deploys, then works) and the rover's airbag on its way down.
     const still = overlay.rover && !overlay.rover.landed ? { b: overlay.rover, key: GAME_ASSETS.PART_ROVER.key } : overlay.satellite && !overlay.satellite.landed ? { b: overlay.satellite, key: GAME_ASSETS.PART_SATELLITE.key } : null;
     let sat = overlay.satellite && !overlay.satellite.landed ? this.toScreen(overlay.satellite.x, overlay.satellite.y) : null;
-    if (sat) {
-      // Small gaps are stretched (11x up to +SATELLITE_PARTING_PX); far apart, the true position shows.
+    if (sat && overlay.satellite) {
+      // It flies its own orbit, always. A small gap to the stage is shown larger by looking ahead (or back) along that same orbit,
+      // so the sprite never leaves its path; far apart, the true position shows.
+      const body = overlay.satellite;
       const r = this.rocketScreen(sim);
       const gap = Math.hypot(sat.x - r.x, sat.y - r.y);
-      if (gap > 0.01) {
-        const extra = Math.min(gap * 10, SATELLITE_PARTING_PX) / gap;
-        sat = { x: sat.x + (sat.x - r.x) * extra, y: sat.y + (sat.y - r.y) * extra };
+      const speed = Math.hypot(body.vx, body.vy);
+      if (gap > 0.01 && speed > 1) {
+        const ahead = (body.x - sim.state.x) * body.vx + (body.y - sim.state.y) * body.vy >= 0 ? 1 : -1;
+        const seconds = (ahead * Math.min(gap * 10, SATELLITE_PARTING_PX)) / this.camera.scale / speed;
+        const shown = positionAfter(body, seconds);
+        sat = this.toScreen(shown.x, shown.y);
       }
+      this.drawSatelliteOrbit(g, body);
     }
     const ball = overlay.rover && !overlay.rover.landed ? this.toScreen(overlay.rover.x, overlay.rover.y) : null;
     const animated = this.payloads.updateSatellite(sat && { ...sat, size: SATELLITE_PX });
