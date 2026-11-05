@@ -16,7 +16,7 @@ export const SFX = {
   ROCKET_ENGINE: { key: 'sfx_rocket_engine', path: 'assets/sound/rocket_engine.wav', volume: 0.4 },
   /** The main engine's roar while the rocket flies. */
   ROCKET_FLYING: { key: 'sfx_rocket_flying', path: 'assets/sound/rocket_flying.wav', volume: 0.4 },
-  /** Ignition during the countdown (about as long as the countdown itself). */
+  /** Lift-off: plays once the countdown hits GO!. */
   ROCKET_LAUNCH: { key: 'sfx_rocket_launch', path: 'assets/sound/rocket_launch.wav', volume: 0.6 },
   ROCKET_SEPARATION: { key: 'sfx_rocket_separation', path: 'assets/sound/rocket_separation.wav', volume: 0.6 }
 } as const;

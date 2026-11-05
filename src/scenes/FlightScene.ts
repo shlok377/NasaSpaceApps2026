@@ -441,7 +441,6 @@ export class FlightScene extends Phaser.Scene {
     saveProgress(this.progress);
     this.countdown = COUNTDOWN_SECONDS;
     this.countdownText.setVisible(true);
-    playSfx(this, 'ROCKET_LAUNCH');
   }
 
   private steerKey(): number {
@@ -588,6 +587,7 @@ export class FlightScene extends Phaser.Scene {
     this.countdownText.setText('GO!');
     this.tweens.add({ targets: this.countdownText, alpha: 0, delay: 500, duration: 400, onComplete: () => this.countdownText.setVisible(false) });
     this.sim.launch();
+    playSfx(this, 'ROCKET_LAUNCH');
     this.time.delayedCall(1000, () => this.showPhaseTitle('ORBIT'));
   }
 
