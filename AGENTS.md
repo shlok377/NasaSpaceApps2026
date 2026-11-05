@@ -29,6 +29,7 @@ The temporary static icons are replaced by pixel sprite sheets in the rocket par
 - **Crew** (after the rocket lands): astronaut beside the rocket's base: `exit`, then `plant` + `wave_flag` on the landing site, or `wave` (no flag) when down safely off the site. The flag is the cyan pennant from `flag_blue.png`.
 - Code: `core/spriteSheets.ts` (load + anim keys; clip timings come from each sheet's JSON), `scenes/flight/PayloadSprites.ts` (+ test) draws them; `WorldRenderer` feeds it positions (`MissionOverlay.landedRoverOk`, `.crew`), `FlightScene` sets them on `ROVER_LANDED` / `COMPLETE`. If a sheet is missing, the old still sprite shows.
 - The result panel now waits longer after a successful flight (6.5 s satellite, 5.2 s rover and crew) so the animation can play.
+- **Orbit gauge** moved from the top centre to a vertical tube on the right (where the HEIGHT tube sits on the climb; they never show together).
 - **Satellite ejection**: the satellite is pushed ahead and the spent stage backs off (`phases.satellite` in `game.json`, `deploySatellite`; both pushes are checked so each orbit holds), time runs ×3 so they drift apart, and on the orbit map the gap is stretched (`SATELLITE_PARTING_PX`) so it is easy to see. Satellite sprite is 96 px, crew `CREW_CELLS` 4.5.
 - **Open**: the missed-rover and crash cases have no special clip; no sound yet; crew size is `CREW_CELLS` in `WorldRenderer` if it looks too small or big next to big rockets.
 

@@ -54,7 +54,7 @@ export function hudFrame(g: Phaser.GameObjects.Graphics, x: number, y: number, w
 }
 
 /** Orange header tab sitting on a frame's top edge. */
-function headerTab(scene: Phaser.Scene, g: Phaser.GameObjects.Graphics, x: number, y: number, text: string): Phaser.GameObjects.Text {
+export function headerTab(scene: Phaser.Scene, g: Phaser.GameObjects.Graphics, x: number, y: number, text: string): Phaser.GameObjects.Text {
   const label = scene.add.text(x + 8, y - 6, text, title(7, PX.text.shadow)).setShadow(0, 0, SHADOW, 0, false, false);
   const w = Math.ceil(label.width) + 16;
   g.fillStyle(0x07060b, 1);
