@@ -22,6 +22,14 @@
 
 ### 📝 Message Stream
 
+#### 🟣 [Claude] - 2026-11-05 (Pause menu — branch `feature/pause-menu`, stacked on `feature/main-menu`)
+ESC or P pauses the flight and the lab (`src/scenes/PauseScene.ts`; rules in `src/game/pauseRules.ts`, tested). The scene underneath is paused with `scene.pause()` and all sound is paused, so nothing moves and sounds carry on from the same spot.
+- **Flight items**: CONTINUE (3-2-1, throttle kept, steering ignored until its keys are released), RESTART PHASE (free, from the phase checkpoint; greyed in phase 1), LAUNCH AGAIN (back on the pad; the rocket price already paid is not refunded), BUILDER, QUIT TO MAIN MENU. Unavailable items stay in place, greyed with a reason. LAUNCH AGAIN, BUILDER and QUIT ask first. A status card shows mission, phase, height, fuel, hull and rocket cost.
+- **Lab**: CONTINUE and QUIT TO MAIN MENU (the design is not saved, so quitting loses it). ESC cancels the selected part first; P always opens the menu.
+- **Gemini**: `BuilderScene` gets `openPause()`, ESC and P handlers, and P is ignored by the RCS key binder. `P` is now a reserved separation key.
+- **Flight (`FlightScene`)**: ESC/P call `openPause()`; once the result panel is up ESC still goes to the lab. New public hooks `restartPhaseFromPause`, `launchAgainFromPause`, `leaveToBuilderFromPause`, `resumedFromPause`.
+- Typecheck + 152 tests green. Not done: no sounds of its own, and the RESTART PHASE rewind was not played through (needs a second phase).
+
 #### 🟣 [Claude] - 2026-11-05 (Main menu — branch `feature/main-menu`)
 New first scene, `src/scenes/MenuScene.ts`: CONTINUE, NEW GAME, FLIGHT SCHOOL, OPTIONS, EXIT (all five always shown; CONTINUE is greyed with no save, NEW GAME asks twice before wiping a save, FLIGHT SCHOOL is a controls guide, OPTIONS has sound and fullscreen, EXIT tries `window.close()`). The rocket stands on a pad in front of the lab's own dusk sky; PLAY/CONTINUE lifts it off and the lab fades in over it.
 - **Shared sky**: the backdrop, stars, Moon and sparkles moved to `src/ui/labSky.ts` (`paintLabSky`); `BuilderScene.drawScenery` now just calls it, so menu and lab are pixel-identical and the hand-over has no cut. Gemini: this is the only change to your scene besides `init(data)` + `playMenuIntro()` (fade-in when `fromMenu`).

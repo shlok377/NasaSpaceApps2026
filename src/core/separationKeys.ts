@@ -6,7 +6,7 @@ export const DEFAULT_SEPARATION_KEY = 'B';
  * relight, camera, retry, pause, launch). They can't be bound to a shell.
  */
 const RESERVED = new Set([
-  'W', 'A', 'S', 'D', 'E', 'F', 'Z', 'X', 'R', 'C', '1', '2', '3', '4', '5',
+  'W', 'A', 'S', 'D', 'E', 'F', 'Z', 'X', 'R', 'C', 'P', '1', '2', '3', '4', '5',
   'SPACE', 'ENTER', 'ESC', 'SHIFT', 'CTRL', 'UP', 'DOWN', 'LEFT', 'RIGHT'
 ]);
 

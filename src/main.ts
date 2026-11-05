@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { BuilderScene } from './scenes/BuilderScene';
 import { MenuScene } from './scenes/MenuScene';
+import { PauseScene } from './scenes/PauseScene';
 import { FlightScene } from './scenes/FlightScene';
 
 const config: Phaser.Types.Core.GameConfig = {
@@ -17,7 +18,7 @@ const config: Phaser.Types.Core.GameConfig = {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH
   },
-  scene: [MenuScene, BuilderScene, FlightScene]
+  scene: [MenuScene, BuilderScene, FlightScene, PauseScene]
 };
 
 // Phaser text is drawn to canvas, so the fonts must be ready before the first scene renders.
