@@ -4,7 +4,7 @@ import type Phaser from 'phaser';
 export const SFX = {
   UI_CLICK: { key: 'sfx_ui_click', path: 'assets/sound/UI_click.wav', volume: 0.5 },
   UI_HOVER: { key: 'sfx_ui_hover', path: 'assets/sound/UI_hover.wav', volume: 0.25 },
-  UI_BLOCK_DELETE: { key: 'sfx_ui_block_delete', path: 'assets/sound/UI_block_delete.wav', volume: 0.5 },
+  UI_BLOCK_DELETE: { key: 'sfx_ui_block_delete', path: 'assets/sound/UI_delete.ogg', volume: 0.5 },
   CLICK_FAIL: { key: 'sfx_click_fail', path: 'assets/sound/click_fail.wav', volume: 0.5 },
   BUZZER: { key: 'sfx_buzzer', path: 'assets/sound/buzzer.wav', volume: 0.45 },
   EXPLOSION: { key: 'sfx_explosion', path: 'assets/sound/explosion.wav', volume: 0.7 },
