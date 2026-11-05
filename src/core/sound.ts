@@ -13,11 +13,11 @@ export const SFX = {
   GAME_OVER: { key: 'sfx_game_over', path: 'assets/sound/game_over.wav', volume: 0.6 },
   ROCKET_DAMAGE: { key: 'sfx_rocket_damage', path: 'assets/sound/rocket_damage.wav', volume: 0.6 },
   /** The RCS thrusters: heard while A / D steer with an open shell. */
-  ROCKET_ENGINE: { key: 'sfx_rocket_engine', path: 'assets/sound/rocket_engine.wav', volume: 0.4 },
+  ROCKET_ENGINE: { key: 'sfx_rocket_engine', path: 'assets/sound/rocket_engine.wav', volume: 0.55 },
   /** The main engine's roar while the rocket flies. */
-  ROCKET_FLYING: { key: 'sfx_rocket_flying', path: 'assets/sound/rocket_flying.wav', volume: 0.4 },
+  ROCKET_FLYING: { key: 'sfx_rocket_flying', path: 'assets/sound/rocket_flying.wav', volume: 0.85 },
   /** Lift-off: plays once the countdown hits GO!. */
-  ROCKET_LAUNCH: { key: 'sfx_rocket_launch', path: 'assets/sound/rocket_launch.wav', volume: 0.6 },
+  ROCKET_LAUNCH: { key: 'sfx_rocket_launch', path: 'assets/sound/rocket_launch.wav', volume: 1 },
   ROCKET_SEPARATION: { key: 'sfx_rocket_separation', path: 'assets/sound/rocket_separation.wav', volume: 0.6 }
 } as const;
 
