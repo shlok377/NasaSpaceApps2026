@@ -21,6 +21,8 @@ import {
   PROBLEM_INFO
 } from '../game/phases';
 import { DEFAULT_SEPARATION_KEY, normalizeKey } from '../core/separationKeys';
+import { flightPauseItems } from '../game/pauseRules';
+import type { PauseHost, PauseSceneData } from './PauseScene';
 import { coverage, counts, DeployedAsset, liveSatellite, newRover, newSatellite, ScoutSite, scoutSites, siteTotal, spendDay } from '../game/moonNetwork';
 import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, objectiveBonus, payoutBreakdown, PlayerProgress, saveProgress } from '../game/progress';
 import { Award, StuntTracker } from '../game/stunts';
@@ -59,7 +61,7 @@ const THROTTLE_RATE = 0.9; // per second while a throttle key is held
 const APEX_INTERVAL_MS = 200;
 
 type Keys = Record<
-  'W' | 'S' | 'SHIFT' | 'CTRL' | 'Z' | 'X' | 'A' | 'D' | 'E' | 'F' | 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'SPACE' | 'ENTER' | 'ESC' | 'R' | 'B' | 'TAB' | 'ONE' | 'TWO' | 'THREE' | 'FOUR' | 'FIVE' | 'SIX' | 'SEVEN' | 'EIGHT' | 'NINE',
+  'W' | 'S' | 'SHIFT' | 'CTRL' | 'Z' | 'X' | 'A' | 'D' | 'E' | 'F' | 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'SPACE' | 'ENTER' | 'ESC' | 'R' | 'B' | 'P' | 'TAB' | 'ONE' | 'TWO' | 'THREE' | 'FOUR' | 'FIVE' | 'SIX' | 'SEVEN' | 'EIGHT' | 'NINE',
   Phaser.Input.Keyboard.Key
 >;
 
@@ -121,7 +123,7 @@ function dryRun(vehicle: FlightVehicle): { maxAltitude: number; reachesMoon: boo
   return { maxAltitude: sim.stats.maxAltitude, reachesMoon: sim.stats.reachedMoonSoi, deltaVLeft, tips, finsDropped };
 }
 
-export class FlightScene extends Phaser.Scene {
+export class FlightScene extends Phaser.Scene implements PauseHost {
   private tree!: HierarchicalRocketNode;
   private vehicle!: FlightVehicle;
   private report!: VehicleReport;
@@ -187,6 +189,8 @@ export class FlightScene extends Phaser.Scene {
   private repairPressed = false;
   private timeScale = 1;
   private titleTimer = 0;
+  /** Set when the game resumes after a pause: steering is ignored until its keys are released. */
+  private steerLocked = false;
 
   // Mission layer
   private progress!: PlayerProgress;
@@ -419,7 +423,7 @@ export class FlightScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
 
   private setupInput(): void {
-    this.keys = this.input.keyboard!.addKeys('W,S,SHIFT,CTRL,Z,X,A,D,E,F,LEFT,RIGHT,UP,DOWN,SPACE,ENTER,ESC,R,B,TAB,ONE,TWO,THREE,FOUR,FIVE,SIX,SEVEN,EIGHT,NINE') as Keys;
+    this.keys = this.input.keyboard!.addKeys('W,S,SHIFT,CTRL,Z,X,A,D,E,F,LEFT,RIGHT,UP,DOWN,SPACE,ENTER,ESC,R,B,P,TAB,ONE,TWO,THREE,FOUR,FIVE,SIX,SEVEN,EIGHT,NINE') as Keys;
     this.keys.SPACE.on('down', () => {
       if (this.sim.phase === 'PRELAUNCH') this.startCountdown();
       else if (this.runner.deploySatellite(this.sim) || this.runner.dropRover(this.sim)) {
@@ -444,7 +448,11 @@ export class FlightScene extends Phaser.Scene {
     this.keys.ENTER.on('down', () => {
       if (!this.result && this.launched) this.finishMission();
     });
-    this.keys.ESC.on('down', () => this.returnToBuilder());
+    // ESC and P pause. Once the result panel is up there is nothing to pause, so ESC still goes to the lab.
+    this.keys.ESC.on('down', () => (this.result ? this.returnToBuilder() : this.openPause()));
+    this.keys.P.on('down', () => {
+      if (!this.result) this.openPause();
+    });
     // Pick a scouted landing spot: number keys, TAB to cycle, or click it on the orbit map.
     const numbers: Array<keyof Keys> = ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE'];
     numbers.forEach((k, i) => this.keys[k].on('down', () => this.pickSite(i)));
@@ -651,7 +659,13 @@ export class FlightScene extends Phaser.Scene {
 
   private steerKey(): number {
     const k = this.keys;
-    return (k.A.isDown || k.LEFT.isDown ? 1 : 0) - (k.D.isDown || k.RIGHT.isDown ? 1 : 0);
+    const raw = (k.A.isDown || k.LEFT.isDown ? 1 : 0) - (k.D.isDown || k.RIGHT.isDown ? 1 : 0);
+    // After a pause, steering stays off until the steering keys have been let go and pressed again.
+    if (this.steerLocked) {
+      if (raw === 0) this.steerLocked = false;
+      return 0;
+    }
+    return raw;
   }
 
   private currentInput(_t: FlightTelemetry): ControlInput {
@@ -1285,6 +1299,55 @@ export class FlightScene extends Phaser.Scene {
     saveProgress(this.progress);
     if (!r.complete) playSfx(this, 'GAME_OVER');
     this.showResultPanel(this.result);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pause menu (scenes/PauseScene.ts): this scene is frozen while it is open
+  // ---------------------------------------------------------------------------
+
+  private openPause(): void {
+    if (this.scene.isPaused() || this.scene.isActive('PauseScene')) return;
+    const t = this.sim.getTelemetry();
+    const paid = this.countdown !== null || this.launched;
+    const phase = this.runner.phase;
+    const chain = this.runner.chain;
+    const fuel = Math.round(t.fuelFraction * 100);
+    const hull = Math.round(this.sim.hull);
+    const data: PauseSceneData = {
+      context: 'FLIGHT',
+      target: 'FlightScene',
+      title: 'PAUSED',
+      subtitle: this.launched ? `PHASE ${phaseNumber(chain, phase)} · ${PHASE_INFO[phase].title}` : 'ON THE PAD',
+      items: flightPauseItems({ launched: this.launched, paid, checkpointPhase: this.checkpoint?.phase ?? null, cost: this.cost }),
+      statusTitle: 'FLIGHT',
+      status: [
+        { label: 'MISSION', value: this.mission ? this.mission.title : 'HIGH SCORE' },
+        { label: 'PHASE', value: `${phaseNumber(chain, phase)} OF ${chain.length}` },
+        { label: 'HEIGHT', value: `${Math.max(0, Math.round(t.altitude)).toLocaleString('en-US')} M` },
+        { label: 'FUEL', value: `${fuel}%`, color: fuel < 15 ? PX.text.red : PX.text.white },
+        { label: 'HULL', value: `${hull}%`, color: hull < 40 ? PX.text.red : hull < 70 ? PX.text.gold : PX.text.white },
+        { label: 'ROCKET', value: paid ? `$${this.cost} SPENT` : `$${this.cost}`, color: PX.text.gold }
+      ]
+    };
+    this.scene.pause();
+    this.scene.launch('PauseScene', data);
+  }
+
+  public restartPhaseFromPause(): void {
+    this.retryFromCheckpoint();
+    this.steerLocked = true;
+  }
+
+  public launchAgainFromPause(): void {
+    this.scene.restart({ tree: this.tree });
+  }
+
+  public leaveToBuilderFromPause(): void {
+    this.returnToBuilder();
+  }
+
+  public resumedFromPause(): void {
+    this.steerLocked = true;
   }
 
   /** What this flight leaves behind: the ejected satellite on its orbit, or the rover that came down in the zone. */

@@ -10,6 +10,8 @@ import { PX, drawPixelPanel, pixelBody, pixelTitle } from '../ui/pixel';
 import { normalizeKey } from '../core/separationKeys';
 import { playSfx } from '../core/sound';
 import { paintLabSky } from '../ui/labSky';
+import { labPauseItems } from '../game/pauseRules';
+import type { PauseSceneData } from './PauseScene';
 
 interface PaletteBay {
   type: PartType;
@@ -206,6 +208,29 @@ export class BuilderScene extends Phaser.Scene {
     });
 
     if (this.fromMenu) this.playMenuIntro();
+  }
+
+  /** Pause menu (scenes/PauseScene.ts): this scene is frozen while it is open. */
+  private openPause(): void {
+    if (this.scene.isPaused() || this.scene.isActive('PauseScene') || this.cameras.main.alpha < 1) return;
+    const nodes = this.rocketTree.getAllNodes();
+    const tel = this.rocketTree.getTelemetry();
+    const data: PauseSceneData = {
+      context: 'LAB',
+      target: 'BuilderScene',
+      title: 'PAUSED',
+      subtitle: 'ROCKET LAB',
+      items: labPauseItems(),
+      statusTitle: 'ROCKET',
+      status: [
+        { label: 'MASS', value: `${Math.round(tel.totalMass + tel.totalFuelMass)} KG` },
+        { label: 'PARTS', value: `${nodes.length}` },
+        { label: 'ROCKET COST', value: `$${rocketCost(nodes)}`, color: PX.text.gold },
+        { label: 'BANK', value: `$${this.money.toLocaleString('en-US')}`, color: PX.text.gold }
+      ]
+    };
+    this.scene.pause();
+    this.scene.launch('PauseScene', data);
   }
 
   /**
@@ -904,14 +929,17 @@ export class BuilderScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-FIVE', () => this.selectPaletteItem('FIN'));
     this.input.keyboard?.on('keydown-C', () => this.cyclePayload());
 
+    // ESC cancels the selected part first; with nothing selected it opens the pause menu. P always does.
     this.input.keyboard?.on('keydown-ESC', () => {
-      this.deselectPart();
+      if (this.selectedPartType || this.flyoutFor) this.deselectPart();
+      else this.openPause();
     });
+    this.input.keyboard?.on('keydown-P', () => this.openPause());
 
     this.input.keyboard?.on('keydown-ENTER', () => this.launchFlight());
     // Hovering an RCS shell and pressing a key binds that key to separate it in flight.
     this.input.keyboard?.on('keydown', (e: KeyboardEvent) => {
-      if (!this.shellTipId || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!this.shellTipId || e.ctrlKey || e.metaKey || e.altKey || e.code === 'KeyP') return;
       const key = normalizeKey(e.key.length === 1 ? e.key : '');
       if (!key) return;
       const res = this.rocketTree.setSeparationKey(this.shellTipId, key);

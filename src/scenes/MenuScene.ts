@@ -72,12 +72,20 @@ export class MenuScene extends Phaser.Scene {
     preloadGameAssets(this);
   }
 
+  /** True when the player came back here from the pause menu (QUIT TO MAIN MENU). */
+  private fromPause = false;
+
+  init(data?: { fromPause?: boolean }): void {
+    this.fromPause = !!data?.fromPause;
+  }
+
   create(): void {
-    // Tests and diagnose scripts can open the lab directly with ?skipMenu.
-    if (new URLSearchParams(window.location.search).has('skipMenu')) {
+    // Tests and diagnose scripts can open the lab directly with ?skipMenu (not when quitting to the menu).
+    if (!this.fromPause && new URLSearchParams(window.location.search).has('skipMenu')) {
       this.scene.start('BuilderScene');
       return;
     }
+    if (this.fromPause) this.cameras.main.fadeIn(450, 7, 6, 11);
     this.state = 'idle';
     this.clock = 0;
     this.stateTime = 0;
