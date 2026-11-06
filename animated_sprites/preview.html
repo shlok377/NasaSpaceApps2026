@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sprite preview</title>
+<style>
+  :root { --bg:#07060b; --panel:#16131d; --border:#4b4458; --text:#f4eee6; --muted:#9d94ae; --accent:#ffb85c; --green:#3ef08a; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:20px 16px 40px; background:var(--bg); color:var(--text); font:16px/1.4 ui-monospace, "VT323", monospace; }
+  h1 { font-size:18px; margin:0 0 4px; color:var(--accent); letter-spacing:1px; }
+  p.sub { margin:0 0 18px; color:var(--muted); }
+  .wrap { max-width:1000px; margin:0 auto; }
+  .row { display:flex; flex-wrap:wrap; gap:16px; margin-bottom:16px; }
+  .card { background:var(--panel); border:2px solid var(--border); padding:12px; }
+  .card h2 { margin:0 0 8px; font-size:13px; color:var(--muted); font-weight:normal; text-transform:uppercase; letter-spacing:1px; }
+  canvas { display:block; image-rendering:pixelated; background:#0b0a12; }
+  canvas.sky { background:linear-gradient(#05040a,#0d0a1c 60%,#1a1030); }
+  .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  button, select { font:inherit; color:var(--text); background:#241f30; border:2px solid var(--border); padding:4px 10px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.on { border-color:var(--green); color:var(--green); }
+  label { color:var(--muted); display:flex; gap:6px; align-items:center; }
+  .stat { color:var(--green); min-width:150px; }
+  .strips canvas { margin-bottom:8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">SPRITE PREVIEW</h1>
+  <p class="sub" id="sub"></p>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="controls">
+      <span id="sprites"></span>
+      <span id="anims"></span>
+    </div>
+    <div class="controls" style="margin-top:10px">
+      <button id="replay">&#9654; Replay</button>
+      <button id="pause">Pause</button>
+      <button id="step">Step</button>
+      <label>Speed <select id="speed"><option value="2">2x slower</option><option value="1" selected>1x</option><option value="0.5">2x faster</option></select></label>
+      <label><input type="checkbox" id="ground"> ground line</label>
+      <span class="stat" id="stat"></span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="card"><h2>Large</h2><canvas id="big" width="384" height="384"></canvas></div>
+    <div class="card"><h2>Medium on a sky backdrop</h2><canvas id="mid" class="sky" width="256" height="256"></canvas></div>
+    <div class="card">
+      <h2>Actual size (1x) and 22px as in the orbit view</h2>
+      <canvas id="small" width="140" height="64"></canvas>
+    </div>
+  </div>
+
+  <div class="card strips">
+    <h2>All frames</h2>
+    <canvas id="strip" width="960" height="192"></canvas>
+  </div>
+</div>
+
+<script>
+// name -> { json, sequence (played in order; a looping clip in the middle repeats `repeat` times), ground row }
+const SPRITES = {
+  satellite: { json: 'satellite/satellite.json', variants: { default: ['deploy', 'working'] }, repeat: {}, ground: null, label: 'Satellite' },
+  rover: { json: 'rover/rover.json', variants: { default: ['fall', 'land', 'deploy', 'drive'] }, repeat: {}, ground: 58, label: 'Rover' },
+  crew: { json: 'crew/crew.json', variants: { 'on site': ['exit', 'plant', 'wave_flag'], 'off site': ['exit', 'wave'] }, repeat: {}, ground: 45, label: 'Crew' }
+};
+const $ = (id) => document.getElementById(id);
+const loaded = {};
+let cur = location.hash.slice(1) in SPRITES ? location.hash.slice(1) : 'satellite';
+let variant = null, mode = 'all', paused = false, speed = 1;
+let anim = null, frame = 0, acc = 0, last = 0, loops = 0;
+
+async function load(name) {
+  if (loaded[name]) return loaded[name];
+  const dir = SPRITES[name].json.split('/')[0];
+  const meta = await (await fetch(SPRITES[name].json)).json();
+  const img = new Image();
+  img.src = dir + '/' + meta.image + '?t=' + Date.now();
+  await img.decode();
+  return (loaded[name] = { meta, img });
+}
+const sp = () => loaded[cur];
+const A = () => sp().meta.animations[anim];
+
+function drawFrame(ctx, name, i, x, y, size) {
+  const { meta, img } = sp();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, i * meta.frameWidth, meta.animations[name].row * meta.frameHeight, meta.frameWidth, meta.frameHeight, x, y, size, size);
+}
+function drawStrip() {
+  const { meta } = sp();
+  const names = Object.keys(meta.animations);
+  const cell = 96, cv = $('strip');
+  cv.width = 960; cv.height = names.length * cell;
+  const c = cv.getContext('2d');
+  c.font = '12px monospace';
+  names.forEach((name, r) => {
+    for (let i = 0; i < meta.animations[name].frames; i++) {
+      c.fillStyle = '#120e1a'; c.fillRect(i * cell, r * cell, cell - 1, cell - 1);
+      drawFrame(c, name, i, i * cell, r * cell, cell);
+      c.fillStyle = '#9d94ae'; c.fillText(i + '', i * cell + 4, r * cell + 12);
+    }
+    c.fillStyle = '#ffb85c'; c.fillText(name, 960 - 80, r * cell + 12);
+  });
+}
+function ground(ctx, size) {
+  const g = SPRITES[cur].ground;
+  if (g == null || !$('ground').checked) return;
+  const y = (g / sp().meta.frameHeight) * size;
+  ctx.fillStyle = '#6b6b6b'; ctx.fillRect(0, y, size, size - y);
+  ctx.fillStyle = '#9d94ae'; ctx.fillRect(0, y, size, 2);
+}
+function render() {
+  const { meta } = sp();
+  const big = $('big').getContext('2d'); big.clearRect(0, 0, 384, 384); ground(big, 384); drawFrame(big, anim, frame, 0, 0, 384);
+  const mid = $('mid').getContext('2d'); mid.clearRect(0, 0, 256, 256); ground(mid, 256); drawFrame(mid, anim, frame, 0, 0, 256);
+  const sm = $('small').getContext('2d'); sm.clearRect(0, 0, 140, 64);
+  drawFrame(sm, anim, frame, 0, 0, meta.frameWidth); drawFrame(sm, anim, frame, 100, 20, 22);
+  $('stat').textContent = anim + ' ' + (frame + 1) + '/' + A().frames;
+}
+function seq() { return SPRITES[cur].variants[variant]; }
+function advance() {
+  const a = A();
+  if (frame + 1 < a.frames) { frame++; return; }
+  if (mode === 'all') {
+    const s = seq(), idx = s.indexOf(anim);
+    const rep = SPRITES[cur].repeat[anim] || 1;
+    if (a.loop && ++loops < rep) { frame = 0; return; }
+    if (idx + 1 < s.length) { anim = s[idx + 1]; frame = 0; loops = 0; return; }
+    frame = 0; // last clip of the sequence loops forever
+    return;
+  }
+  if (a.loop) frame = 0; else frame = a.frames - 1; // single clip: loop or hold the last frame
+}
+function tick(t) {
+  const dt = t - last; last = t;
+  if (!paused && anim) {
+    acc += dt;
+    const ms = A().frameMs * speed;
+    while (acc >= ms) { acc -= ms; advance(); }
+  }
+  if (anim) render();
+  requestAnimationFrame(tick);
+}
+function play(name) { anim = name; frame = 0; acc = 0; loops = 0; paused = false; $('pause').textContent = 'Pause'; }
+function buttons() {
+  $('sprites').innerHTML = Object.entries(SPRITES).map(([k, v]) => `<button data-s="${k}" class="${k === cur ? 'on' : ''}">${v.label}</button>`).join(' ');
+  const names = Object.keys(sp().meta.animations);
+  $('anims').innerHTML = ['<button data-m="all" class="' + (mode === 'all' ? 'on' : '') + '">Whole sequence</button>']
+    .concat(names.map((n) => `<button data-m="${n}" class="${mode === n ? 'on' : ''}">${n}</button>`)).join(' ');
+  const vs = Object.keys(SPRITES[cur].variants);
+  if (vs.length > 1) $('anims').innerHTML += ' <span class="stat">path:</span> ' + vs.map((v) => `<button data-v="${v}" class="${v === variant ? 'on' : ''}">${v}</button>`).join(' ');
+  $('anims').querySelectorAll('button[data-v]').forEach((b) => b.onclick = () => { variant = b.dataset.v; mode = 'all'; buttons(); setTitle(); play(seq()[0]); });
+  $('sprites').querySelectorAll('button').forEach((b) => b.onclick = () => select(b.dataset.s));
+  $('anims').querySelectorAll('button[data-m]').forEach((b) => b.onclick = () => { mode = b.dataset.m; buttons(); play(mode === 'all' ? seq()[0] : mode); });
+}
+function setTitle() { $('title').textContent = SPRITES[cur].label.toUpperCase() + ': ' + seq().join(' \u2192 '); }
+async function select(name) {
+  await load(name); cur = name; location.hash = name; mode = 'all'; variant = Object.keys(SPRITES[name].variants)[0];
+  setTitle();
+  const m = sp().meta;
+  $('sub').textContent = SPRITES[name].json.split('/')[1].replace('.json', '.png') + ' (' + m.frameWidth + 'x' + m.frameHeight + ' frames). Clips: ' + Object.entries(m.animations).map(([k, v]) => k + ' ' + v.frames + 'f ' + (v.loop ? 'loop' : 'once')).join(', ') + '.';
+  buttons(); drawStrip(); play(seq()[0]);
+}
+$('replay').onclick = () => play(mode === 'all' ? seq()[0] : mode);
+$('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? 'Resume' : 'Pause'; };
+$('step').onclick = () => { paused = true; $('pause').textContent = 'Resume'; advance(); };
+$('speed').onchange = (e) => { speed = parseFloat(e.target.value); };
+$('ground').onchange = () => {};
+// Debug hook for the headless check: jump to a clip and frame.
+window.__show = (name, i) => { paused = true; mode = name; anim = name; frame = i; };
+window.__select = select;
+select(cur).then(() => requestAnimationFrame(tick));
+</script>
+</body>
+</html>

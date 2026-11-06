@@ -180,8 +180,8 @@ describe('Surface Flags & Moon Big Sprite in WorldRenderer', () => {
 
     const greenFlag = images.find(img => img.key === GAME_ASSETS.FLAG_GREEN.key)!;
     expect(greenFlag.visible).toBe(true);
-    expect(greenFlag.displayWidth).toBe(20);
-    expect(greenFlag.displayHeight).toBe(20);
+    expect(greenFlag.displayWidth).toBe(32);
+    expect(greenFlag.displayHeight).toBe(32);
 
     // Flag base must match Moon surface point on screen
     const roverBase = moonSurfacePoint(ROVER_ZONE.angle);

@@ -22,7 +22,23 @@
 
 ### 📝 Message Stream
 
-#### 🟣 [Claude] - 2026-11-05 (Pause menu — branch `feature/pause-menu`, stacked on `feature/main-menu`)
+#### 🔵 [Gemini] - 2026-11-06 (Moon network spawn safety & ID fix — on `main`)
+Addressed user-reported bug where hitting one satellite in orbit caused other deployed satellites to crash / explode.
+- **Physical collision radii**: Reverted back to original values (`satelliteRadius: 120`, `roverRadius: 28`, `assetRadius: 60` in `game.json`) per user request.
+- **Spawn separation**: `FlightScene.init()` checks live satellites on spawn against each other and nudges phase forward along orbit if spawned within $2 \times \text{assetRadius}$, eliminating immediate spawn detonation.
+- **Monotonic asset IDs**: `FlightScene.newAssets()` generates monotonic IDs per prefix (`SAT-1`, `SAT-2`, `SAT-3`) based on existing max ID + 1, preventing ID collision and accidental batch deletion on blowUp.
+- 165 tests + typecheck green.
+
+#### 🟣 [Claude] - 2026-11-06 (Moon network — branch `feature/moon-program`, no PR yet)
+Deployed satellites and rovers now **stay** and help later flights (`game/moonNetwork.ts`, numbers in `game.json` → `network`).
+- A **day = one launch**: a satellite lasts 15, a rover 5. Each launch spends one day on every asset (`spendDay`); flat ones are retired. Saved in `PlayerProgress.assets`; a flight that finishes its objective leaves a new one (satellite on its deployment orbit, rover where it landed in the zone).
+- **Scouted landing spots** (`scoutSites`): satellite = 1 spot, rover = 3 spots, up to 9, new places each flight. Narrow (satellite ×0.7, rover ×0.5 of the mission's zone) but every other asset widens them (+25 % each, cap ×2.5). With nothing deployed the old fixed zone is the only spot. The **crew** gets extra width per rover (+40 %) and per satellite (+20 %), and rovers on the Moon switch the boulder surprise off (`PhaseRunner.scouted`).
+- **Pick a spot** from orbit: number keys, TAB or click on the orbit map (rover: before the drop; crew: before the final descent). `PhaseRunner.roverZone / landingSite` hold the pick, and **landing in any scouted spot counts** (`extraRoverZones / extraLandingSites`).
+- Deployed assets are drawn at half size on the orbit map (`PayloadSprites.updateNetwork`); satellites keep flying their own orbit. Touching one costs 5–10 health once per pass (`checkNetworkCollisions`), and the asset dies: any asset that hits the rocket or another asset falls into the Moon with an explosion and is deleted from the saved list whatever its battery (`doom` / `blowUp`). Name tags (SAT-1, ROV-2) float over each asset; rovers are drawn as big as satellites.
+- **Bottom-right panel** (`ui/NetworkPanel.ts`): a satellite icon and a rover icon, each opens its list with the days of battery left, plus total scout spots and coverage of the Moon.
+- Not flown by hand over many missions; balance numbers are first guesses.
+
+#### 🟣 [Claude] - 2026-11-05 (Pause menu — branch `feature/pause-menu`)
 ESC or P pauses the flight and the lab (`src/scenes/PauseScene.ts`; rules in `src/game/pauseRules.ts`, tested). The scene underneath is paused with `scene.pause()` and all sound is paused, so nothing moves and sounds carry on from the same spot.
 - **Flight items**: CONTINUE (3-2-1, throttle kept, steering ignored until its keys are released), RESTART PHASE (free, from the phase checkpoint; greyed in phase 1), LAUNCH AGAIN (back on the pad; the rocket price already paid is not refunded), BUILDER, QUIT TO MAIN MENU. Unavailable items stay in place, greyed with a reason. LAUNCH AGAIN, BUILDER and QUIT ask first. A status card shows mission, phase, height, fuel, hull and rocket cost.
 - **Lab**: CONTINUE and QUIT TO MAIN MENU (the design is not saved, so quitting loses it). ESC cancels the selected part first; P always opens the menu.
@@ -35,6 +51,16 @@ New first scene, `src/scenes/MenuScene.ts`: CONTINUE, NEW GAME, FLIGHT SCHOOL, O
 - **Shared sky**: the backdrop, stars, Moon and sparkles moved to `src/ui/labSky.ts` (`paintLabSky`); `BuilderScene.drawScenery` now just calls it, so menu and lab are pixel-identical and the hand-over has no cut. Gemini: this is the only change to your scene besides `init(data)` + `playMenuIntro()` (fade-in when `fromMenu`).
 - **Scripts / tests**: `main.ts` now starts on the menu. Open `/?skipMenu` to land straight in the lab; the `scripts/*.mjs` already do. Typecheck + 144 tests green.
 - Not done: no Flight School lesson (guide only), no way back to the menu from the lab.
+#### 🟣 [Claude] - 2026-11-05 (Animated payload sprites — branch `feature/sprites`, PR #54)
+The temporary static icons are replaced by pixel sprite sheets in the rocket parts' style. Sources and a preview page live in **`animated_sprites/`** (`npm run sprites` rebuilds the sheets and copies them to `public/assets/sprites/`; preview with `python3 -m http.server 8765 --directory animated_sprites`). `typecheck` + 152 tests green; played in headless Chromium.
+- **Satellite** (SPACE in a stable orbit): pops out, panels unfold, mast + dish rise (`deploy`), then loops `working` with signal waves.
+- **Rover**: the airbag ball is a **still frame** while it falls; the animation starts on touchdown (`land`: squash, two bounces, deflate), then in the zone `deploy` (shell opens) and `drive`; a missed rover only lands and is greyed out.
+- **Crew** (after the rocket lands): astronaut beside the rocket's base: `exit`, then `plant` + `wave_flag` on the landing site, or `wave` (no flag) when down safely off the site. The flag is the cyan pennant from `flag_blue.png`.
+- Code: `core/spriteSheets.ts` (load + anim keys; clip timings come from each sheet's JSON), `scenes/flight/PayloadSprites.ts` (+ test) draws them; `WorldRenderer` feeds it positions (`MissionOverlay.landedRoverOk`, `.crew`), `FlightScene` sets them on `ROVER_LANDED` / `COMPLETE`. If a sheet is missing, the old still sprite shows.
+- The result panel now waits longer after a successful flight (6.5 s satellite, 5.2 s rover and crew) so the animation can play.
+- **Orbit gauge** moved from the top centre to a vertical tube on the right (where the HEIGHT tube sits on the climb; they never show together).
+- **Satellite ejection**: the satellite is pushed ahead and the spent stage backs off (`phases.satellite` in `game.json`, `deploySatellite`; both pushes are checked so each orbit holds), time runs ×3 so they drift apart, and on the orbit map the gap is stretched (`SATELLITE_PARTING_PX`) so it is easy to see. Satellite sprite is 96 px, crew `CREW_CELLS` 4.5.
+- **Open**: the missed-rover and crash cases have no special clip; no sound yet; crew size is `CREW_CELLS` in `WorldRenderer` if it looks too small or big next to big rockets.
 
 #### 🟣 [Claude] - 2026-11-05 (Lab animation: block placement — on `main`)
 First lab animation. A newly placed block now starts tucked **behind its parent**, slides to its cell (`PLACE_SLIDE_MS` = 260 ms, `Cubic.easeOut`), then does the old scale bounce and snap burst. Code: `BuilderScene.animatePlacement`, called from `handleLeftClick`. Not visually playtested yet. More lab animations (removal, variant swap) can hang off the same pattern.
@@ -111,7 +137,9 @@ Use `[ ]` for todo, `[/]` for in-progress (`[CLAIMED: GEMINI]` or `[CLAIMED: CLA
 - [x] Rock belt as part of the flight (`src/modules/rockBelt`), difficulty per launch time.
 - [x] Payload objectives, rewards, shell separation keys, hull integrity (`fixing_gameplay`).
 - [x] Flight challenges in `src/modules/` (max-Q, wind shear, staging fault, radiation belt, trans-lunar window).
+- [x] Moon network: deployed assets with batteries, scouted landing spots, bottom-right panel (`feature/moon-program`).
 - [ ] Restyle the orbit gauge and problem cards to match the new HUD.
+- [x] Animated satellite, rover and crew sprites (`animated_sprites/`, `feature/sprites`).
 - [x] Satellite / rover sprites, hazard scheduling, two-step mission HUD.
 
 ---

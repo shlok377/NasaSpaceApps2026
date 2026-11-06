@@ -1,6 +1,7 @@
 import { CONFIG, deg } from '../config';
 import { gravityAt, insideMoonSoi, moonAltitude, moonAngleOf, surfaceDistance } from '../physics/bodies';
 import { MOON, MOON_CENTER } from '../physics/constants';
+import { orbitFromState } from '../physics/orbit';
 import { FlightSim, FlightSnapshot, FlightTelemetry } from '../physics/FlightSim';
 import { momentOfInertia } from '../physics/vehicle';
 import { PayloadKind } from '../core/types';
@@ -64,6 +65,7 @@ export const PROBLEM_INFO: Record<ProblemId, { title: string; howTo: string }> =
 
 const ORBIT_CFG = CONFIG.phases.orbit;
 const ROVER_CFG = CONFIG.phases.rover;
+const SATELLITE_CFG = CONFIG.phases.satellite;
 const LANDING_CFG = CONFIG.phases.landing;
 
 export interface SurfaceZone {
@@ -77,6 +79,11 @@ export const BOULDER_FIELD: SurfaceZone = { angle: LANDING_SITE.angle, halfWidth
 
 export function inZone(angle: number | null, zone: SurfaceZone): boolean {
   return angle !== null && surfaceDistance(angle, zone.angle) <= zone.halfWidth;
+}
+
+/** Is the angle inside this zone (or any of these zones)? */
+export function inAny(angle: number | null, zones: SurfaceZone | readonly SurfaceZone[]): boolean {
+  return (Array.isArray(zones) ? zones : [zones as SurfaceZone]).some(z => inZone(angle, z));
 }
 
 function moonRadius(sim: FlightSim): number {
@@ -318,13 +325,40 @@ export function predictRoverLanding(sim: FlightSim): { angle: number; x: number;
   return sim.predictMoonImpact(k.x, k.y);
 }
 
+/** Where a free-flying body (the satellite) is `seconds` from now on its own orbit; negative looks back along it. */
+export function positionAfter(body: RoverCapsule, seconds: number): { x: number; y: number } {
+  const sign = seconds < 0 ? -1 : 1;
+  // Walking backwards is walking forwards with the velocity reversed.
+  const ghost: RoverCapsule = { ...body, vx: body.vx * sign, vy: body.vy * sign, landed: false };
+  stepRover(ghost, Math.abs(seconds));
+  return { x: ghost.x, y: ghost.y };
+}
+
+/** Would the orbit survive this push? (Above the surface, and still inside the Moon's pull.) */
+function orbitHolds(sim: FlightSim, vx: number, vy: number): boolean {
+  const o = orbitFromState({ x: sim.state.x - MOON_CENTER.x, y: sim.state.y - MOON_CENTER.y }, { x: vx, y: vy }, MOON.mu, MOON.radius);
+  return !o.escaping && o.periapsisAltitude >= 30 && o.apoapsisRadius <= MOON.sphereOfInfluence - 100;
+}
+
+/** The biggest push (up to `kick`, along the direction of travel) after which the orbit still holds. */
+function safeKick(sim: FlightSim, kick: number): number {
+  const speed = Math.hypot(sim.state.vx, sim.state.vy) || 1;
+  const dx = sim.state.vx / speed;
+  const dy = sim.state.vy / speed;
+  for (const scale of [1, 0.6, 0.3]) {
+    const k = kick * scale;
+    if (orbitHolds(sim, sim.state.vx + dx * k, sim.state.vy + dy * k)) return k;
+  }
+  return 0;
+}
+
 export function releaseRover(sim: FlightSim): RoverCapsule {
   const k = dropKick(sim);
   return { x: sim.state.x, y: sim.state.y, vx: sim.state.vx + k.x, vy: sim.state.vy + k.y, landed: false, angle: null, inZone: false };
 }
 
 /** Falls under the Moon's gravity onto its airbags. */
-export function stepRover(rover: RoverCapsule, dt: number): void {
+export function stepRover(rover: RoverCapsule, dt: number, zone: SurfaceZone | readonly SurfaceZone[] = ROVER_ZONE): void {
   if (rover.landed) return;
   const n = Math.max(1, Math.ceil(dt / 0.05));
   const h = dt / n;
@@ -337,7 +371,7 @@ export function stepRover(rover: RoverCapsule, dt: number): void {
     if (moonAltitude(rover.x, rover.y) <= 0) {
       rover.landed = true;
       rover.angle = moonAngleOf(rover.x, rover.y);
-      rover.inZone = inZone(rover.angle, ROVER_ZONE);
+      rover.inZone = inAny(rover.angle, zone);
     } else if (!insideMoonSoi(rover.x, rover.y)) {
       rover.landed = true;
       rover.angle = null;
@@ -395,9 +429,23 @@ export class PhaseRunner {
   public dropReady = false;
   public rover: RoverCapsule | null = null;
   public sparesLeft: number = ROVER_CFG.spareRovers;
+  /** The zone the rover has to land in (the spot picked from the scouted ones; the default with nothing deployed). */
+  public roverZone: SurfaceZone = { ...ROVER_ZONE };
+  /** The other scouted rover spots: landing in any of them counts too. */
+  public extraRoverZones: SurfaceZone[] = [];
+  /** The spot the crew aims for at the start of the landing. */
+  public landingSite: SurfaceZone = { ...LANDING_SITE };
+  /** The other scouted landing spots: touching down in any of them is on the site too. */
+  public extraLandingSites: SurfaceZone[] = [];
+  /** Rovers on the Moon have already surveyed the site: no boulders surprise the crew. */
+  public scouted = false;
   /** The landing site the crew should aim for (moves if boulders block it). */
   public site: SurfaceZone = { ...LANDING_SITE };
   public bouldersSeen = false;
+  /** The rocks sit on the spot picked for the landing. */
+  public get boulderField(): SurfaceZone {
+    return { angle: this.landingSite.angle, halfWidth: LANDING_CFG.boulderFieldHalfWidth };
+  }
   public failure: string | null = null;
   public complete = false;
   /** The phases this flight has to get through, in order. */
@@ -449,7 +497,7 @@ export class PhaseRunner {
     }
     if (phase === 'DEPLOY') this.deployReady = true;
     if (phase === 'LANDING') {
-      this.site = { ...LANDING_SITE };
+      this.site = { ...this.landingSite };
       this.triggered.clear();
       this.bouldersSeen = false;
     }
@@ -472,7 +520,15 @@ export class PhaseRunner {
   public deploySatellite(sim: FlightSim): boolean {
     if (this.phase !== 'DEPLOY' || !this.deployReady || sim.phase !== 'FLYING' || this.over) return false;
     if (!isStableOrbit(sim.getTelemetry())) return false;
-    this.satellite = { x: sim.state.x, y: sim.state.y, vx: sim.state.vx, vy: sim.state.vy, landed: false, angle: null, inZone: false };
+    // A spring pushes the satellite on ahead while the spent stage backs off: two different orbits, so they drift apart.
+    const speed = Math.hypot(sim.state.vx, sim.state.vy) || 1;
+    const dx = sim.state.vx / speed;
+    const dy = sim.state.vy / speed;
+    const ahead = safeKick(sim, SATELLITE_CFG.ejectKick);
+    const back = safeKick(sim, -SATELLITE_CFG.stageKick);
+    this.satellite = { x: sim.state.x, y: sim.state.y, vx: sim.state.vx + dx * ahead, vy: sim.state.vy + dy * ahead, landed: false, angle: null, inZone: false };
+    sim.state.vx += dx * back;
+    sim.state.vy += dy * back;
     this.events.push({ kind: 'SATELLITE_DEPLOYED' });
     this.finishPhase(sim);
     return true;
@@ -487,12 +543,14 @@ export class PhaseRunner {
 
   /** How fast the scene may run time right now (quiet stretches in orbit go by faster). */
   public timeScale(sim: FlightSim): number {
+    // The satellite has just left: speed up so it and the stage visibly part ways.
+    if (this.complete && this.satellite && !this.satellite.landed && sim.phase === 'FLYING') return SATELLITE_CFG.fastForward;
     if (this.over || sim.phase !== 'FLYING' || this.phase !== 'ROVER' || this.problem) return 1;
     if (this.rover && !this.rover.landed) return ROVER_CFG.orbitFastForward;
     if (this.dropReady && !this.rover) {
       if (sim.getTelemetry().thrust > 0) return 1;
       const hit = predictRoverLanding(sim);
-      if (hit && surfaceDistance(hit.angle, ROVER_ZONE.angle) < ROVER_ZONE.halfWidth * 5) return 1;
+      if (hit && [this.roverZone, ...this.extraRoverZones].some(z => surfaceDistance(hit.angle, z.angle) < z.halfWidth * 5)) return 1;
       return ROVER_CFG.orbitFastForward;
     }
     return 1;
@@ -602,7 +660,7 @@ export class PhaseRunner {
       return;
     }
     if (!this.rover) return;
-    stepRover(this.rover, dt);
+    stepRover(this.rover, dt, [this.roverZone, ...this.extraRoverZones]);
     if (!this.rover.landed) return;
     const ok = this.rover.inZone;
     if (ok) {
@@ -626,10 +684,11 @@ export class PhaseRunner {
       if (this.triggered.has(id) || this.problem) continue;
       if (t.moonAltitude > LANDING_CFG.problems[id].atAltitude) continue;
       this.triggered.add(id);
+      if (id === 'BOULDERS' && this.scouted) continue; // surveyed by a rover: no surprise
       if (id === 'BOULDERS') {
         // Divert further along the direction of travel.
         const dir = t.moonOrbit?.direction ?? 1;
-        this.site = { angle: LANDING_SITE.angle + (dir * LANDING_CFG.problems.BOULDERS.divert) / MOON.radius, halfWidth: LANDING_CFG.siteHalfWidth };
+        this.site = { angle: this.landingSite.angle + (dir * LANDING_CFG.problems.BOULDERS.divert) / MOON.radius, halfWidth: this.landingSite.halfWidth };
         this.bouldersSeen = true;
         this.events.push({ kind: 'SITE_MOVED', site: this.site });
         continue;
@@ -642,7 +701,7 @@ export class PhaseRunner {
   /** Did the crew land somewhere safe? */
   private judgeTouchdown(sim: FlightSim): void {
     const at = sim.stats.touchdownAt;
-    if (this.bouldersSeen && inZone(at, BOULDER_FIELD)) {
+    if (this.bouldersSeen && inZone(at, this.boulderField)) {
       this.fail(sim, 'Landed in the boulder field');
       return;
     }
@@ -650,6 +709,6 @@ export class PhaseRunner {
     this.events.push({ kind: 'PHASE_DONE', phase: 'LANDING' });
     this.phasesDone = 3;
     this.complete = true;
-    this.events.push({ kind: 'COMPLETE', onSite: inZone(at, this.site) });
+    this.events.push({ kind: 'COMPLETE', onSite: inAny(at, [this.site, ...this.extraLandingSites]) });
   }
 }

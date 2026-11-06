@@ -4,6 +4,7 @@ import { HierarchicalRocketNode, PayloadKind } from '../core/types';
 import { currentMission, Mission, MissionContext, newlyCompleted, rocketCost } from '../game/missions';
 import {
   ActiveProblem,
+  RoverCapsule,
   Checkpoint,
   isStableOrbit,
   onImpactCourse,
@@ -12,6 +13,8 @@ import {
   PhaseId,
   PhaseRunner,
   stepRover,
+  LANDING_SITE,
+  ROVER_ZONE,
   phaseNumber,
   stepsDone,
   predictRoverLanding,
@@ -20,11 +23,12 @@ import {
 import { DEFAULT_SEPARATION_KEY, normalizeKey } from '../core/separationKeys';
 import { flightPauseItems } from '../game/pauseRules';
 import type { PauseHost, PauseSceneData } from './PauseScene';
+import { coverage, counts, DeployedAsset, liveSatellite, newRover, newSatellite, ScoutSite, scoutSites, siteTotal, spendDay } from '../game/moonNetwork';
 import { cashFromAwards, flightEarnings, FlightEarnings, loadProgress, objectiveBonus, payoutBreakdown, PlayerProgress, saveProgress } from '../game/progress';
 import { Award, StuntTracker } from '../game/stunts';
 import { TIME_LOOKS, TIMES_OF_DAY, TimeOfDay, timeOfDayReward, timeOfDayWind } from '../game/timeOfDay';
-import { moonSoiAltitude } from '../physics/bodies';
-import { ENGINE, FINS, G0, LIMITS, ROCK_BELT, WORLD } from '../physics/constants';
+import { moonAngleOf, moonSoiAltitude, moonSurfacePoint, surfaceDistance } from '../physics/bodies';
+import { ENGINE, FINS, G0, LIMITS, MOON, MOON_CENTER, ROCK_BELT, WORLD } from '../physics/constants';
 import { ControlInput, FlightEvent, FlightSim, FlightTelemetry } from '../physics/FlightSim';
 import { evaluateMission, MAX_STARS, MissionResult, OUTCOME_PAYOUT } from '../physics/mission';
 import { analyzeVehicle, buildFlightVehicle, FlightVehicle, VehicleReport } from '../physics/vehicle';
@@ -34,9 +38,11 @@ import { SkyCards } from '../ui/SkyCards';
 import { Milestone } from '../ui/JourneyArc';
 import { LaunchButton } from '../ui/LaunchButton';
 import { drawPixelPanel, pixelBody, pixelTitle, PX } from '../ui/pixel';
+import { NetworkPanel } from '../ui/NetworkPanel';
 import { OrbitGauge, ProblemCard } from '../ui/PhaseHud';
 import { formatDistance, TEXT_STYLE, TITLE_STYLE, UI } from '../ui/theme';
 import { preloadGameAssets } from '../core/assets';
+import { createSpriteAnimations } from '../core/spriteSheets';
 import { EngineLoop, LoopSfx, playSfx } from '../core/sound';
 import { ChallengeCard, ChallengeContext, ChallengeEvent, ChallengeRunner, Combo, createChallenges } from '../modules';
 import { Effects } from './flight/Effects';
@@ -55,7 +61,7 @@ const THROTTLE_RATE = 0.9; // per second while a throttle key is held
 const APEX_INTERVAL_MS = 200;
 
 type Keys = Record<
-  'W' | 'S' | 'SHIFT' | 'CTRL' | 'Z' | 'X' | 'A' | 'D' | 'E' | 'F' | 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'SPACE' | 'ENTER' | 'ESC' | 'R' | 'B' | 'P',
+  'W' | 'S' | 'SHIFT' | 'CTRL' | 'Z' | 'X' | 'A' | 'D' | 'E' | 'F' | 'LEFT' | 'RIGHT' | 'UP' | 'DOWN' | 'SPACE' | 'ENTER' | 'ESC' | 'R' | 'B' | 'P' | 'TAB' | 'ONE' | 'TWO' | 'THREE' | 'FOUR' | 'FIVE' | 'SIX' | 'SEVEN' | 'EIGHT' | 'NINE',
   Phaser.Input.Keyboard.Key
 >;
 
@@ -79,6 +85,7 @@ const AWARD_COLORS: Partial<Record<Award['id'], string>> = {
 /** A checkpoint plus the scene-side bits needed to rewind. */
 interface SceneCheckpoint extends Checkpoint {
   landedRovers: number[];
+  landedRoverOk: boolean[];
   sparesLeft: number;
   solved: number;
   failedProblems: number;
@@ -164,6 +171,7 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
   private launched = false;
   private exploded = false;
   private engineSound: EngineLoop | null = null;
+  private rcsSound: EngineLoop | null = null;
   /** Loops while any warning lasts. */
   private buzzer: LoopSfx | null = null;
   /** When each fuel type went low (scene time, ms): its buzzer gives up after FUEL_BUZZ_MS. */
@@ -190,7 +198,22 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
   private progressBeforeFinish: PlayerProgress | null = null;
   private checkpoint: SceneCheckpoint | null = null;
   private landedRovers: number[] = [];
+  /** For each landed rover: did it land in the zone (it unpacks and drives) or miss (it stays dead)? */
+  private landedRoverOk: boolean[] = [];
+  /** Set when the crew lands: the astronaut gets out beside the rocket. */
+  private crewLanding: { onSite: boolean } | null = null;
   private phasePaid = 0;
+  /** Satellites and rovers from earlier flights that are still serving this one. */
+  private network: Array<{ asset: DeployedAsset; body: RoverCapsule | null; /** Hit something: falling to the Moon, battery or not. */ doomed?: boolean }> = [];
+  /** The satellite ejected this flight hit another asset and was lost. */
+  private newSatelliteLost = false;
+  private freshBlown = false;
+  /** The spots the network scouted for this flight, and which one is picked (rover drop / crew landing). */
+  private sites: { rover: ScoutSite[]; landing: ScoutSite[] } = { rover: [], landing: [] };
+  private chosen = { rover: 0, landing: 0 };
+  /** Network assets the rocket is touching right now (so one pass hurts once). */
+  private touching = new Set<string>();
+  private networkPanel: NetworkPanel | null = null;
   private mission: Mission | null = null;
   private stunts = new StuntTracker();
   private combo = new Combo();
@@ -230,7 +253,29 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
     this.separatePromptShown = false;
     this.checkpoint = null;
     this.landedRovers = [];
+    this.landedRoverOk = [];
+    this.crewLanding = null;
     this.phasePaid = 0;
+    const minSpawnDist = CONFIG.network.collision.assetRadius * 2;
+    this.network = [];
+    for (const asset of this.progress.assets.filter(a => a.daysLeft > 0)) {
+      const body = asset.kind === 'SATELLITE' ? liveSatellite(asset, Math.random) : null;
+      if (body) {
+        for (let tries = 0; tries < 20; tries++) {
+          const overlap = this.network.some(other => other.body && Math.hypot(other.body.x - body.x, other.body.y - body.y) < minSpawnDist);
+          if (!overlap) break;
+          stepRover(body, 5);
+        }
+      }
+      this.network.push({ asset: { ...asset }, body });
+    }
+    const assets = this.network.map(n => n.asset);
+    this.sites = { rover: scoutSites(assets, 'ROVER', ROVER_ZONE, Math.random), landing: scoutSites(assets, 'LANDING', LANDING_SITE, Math.random) };
+    this.chosen = { rover: 0, landing: 0 };
+    this.touching = new Set();
+    this.newSatelliteLost = false;
+    this.freshBlown = false;
+    this.networkPanel = null;
     this.mission = currentMission(this.progress.completedMissions, this.payload);
     this.stunts = new StuntTracker();
     this.combo = new Combo();
@@ -251,21 +296,25 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
     this.sim = new FlightSim(this.vehicle);
     this.runner = new PhaseRunner('ORBIT', 0, Math.random, this.payload);
     this.runner.drainEvents();
+    this.applySiteChoice();
     this.challenges = createChallenges();
     this.cost = rocketCost(flattenParts(this.tree));
     this.exposeForDebug();
     if (this.game.canvas) this.game.canvas.style.cursor = 'default';
 
+    createSpriteAnimations(this);
     this.world = new WorldRenderer(this);
     this.world.updateCamera(this.sim, this.sim.getTelemetry(), 0, 'ASCENT');
     this.fx = new Effects(this);
     this.createHud();
     this.setupInput();
-    this.engineSound = new EngineLoop(this);
+    this.engineSound = new EngineLoop(this, 'ROCKET_FLYING');
+    this.rcsSound = new EngineLoop(this, 'ROCKET_ENGINE');
     this.buzzer = new LoopSfx(this, 'BUZZER');
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.input.keyboard?.removeAllKeys(true);
       this.engineSound?.stop();
+      this.rcsSound?.stop();
       this.buzzer?.stop();
     });
   }
@@ -298,6 +347,7 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
     );
     this.instruments = new InstrumentChip(this);
     this.coins = new MoneyChip(this);
+    this.networkPanel = new NetworkPanel(this);
 
     const [verdict, color] = this.verdict();
     const affordable = this.progress.money >= this.cost;
@@ -373,12 +423,13 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
   // ---------------------------------------------------------------------------
 
   private setupInput(): void {
-    this.keys = this.input.keyboard!.addKeys('W,S,SHIFT,CTRL,Z,X,A,D,E,F,LEFT,RIGHT,UP,DOWN,SPACE,ENTER,ESC,R,B,P') as Keys;
+    this.keys = this.input.keyboard!.addKeys('W,S,SHIFT,CTRL,Z,X,A,D,E,F,LEFT,RIGHT,UP,DOWN,SPACE,ENTER,ESC,R,B,P,TAB,ONE,TWO,THREE,FOUR,FIVE,SIX,SEVEN,EIGHT,NINE') as Keys;
     this.keys.SPACE.on('down', () => {
       if (this.sim.phase === 'PRELAUNCH') this.startCountdown();
       else if (this.runner.deploySatellite(this.sim) || this.runner.dropRover(this.sim)) {
         const at = this.world.rocketScreen(this.sim);
         this.fx.ring(at.x, at.y, WORLD_COLORS.rover, 50, 0.5);
+        playSfx(this, 'ROCKET_SEPARATION');
       }
     });
     const onLeftDown = () => {
@@ -401,6 +452,28 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
     this.keys.ESC.on('down', () => (this.result ? this.returnToBuilder() : this.openPause()));
     this.keys.P.on('down', () => {
       if (!this.result) this.openPause();
+    });
+    // Pick a scouted landing spot: number keys, TAB to cycle, or click it on the orbit map.
+    const numbers: Array<keyof Keys> = ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE'];
+    numbers.forEach((k, i) => this.keys[k].on('down', () => this.pickSite(i)));
+    this.keys.TAB.on('down', () => {
+      const open = this.pickable();
+      if (open) this.pickSite((this.chosen[open.kind === 'ROVER' ? 'rover' : 'landing'] + 1) % open.sites.length);
+    });
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer, over: unknown[]) => {
+      const open = this.pickable();
+      if (!open || over.length > 0 || this.world.camera.mode !== 'ORBIT') return;
+      const w = this.world.toWorld(pointer.x, pointer.y);
+      const angle = moonAngleOf(w.x, w.y);
+      let best = -1;
+      let bestDistance = Infinity;
+      open.sites.forEach((site, i) => {
+        const d = surfaceDistance(angle, site.angle);
+        if (d < bestDistance) [best, bestDistance] = [i, d];
+      });
+      // Only a click near the Moon's rim counts (inside the Moon or far out is just a click).
+      const rim = Math.hypot(w.x - MOON_CENTER.x, w.y - MOON_CENTER.y);
+      if (best >= 0 && rim > MOON.radius * 0.6 && rim < MOON.radius * 1.9) this.pickSite(best);
     });
     // Each RCS shell has its own key from the lab; it can be pressed any time in flight.
     this.input.keyboard!.on('keydown', (e: KeyboardEvent) => {
@@ -426,6 +499,149 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
     });
   }
 
+  // ---------------------------------------------------------------------------
+  // Moon network: scouted landing spots and the assets from earlier flights
+  // ---------------------------------------------------------------------------
+
+  /** The runner aims for the picked spots; rovers already on the Moon have surveyed the site. */
+  private applySiteChoice(): void {
+    const r = this.runner;
+    r.roverZone = { angle: this.sites.rover[this.chosen.rover].angle, halfWidth: this.sites.rover[this.chosen.rover].halfWidth };
+    r.landingSite = { angle: this.sites.landing[this.chosen.landing].angle, halfWidth: this.sites.landing[this.chosen.landing].halfWidth };
+    // The picked spot is the one to aim for, but landing in any scouted spot counts.
+    const others = (list: ScoutSite[], picked: number) => list.filter((_, i) => i !== picked).map(z => ({ angle: z.angle, halfWidth: z.halfWidth }));
+    r.extraRoverZones = others(this.sites.rover, this.chosen.rover);
+    r.extraLandingSites = others(this.sites.landing, this.chosen.landing);
+    if (r.phase === 'LANDING' && !r.bouldersSeen) r.site = { ...r.landingSite };
+    r.scouted = counts(this.network.map(n => n.asset)).rovers > 0;
+  }
+
+  /** The spots to choose from right now: the rover's before the drop, the crew's before the final descent. */
+  private pickable(): { kind: 'ROVER' | 'LANDING'; sites: ScoutSite[] } | null {
+    const r = this.runner;
+    if (this.result || r.over || this.sim.phase === 'CRASHED') return null;
+    if (r.phase === 'ROVER' && !r.rover && this.sites.rover.length > 1) return { kind: 'ROVER', sites: this.sites.rover };
+    if (r.phase === 'LANDING' && this.sites.landing.length > 1 && !onImpactCourse(this.sim.getTelemetry())) return { kind: 'LANDING', sites: this.sites.landing };
+    return null;
+  }
+
+  private pickSite(index: number): void {
+    const open = this.pickable();
+    if (!open || index < 0 || index >= open.sites.length) return;
+    const key = open.kind === 'ROVER' ? 'rover' : 'landing';
+    if (this.chosen[key] === index) return;
+    this.chosen[key] = index;
+    this.applySiteChoice();
+    playSfx(this, 'UI_CLICK');
+    this.showBanner(`${open.kind === 'ROVER' ? 'Rover' : 'Landing'} spot ${index + 1} picked`, UI.greenText);
+  }
+
+  /** Satellites keep flying their orbits while this flight runs; one that was hit falls and blows up on the Moon. */
+  private stepNetwork(gameDt: number): void {
+    for (const n of this.network) {
+      if (!n.body) continue;
+      // A doomed satellite drops fast, so the crash is not a long wait.
+      stepRover(n.body, n.doomed ? gameDt * CONFIG.network.collision.fallTimeScale : gameDt);
+      if (!n.body.landed) continue;
+      if (n.doomed) this.blowUp(n);
+      else n.body = null;
+    }
+    // The satellite ejected this flight, if it was hit, comes down the same way.
+    const fresh = this.runner.satellite;
+    if (this.newSatelliteLost && fresh?.landed && fresh.angle !== null && !this.freshBlown) {
+      this.freshBlown = true;
+      this.explodeAt(fresh.x, fresh.y);
+    }
+    if (this.launched) this.checkAssetCrashes();
+  }
+
+  /** Hit: it loses its way and drops into the Moon. A rover on the ground blows up where it stands. */
+  private doom(n: { asset: DeployedAsset; body: RoverCapsule | null; doomed?: boolean }): void {
+    if (n.doomed) return;
+    n.doomed = true;
+    if (n.body) {
+      n.body.vx *= CONFIG.network.collision.fallSpeed;
+      n.body.vy *= CONFIG.network.collision.fallSpeed;
+    } else this.blowUp(n);
+  }
+
+  /** The asset is gone for good, whatever charge it had left. */
+  private blowUp(n: { asset: DeployedAsset; body: RoverCapsule | null }): void {
+    const at = n.body ?? (n.asset.angle !== undefined ? moonSurfacePoint(n.asset.angle, 0) : null);
+    if (at) this.explodeAt(at.x, at.y);
+    this.network = this.network.filter(m => m !== n);
+    this.progress = { ...this.progress, assets: this.progress.assets.filter(a => a.id !== n.asset.id) };
+    saveProgress(this.progress);
+    this.showBanner(`${n.asset.id} destroyed`, '#fca5a5');
+  }
+
+  private explodeAt(wx: number, wy: number): void {
+    const p = this.world.toScreen(wx, wy);
+    this.fx.explode(p.x, p.y);
+    playSfx(this, 'EXPLOSION');
+    this.cameras.main.shake(200, 0.005);
+  }
+
+  /** Assets that run into each other (satellite on satellite, satellite on a rover's spot) are both lost. */
+  private checkAssetCrashes(): void {
+    const col = CONFIG.network.collision;
+    const spots = (n: { asset: DeployedAsset; body: RoverCapsule | null }) =>
+      n.body ?? (n.asset.angle !== undefined ? moonSurfacePoint(n.asset.angle, 0) : null);
+    const live = this.network.filter(n => !n.doomed);
+    for (let i = 0; i < live.length; i++) {
+      for (let j = i + 1; j < live.length; j++) {
+        if (!live[i].body && !live[j].body) continue; // two rovers just sit there
+        const a = spots(live[i]);
+        const b = spots(live[j]);
+        if (a && b && Math.hypot(a.x - b.x, a.y - b.y) < col.assetRadius) {
+          this.doom(live[i]);
+          this.doom(live[j]);
+        }
+      }
+    }
+    // The satellite ejected this flight against one of them.
+    const fresh = this.runner.satellite;
+    if (!fresh || fresh.landed || this.newSatelliteLost) return;
+    for (const n of live) {
+      const at = spots(n);
+      if (!at || n.doomed || Math.hypot(at.x - fresh.x, at.y - fresh.y) >= col.assetRadius) continue;
+      this.doom(n);
+      this.newSatelliteLost = true;
+      fresh.vx *= col.fallSpeed;
+      fresh.vy *= col.fallSpeed;
+      break;
+    }
+  }
+
+  /** Running into a deployed asset hurts: 5 to 10 health, once per pass, and the asset is destroyed. */
+  private checkNetworkCollisions(t: FlightTelemetry): void {
+    if (!this.launched || this.sim.phase !== 'FLYING' || this.result) return;
+    const col = CONFIG.network.collision;
+    const s = this.sim.state;
+    for (const n of [...this.network]) {
+      if (n.doomed) continue;
+      const id = n.asset.id;
+      let distance = Infinity;
+      let radius = col.satelliteRadius;
+      if (n.body) distance = Math.hypot(n.body.x - s.x, n.body.y - s.y);
+      else if (n.asset.kind === 'ROVER' && n.asset.angle !== undefined && t.moonOrbit && t.moonAltitude < 40) {
+        distance = surfaceDistance(moonAngleOf(s.x, s.y), n.asset.angle);
+        radius = col.roverRadius;
+      }
+      if (distance > radius * 2) this.touching.delete(id);
+      if (distance >= radius || this.touching.has(id)) continue;
+      this.touching.add(id);
+      const hurt = Math.round(col.damageMin + Math.random() * (col.damageMax - col.damageMin));
+      this.sim.damage(hurt);
+      const at = this.world.rocketScreen(this.sim);
+      this.fx.ring(at.x, at.y, 0xf87171, 60, 0.4);
+      playSfx(this, 'ROCKET_DAMAGE');
+      this.cameras.main.shake(220, 0.008);
+      this.doom(n);
+      this.showBanner(`Hit ${id}! -${hurt} health`, '#fca5a5');
+    }
+  }
+
   private startCountdown(): void {
     if (this.sim.phase !== 'PRELAUNCH' || this.countdown !== null) return;
     if (this.progress.money < this.cost) {
@@ -433,7 +649,9 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
       return;
     }
     // Pay for the rocket.
-    this.progress = { ...this.progress, money: this.progress.money - this.cost, flights: this.progress.flights + 1 };
+    // Every launch uses one day of battery on each deployed asset (a flat one still serves this flight, then goes).
+    this.progress = { ...this.progress, money: this.progress.money - this.cost, flights: this.progress.flights + 1, assets: spendDay(this.progress.assets) };
+    for (const n of this.network) n.asset.daysLeft -= 1;
     saveProgress(this.progress);
     this.countdown = COUNTDOWN_SECONDS;
     this.countdownText.setVisible(true);
@@ -470,7 +688,8 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
       const gameDt = dt * GAME_SPEED * this.timeScale;
       this.sim.advance(gameDt, this.currentInput(t));
 
-      if (this.runner.satellite) stepRover(this.runner.satellite, gameDt);
+      if (this.runner.satellite) stepRover(this.runner.satellite, this.newSatelliteLost ? gameDt * CONFIG.network.collision.fallTimeScale : gameDt);
+      this.stepNetwork(gameDt);
       if (this.launched) this.runner.update(this.sim, gameDt, { repairPressed: this.repairPressed, relightHeld: this.keys.E.isDown });
       this.repairPressed = false;
       const events = this.sim.drainEvents();
@@ -482,6 +701,7 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
       for (const a of this.stunts.update(this.sim, t, events)) this.celebrate(a);
       if (this.world.camera.mode === 'ASCENT') this.checkMilestones(t);
       this.checkWobble(t);
+      this.checkNetworkCollisions(t);
       this.refreshApex();
       this.refreshMarkers();
 
@@ -503,7 +723,7 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
           }
         }
       }
-      if (this.finishedAt !== null && this.time.now - this.finishedAt > 2200) this.finishMission();
+      if (this.finishedAt !== null && this.time.now - this.finishedAt > this.resultDelayMs()) this.finishMission();
     }
 
     if (this.sim.version !== this.lastVersion) {
@@ -517,7 +737,10 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
     this.fx.update(dt, t, false);
     this.fx.draw(t, this.world.rocketScreen(this.sim), !this.exploded, false);
     this.updateHud(t, dt);
-    this.engineSound?.update(!this.result && !this.exploded && t.thrust > 0 ? 0.35 + 0.65 * t.throttle : 0, dt);
+    const alive = !this.result && !this.exploded;
+    this.engineSound?.update(alive && t.thrust > 0 ? 0.35 + 0.65 * t.throttle : 0, dt);
+    // The RCS thrusters hiss only while A / D steer with a shell open and cold gas left.
+    this.rcsSound?.update(alive && this.launched && this.sim.rcsReady && this.steerKey() !== 0 ? 1 : 0, dt);
 
     if (t.thrust > 0 && t.earthAltitude < 60 && !this.cameras.main.shakeEffect.isRunning) {
       this.cameras.main.shake(120, 0.003 * t.throttle);
@@ -549,11 +772,29 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
       boulders: r.bouldersSeen,
       rover: r.rover,
       satellite: r.satellite,
+      roverSpot: r.roverZone,
+      boulderField: r.boulderField,
+      options: this.pickableOptions(),
+      network: {
+        satellites: this.network.filter(n => n.body).map(n => ({ id: n.asset.id, body: n.body! })),
+        rovers: this.network.filter(n => n.asset.kind === 'ROVER' && n.asset.angle !== undefined).map(n => ({ id: n.asset.id, angle: n.asset.angle! }))
+      },
       landedRovers: this.landedRovers,
+      landedRoverOk: this.landedRoverOk,
+      crew: this.crewLanding,
       dropMarker: this.dropMarker,
       debrisRing: problem?.id === 'DEBRIS' ? problem.data.ringRadius : null,
       impactMarker: this.impactMarker
     };
+  }
+
+  /** The scouted spots on show: the rover's while it is the mission (and after), the crew's during the landing. They stay up after the pick. */
+  private pickableOptions(): MissionOverlay['options'] {
+    const r = this.runner;
+    const kind = r.phase === 'ROVER' || this.landedRovers.length > 0 ? 'ROVER' : r.phase === 'LANDING' || (r.complete && r.phasesDone >= 3) ? 'LANDING' : null;
+    if (!kind) return null;
+    const key = kind === 'ROVER' ? 'rover' : 'landing';
+    return this.sites[key].length > 1 ? { sites: this.sites[key], kind, chosen: this.chosen[key] } : null;
   }
 
   /** Where the rover / the rocket would come down (refreshed a few times a second). */
@@ -584,6 +825,7 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
     this.countdownText.setText('GO!');
     this.tweens.add({ targets: this.countdownText, alpha: 0, delay: 500, duration: 400, onComplete: () => this.countdownText.setVisible(false) });
     this.sim.launch();
+    playSfx(this, 'ROCKET_LAUNCH');
     this.time.delayedCall(1000, () => this.showPhaseTitle('ORBIT'));
   }
 
@@ -692,7 +934,10 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
           this.showBanner('Rover away!', UI.goldText);
           break;
         case 'ROVER_LANDED':
-          if (e.angle !== null) this.landedRovers.push(e.angle);
+          if (e.angle !== null) {
+            this.landedRovers.push(e.angle);
+            this.landedRoverOk.push(e.inZone);
+          }
           this.showBanner(
             e.inZone ? 'The rover bounced down in the zone!' : e.sparesLeft > 0 ? 'Missed the zone! One spare rover left: wait for the next pass' : 'The rover missed the zone!',
             e.inZone ? UI.greenText : '#fca5a5'
@@ -707,6 +952,7 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
           // The rover already got its own banner when it landed; the satellite and the crew get theirs here.
           if (this.payload === 'SATELLITE') this.showBanner('Satellite deployed: mission complete!', UI.greenText);
           else if (this.payload === 'CREW') {
+            this.crewLanding = { onSite: e.onSite };
             if (e.onSite) this.celebrate({ id: 'BULLSEYE', label: 'ON THE SITE', points: 1_000 });
             this.showBanner(e.onSite ? 'The crew landed right on the site!' : 'The crew is down safely!', UI.greenText);
           }
@@ -725,6 +971,7 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
       snapshot: this.sim.snapshot(),
       awardCount: this.stunts.awards.length,
       landedRovers: [...this.landedRovers],
+      landedRoverOk: [...this.landedRoverOk],
       sparesLeft: this.runner.sparesLeft,
       solved: this.runner.solved,
       failedProblems: this.runner.failedProblems
@@ -746,6 +993,7 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
     this.sim = FlightSim.restore(cp.snapshot);
     this.runner = new PhaseRunner(cp.phase, cp.phasesDone, Math.random, this.payload);
     this.runner.sparesLeft = cp.sparesLeft;
+    this.applySiteChoice();
     // Problems that went wrong before the checkpoint still count.
     this.runner.solved = cp.solved;
     this.runner.failedProblems = cp.failedProblems;
@@ -755,6 +1003,8 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
     this.stunts.awards.length = cp.awardCount;
     this.stunts.total = this.stunts.awards.reduce((s, a) => s + a.points, 0);
     this.landedRovers = [...cp.landedRovers];
+    this.landedRoverOk = [...cp.landedRoverOk];
+    this.crewLanding = null;
     this.result = null;
     this.earnings = null;
     this.completedNow = [];
@@ -830,6 +1080,12 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
     this.ladder.setVisible(ascent && !this.result && slidIn);
     const glitch = this.challenges.glitch;
     this.ladder.update(Math.max(0, t.earthAltitude), best, glitch);
+    this.networkPanel?.update(
+      this.network.map(n => n.asset),
+      siteTotal(this.network.map(n => n.asset)),
+      coverage(this.network.map(n => n.asset), ROVER_ZONE.halfWidth),
+      !this.result
+    );
     this.orbitGauge.setVisible(mode === 'ORBIT' && !this.result);
     this.orbitGauge.update(t.moonOrbit, r.phase === 'ORBIT' ? r.stableFor / CONFIG.phases.orbit.holdSeconds : null, now);
     this.problemCard.update(flying ? (r.problem as ActiveProblem | null) : null, { periapsis: t.moonOrbit?.periapsisAltitude ?? null }, now);
@@ -980,11 +1236,13 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
     }
     if (r.phase === 'ORBIT') return 'A / D turn  ·  W burn  ·  X stop burning  ·  the arrow shows which way you’re moving';
     if (r.phase === 'ROVER') {
+      if (r.dropReady && !r.rover && this.pickable()) return `1-${this.sites.rover.length} / TAB / click: pick the rover spot  ·  SPACE: drop it when the yellow ✕ is in the green spot`;
       if (r.dropReady && !r.rover) return 'SPACE: drop the rover when the yellow ✕ is in the green zone';
       if (r.rover && !r.rover.landed) return 'Rover falling… watch where it lands';
       return 'Stay in orbit: problems can happen any moment';
     }
     if (r.phase === 'DEPLOY') return isStableOrbit(t) ? 'SPACE: eject the satellite from your stable orbit' : 'Fix your orbit (A / D turn  ·  W burn) until it is stable, then press SPACE';
+    if (this.pickable()) return `1-${this.sites.landing.length} / TAB / click: pick the landing spot  ·  then turn to face backwards and burn W to drop out of orbit`;
     if (onImpactCourse(t)) return 'Point along dashed arrow and burn W to slow down  ·  land upright (< 10 m/s)';
     return 'Turn to face backwards (against the arrow), then burn W to drop out of orbit';
   }
@@ -992,6 +1250,12 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
   // ---------------------------------------------------------------------------
   // End of flight
   // ---------------------------------------------------------------------------
+
+  /** How long the result panel waits: long enough to watch the payload's own animation (the satellite opening, the rover driving off, the astronaut planting the flag). */
+  private resultDelayMs(): number {
+    if (!this.runner.complete || this.exploded) return 2200;
+    return this.payload === 'SATELLITE' ? 6500 : 5900;
+  }
 
   private finishMission(): void {
     if (this.result) return;
@@ -1029,7 +1293,8 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
       ...this.progress,
       money: this.progress.money + this.earnings.total,
       bestHeight: Math.max(this.progress.bestHeight, st.maxAltitude),
-      completedMissions: [...this.progress.completedMissions, ...this.completedNow.map(m => m.id)]
+      completedMissions: [...this.progress.completedMissions, ...this.completedNow.map(m => m.id)],
+      assets: [...this.progress.assets, ...this.newAssets()]
     };
     saveProgress(this.progress);
     if (!r.complete) playSfx(this, 'GAME_OVER');
@@ -1083,6 +1348,27 @@ export class FlightScene extends Phaser.Scene implements PauseHost {
 
   public resumedFromPause(): void {
     this.steerLocked = true;
+  }
+
+  /** What this flight leaves behind: the ejected satellite on its orbit, or the rover that came down in the zone. */
+  private newAssets(): DeployedAsset[] {
+    const r = this.runner;
+    if (!r.complete) return [];
+    const id = (prefix: string) => {
+      const nums = this.progress.assets
+        .map(a => a.id)
+        .filter(n => n.startsWith(prefix))
+        .map(n => parseInt(n.slice(prefix.length + 1), 10))
+        .filter(Number.isFinite);
+      const nextNum = Math.max(this.progress.flights, (nums.length > 0 ? Math.max(...nums) : 0) + 1);
+      return `${prefix}-${nextNum}`;
+    };
+    if (this.payload === 'SATELLITE' && r.satellite && !r.satellite.landed && !this.newSatelliteLost) return [newSatellite(id('SAT'), r.satellite)];
+    if (this.payload === 'ROVER') {
+      const i = this.landedRoverOk.lastIndexOf(true);
+      if (i >= 0) return [newRover(id('ROV'), this.landedRovers[i])];
+    }
+    return [];
   }
 
   private returnToBuilder(): void {

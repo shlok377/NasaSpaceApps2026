@@ -6,7 +6,7 @@ import { moonAngleOf, surfaceDistance } from '../physics/bodies';
 import { MOON, MOON_CENTER } from '../physics/constants';
 import { ControlInput, FlightSim } from '../physics/FlightSim';
 import { buildFlightVehicle } from '../physics/vehicle';
-import { chainFor, isStableOrbit, phaseNumber, planHazards, stepsDone, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, updateProblem } from './phases';
+import { chainFor, inAny, isStableOrbit, phaseNumber, planHazards, stepsDone, LANDING_SITE, PhaseEvent, PhaseRunner, predictRoverLanding, ROVER_ZONE, startProblem, stepRover, updateProblem } from './phases';
 
 type Layout = Array<[number, number, PartType, FuelKind?]>;
 const STAGED: Layout = [
@@ -256,6 +256,26 @@ describe('objectives by payload', () => {
     expect(run.drainEvents().some(e => e.kind === 'SATELLITE_DEPLOYED')).toBe(true);
   });
 
+  it('the ejected satellite and the spent stage part ways and both stay in orbit', () => {
+    const sim = inOrbit(400);
+    const run = new PhaseRunner('ORBIT', 0, Math.random, 'SATELLITE');
+    holdOrbit(run, sim);
+    const before = Math.hypot(sim.state.vx, sim.state.vy);
+    run.deploySatellite(sim);
+    const sat = run.satellite!;
+    expect(Math.hypot(sat.vx, sat.vy)).toBeGreaterThan(before);
+    expect(Math.hypot(sim.state.vx, sim.state.vy)).toBeLessThan(before);
+    expect(run.timeScale(sim)).toBeGreaterThan(1);
+    const stage = { x: sim.state.x, y: sim.state.y, vx: sim.state.vx, vy: sim.state.vy, landed: false, angle: null, inZone: false };
+    for (let i = 0; i < 300; i++) {
+      stepRover(sat, 0.1);
+      stepRover(stage, 0.1);
+    }
+    expect(sat.landed).toBe(false);
+    expect(stage.landed).toBe(false);
+    expect(Math.hypot(sat.x - stage.x, sat.y - stage.y)).toBeGreaterThan(100);
+  });
+
   it('the satellite cannot be ejected before the orbit phase is done', () => {
     const run = new PhaseRunner('ORBIT', 0, Math.random, 'SATELLITE');
     expect(run.deploySatellite(inOrbit(400))).toBe(false);
@@ -346,5 +366,34 @@ describe('hazards on the way to the Moon', () => {
     };
     expect(fly('CREW').problem).not.toBeNull();
     expect(fly().problem).toBeNull();
+  });
+});
+
+describe('picked landing spots', () => {
+  it('the rover has to land in the zone that was picked, not the default one', () => {
+    const sim = inOrbit(400);
+    const run = new PhaseRunner('ROVER', 1, Math.random, 'ROVER');
+    run.roverZone = { angle: ROVER_ZONE.angle + 1, halfWidth: 100 };
+    const rover = { x: sim.state.x, y: sim.state.y, vx: 0, vy: 0, landed: false, angle: null, inZone: false };
+    for (let i = 0; i < 4000 && !rover.landed; i++) stepRover(rover, 0.1, run.roverZone);
+    expect(rover.landed).toBe(true);
+    expect(rover.inZone).toBe(Math.abs(rover.angle! - run.roverZone.angle) * MOON.radius <= 100);
+  });
+
+  it('the boulder field sits on the picked landing spot', () => {
+    const run = new PhaseRunner('LANDING', 2, Math.random, 'CREW');
+    run.landingSite = { angle: 2, halfWidth: 80 };
+    expect(run.boulderField.angle).toBe(2);
+  });
+
+  it('landing in any of the scouted spots counts, not just the picked one', () => {
+    const picked = { angle: 1, halfWidth: 100 };
+    const other = { angle: 2, halfWidth: 100 };
+    expect(inAny(2, [picked, other])).toBe(true);
+    expect(inAny(3, [picked, other])).toBe(false);
+    // A rover that comes down in the other spot is in the zone.
+    const rover = { x: MOON_CENTER.x + MOON.radius * Math.cos(2) * 1.001, y: MOON_CENTER.y + MOON.radius * Math.sin(2) * 1.001, vx: 0, vy: 0, landed: false, angle: null, inZone: false };
+    for (let i = 0; i < 4000 && !rover.landed; i++) stepRover(rover, 0.1, [picked, other]);
+    expect(rover.landed && rover.inZone).toBe(true);
   });
 });
